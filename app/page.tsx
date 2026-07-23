@@ -1,5 +1,5 @@
-import { RacingDashboard } from "@/frontend/components/RacingDashboard";
+import { PublicDemoPage } from "@/frontend/components/PublicDemoPage";
 
 export default function Home() {
-  return <RacingDashboard />;
+  return <PublicDemoPage />;
 }

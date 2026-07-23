@@ -1,4 +1,4 @@
-export type CsvRow = Record<string, string | number | null>;
+export type CsvRow = Record<string, string | number | null | undefined>;
 
 export type LapRow = CsvRow & {
   lap: number;
@@ -91,8 +91,8 @@ export function analyzeLaps(rows: LapRow[]) {
     ...row,
     delta_to_best: row.lap_time - fastestLap.lap_time,
   }));
-  const sectorLossRows = rows.map((row) => {
-    const losses = Object.fromEntries(
+  const sectorLossRows: Array<Record<string, number | string>> = rows.map((row) => {
+    const losses: Record<string, number> = Object.fromEntries(
       sectors.map((sector) => [`${sector}_loss`, Number(row[sector]) - sectorBest[sector]])
     );
     const maxLossSector = sectors.reduce((current, sector) => {
@@ -217,7 +217,11 @@ export function validateFiles(lapRows: LapRow[], telemetryRows: TelemetryRow[]) 
   };
 }
 
-export function generateDriverReport(laps: ReturnType<typeof analyzeLaps>, telemetry: ReturnType<typeof summarizeTelemetry>, flags: HandlingFlag[]) {
+export function generateDriverReport(
+  laps: ReturnType<typeof analyzeLaps>,
+  telemetry: ReturnType<typeof summarizeTelemetry> | null,
+  flags: HandlingFlag[]
+) {
   const understeer = flags.filter((flag) => flag.eventType === "Possible Understeer");
   const oversteer = flags.filter((flag) => flag.eventType === "Possible Oversteer");
   return [
@@ -225,7 +229,7 @@ export function generateDriverReport(laps: ReturnType<typeof analyzeLaps>, telem
     `The fastest lap was Lap ${laps.fastestLap.lap} at ${formatSeconds(laps.fastestLap.lap_time)}.`,
     `The theoretical best lap is ${formatSeconds(laps.theoreticalBest)}, leaving ${formatSeconds(laps.potentialGain)} of potential gain.`,
     `The largest performance loss comes from ${formatSector(laps.mainLossSector)}.`,
-    telemetry.maxSpeed ? `Maximum speed reached ${telemetry.maxSpeed.toFixed(1)} km/h with average speed ${telemetry.averageSpeed?.toFixed(1)} km/h.` : "Speed channels are unavailable.",
+    telemetry?.maxSpeed ? `Maximum speed reached ${telemetry.maxSpeed.toFixed(1)} km/h with average speed ${telemetry.averageSpeed?.toFixed(1)} km/h.` : "Telemetry channel unavailable. Lap and sector findings remain valid.",
     understeer.length ? `Driving Behavior Assistant flagged ${understeer.length} possible understeer event(s), mainly around ${understeer[0].sector}.` : "No possible understeer events were flagged by the current heuristic.",
     oversteer.length ? `Possible oversteer appeared ${oversteer.length} time(s). Confidence remains low without yaw_rate or richer trajectory data.` : "No possible oversteer events were flagged by the current heuristic.",
     `Recommended focus: review ${formatSector(laps.mainLossSector)} braking point, entry speed consistency, and corner exit throttle application.`,
@@ -260,4 +264,3 @@ function standardDeviation(values: number[]) {
 function isNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
-

@@ -14,7 +14,6 @@ import {
   LoaderCircle,
   MapPin,
   Play,
-  RotateCcw,
   Scissors,
   Trash2,
   Upload,
@@ -41,17 +40,20 @@ import {
   formatSector,
   generateDriverReport,
   generateHandlingFlags,
+  getSectorColumns,
   normalizeLapRows,
   normalizeTelemetryRows,
   parseCsv,
   summarizeTelemetry,
 } from "../lib/analysis";
+import { frontendConfig } from "../lib/config";
 import { sampleLapCsv, sampleTelemetryCsv } from "../lib/sampleData";
 import {
   clearVideoJob,
   createVideoJob,
   createVideoMarker,
   deleteVideoMarker,
+  getDeploymentCapabilities,
   getVideoJob,
   getVideoLibrary,
   keyframeUrl,
@@ -63,16 +65,19 @@ import {
 } from "../lib/videoApi";
 
 const chartColors = ["#f6c945", "#35d6d0", "#ff5964", "#66e38f"];
+const demoLapRows = normalizeLapRows(parseCsv(sampleLapCsv));
+const demoTelemetryRows = normalizeTelemetryRows(parseCsv(sampleTelemetryCsv));
 
-export function RacingDashboard() {
-  const [lapRows, setLapRows] = useState(() => normalizeLapRows([]));
-  const [telemetryRows, setTelemetryRows] = useState(() => normalizeTelemetryRows([]));
-  const [driverName, setDriverName] = useState("Driver");
-  const [trackName, setTrackName] = useState("Local Kart Track");
-  const [sessionDate, setSessionDate] = useState("2026-07-22");
-  const [referenceLap, setReferenceLap] = useState(1);
-  const [targetLap, setTargetLap] = useState(1);
+export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean }) {
+  const [lapRows, setLapRows] = useState(() => initialDemo ? [...demoLapRows] : normalizeLapRows([]));
+  const [telemetryRows, setTelemetryRows] = useState(() => initialDemo ? [...demoTelemetryRows] : normalizeTelemetryRows([]));
+  const [driverName, setDriverName] = useState(initialDemo ? "Demo Driver" : "Driver");
+  const [trackName, setTrackName] = useState(initialDemo ? "Shanghai Sprint Circuit" : "Local Kart Track");
+  const [sessionDate, setSessionDate] = useState(initialDemo ? "2026-06-14" : new Date().toISOString().slice(0, 10));
+  const [referenceLap, setReferenceLap] = useState(initialDemo ? 6 : 1);
+  const [targetLap, setTargetLap] = useState(initialDemo ? 3 : 1);
   const [videoJob, setVideoJob] = useState<VideoJob | null>(null);
+  const [dataError, setDataError] = useState("");
 
   const lapAnalysis = useMemo(() => (lapRows.length ? analyzeLaps(lapRows) : null), [lapRows]);
   const telemetrySummary = useMemo(
@@ -91,42 +96,57 @@ export function RacingDashboard() {
         : [],
     [telemetryRows, referenceLap, targetLap, lapOptions]
   );
+  const telemetryCurve = useMemo(
+    () => telemetryRows.filter((row) => row.lap === targetLap),
+    [telemetryRows, targetLap]
+  );
   const dataReport = useMemo(
-    () => (lapAnalysis && telemetrySummary ? generateDriverReport(lapAnalysis, telemetrySummary, handlingFlags) : null),
+    () => (lapAnalysis ? generateDriverReport(lapAnalysis, telemetrySummary, handlingFlags) : null),
     [lapAnalysis, telemetrySummary, handlingFlags]
   );
 
   async function handleCsvUpload(file: File, kind: "lap" | "telemetry") {
-    const rows = parseCsv(await file.text());
-    if (kind === "lap") {
-      const normalized = normalizeLapRows(rows);
-      setLapRows(normalized);
-      if (normalized.length) {
+    try {
+      const rows = parseCsv(await file.text());
+      if (kind === "lap") {
+        const normalized = normalizeLapRows(rows);
+        if (!normalized.length || !getSectorColumns(normalized).length) {
+          throw new Error("Lap CSV requires lap, lap_time and at least one sector_ column.");
+        }
+        setLapRows(normalized);
         setReferenceLap(normalized[0].lap);
         setTargetLap(normalized[Math.min(1, normalized.length - 1)].lap);
+      } else {
+        const normalized = normalizeTelemetryRows(rows);
+        if (!normalized.length) {
+          throw new Error("Telemetry CSV requires a valid lap column and numeric samples.");
+        }
+        setTelemetryRows(normalized);
       }
-    } else {
-      setTelemetryRows(normalizeTelemetryRows(rows));
+      setDataError("");
+    } catch (error) {
+      setDataError((error as Error).message);
     }
   }
 
   function loadDemoData() {
-    const laps = normalizeLapRows(parseCsv(sampleLapCsv));
-    setLapRows(laps);
-    setTelemetryRows(normalizeTelemetryRows(parseCsv(sampleTelemetryCsv)));
+    setLapRows([...demoLapRows]);
+    setTelemetryRows([...demoTelemetryRows]);
     setReferenceLap(6);
     setTargetLap(3);
     setDriverName("Demo Driver");
     setTrackName("Shanghai Sprint Circuit");
+    setSessionDate("2026-06-14");
+    setDataError("");
   }
 
   const videoMetadata = videoJob?.metadata;
   const metrics = lapAnalysis
     ? [
-        [<Flag size={20} key="fastest" />, "Fastest Lap", formatSeconds(lapAnalysis.fastestLap.lap_time), `Lap ${lapAnalysis.fastestLap.lap}`, "#f6c945"],
+        [<Flag size={20} key="laps" />, "Total Laps", String(lapRows.length), "Timed laps analyzed", "#66e38f"],
+        [<Gauge size={20} key="fastest" />, "Fastest Lap", formatSeconds(lapAnalysis.fastestLap.lap_time), `Lap ${lapAnalysis.fastestLap.lap}`, "#f6c945"],
         [<Zap size={20} key="theoretical" />, "Theoretical Best", formatSeconds(lapAnalysis.theoreticalBest), "Best sectors combined", "#35d6d0"],
         [<Activity size={20} key="gain" />, "Potential Gain", formatSeconds(lapAnalysis.potentialGain), formatSector(lapAnalysis.mainLossSector), "#ff5964"],
-        [<BarChart3 size={20} key="consistency" />, "Consistency Score", lapAnalysis.consistencyScore.toFixed(1), `${lapRows.length} timed laps`, "#66e38f"],
       ]
     : [
         [<CirclePlay size={20} key="duration" />, "Video Duration", videoMetadata ? formatTimestamp(videoMetadata.duration_seconds) : "--", videoJob?.source_name ?? "No video analyzed", "#f6c945"],
@@ -160,6 +180,7 @@ export function RacingDashboard() {
             <DataUploadPanel
               lapLoaded={lapRows.length > 0}
               telemetryLoaded={telemetryRows.length > 0}
+              error={dataError}
               onLapFile={(file) => handleCsvUpload(file, "lap")}
               onTelemetryFile={(file) => handleCsvUpload(file, "telemetry")}
               onLoadDemo={loadDemoData}
@@ -247,7 +268,7 @@ export function RacingDashboard() {
                 </div>
 
                 <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
-                  {telemetryRows.length ? (
+                  {speedComparison.length ? (
                     <ChartPanel
                       title="Best Lap Comparison"
                       subtitle="Speed difference by distance"
@@ -269,10 +290,29 @@ export function RacingDashboard() {
                       </ResponsiveContainer>
                     </ChartPanel>
                   ) : (
-                    <UnavailablePanel title="Telemetry Comparison" message="上传遥测 CSV 后可按距离比较参考圈与目标圈速度。" />
+                    <UnavailablePanel title="Best Lap Comparison" message="Telemetry channel unavailable" />
                   )}
-                  {telemetrySummary ? <TelemetryPanel summary={telemetrySummary} /> : <UnavailablePanel title="Telemetry Analysis" message="当前视频没有关联遥测数据。" />}
+                  {telemetrySummary ? <TelemetryPanel summary={telemetrySummary} /> : <UnavailablePanel title="Telemetry Analysis" message="Telemetry channel unavailable" />}
                 </div>
+
+                {telemetryCurve.length ? (
+                  <ChartPanel title="Telemetry Curve" subtitle={`Lap ${targetLap}: speed, throttle and brake by distance`}>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <ComposedChart data={telemetryCurve}>
+                        <CartesianGrid stroke="rgba(148, 163, 184, 0.14)" />
+                        <XAxis dataKey="distance" stroke="#8b98aa" />
+                        <YAxis yAxisId="speed" stroke="#f6c945" />
+                        <YAxis yAxisId="input" orientation="right" domain={[0, 100]} stroke="#35d6d0" />
+                        <Tooltip contentStyle={tooltipStyle} />
+                        <Line yAxisId="speed" type="monotone" dataKey="speed" name="Speed" stroke="#f6c945" strokeWidth={3} dot={false} connectNulls />
+                        <Line yAxisId="input" type="monotone" dataKey="throttle" name="Throttle" stroke="#35d6d0" strokeWidth={2} dot={false} connectNulls />
+                        <Line yAxisId="input" type="monotone" dataKey="brake" name="Brake" stroke="#ff5964" strokeWidth={2} dot={false} connectNulls />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </ChartPanel>
+                ) : (
+                  <UnavailablePanel title="Telemetry Curve" message="Telemetry channel unavailable" />
+                )}
 
                 {dataReport && <ReportPanel title="Data Driver Review" report={dataReport} />}
                 <LapTable data={lapAnalysis.lapDeltas} />
@@ -291,42 +331,56 @@ export function RacingDashboard() {
 }
 
 function VideoWorkspace({ onJobChange }: { onJobChange: (job: VideoJob | null) => void }) {
+  const localMode = frontendConfig.deploymentMode === "local";
   const [sources, setSources] = useState<VideoSource[]>([]);
   const [selectedSourceId, setSelectedSourceId] = useState("");
   const [job, setJob] = useState<VideoJob | null>(null);
-  const [loadingLibrary, setLoadingLibrary] = useState(true);
+  const [loadingLibrary, setLoadingLibrary] = useState(localMode);
   const [error, setError] = useState("");
   const [notes, setNotes] = useState("");
   const [currentTime, setCurrentTime] = useState(0);
   const [playbackFailed, setPlaybackFailed] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const pollingJobId = job?.id;
+  const pollingJobStatus = job?.status;
 
   useEffect(() => {
+    if (!localMode) return;
     let active = true;
-    getVideoLibrary()
+    getDeploymentCapabilities()
+      .then((capabilities) => {
+        if (!capabilities.local_video_library) {
+          throw new Error(
+            capabilities.direct_uploads
+              ? "当前部署使用云端上传模式。"
+              : "当前公开部署尚未启用云端视频上传，请使用本机模式分析视频。"
+          );
+        }
+        return getVideoLibrary();
+      })
       .then((items) => {
         if (!active) return;
         setSources(items);
         setSelectedSourceId(items[0]?.source_id ?? "");
         setError(items.length ? "" : "本机视频目录中没有找到 MP4、MOV 或 ZIP。 ");
       })
-      .catch((reason: Error) => active && setError(`无法连接本机视频服务：${reason.message}`))
+      .catch((reason: Error) => active && setError(reason.message))
       .finally(() => active && setLoadingLibrary(false));
     return () => {
       active = false;
     };
-  }, []);
+  }, [localMode]);
 
   useEffect(() => {
     onJobChange(job);
   }, [job, onJobChange]);
 
   useEffect(() => {
-    if (!job || job.status === "completed" || job.status === "failed") return;
+    if (!pollingJobId || pollingJobStatus === "completed" || pollingJobStatus === "failed") return;
     let active = true;
     const poll = async () => {
       try {
-        const next = await getVideoJob(job.id);
+        const next = await getVideoJob(pollingJobId);
         if (active) setJob(next);
       } catch (reason) {
         if (active) setError((reason as Error).message);
@@ -338,7 +392,7 @@ function VideoWorkspace({ onJobChange }: { onJobChange: (job: VideoJob | null) =
       active = false;
       window.clearInterval(timer);
     };
-  }, [job?.id, job?.status]);
+  }, [pollingJobId, pollingJobStatus]);
 
   async function startAnalysis() {
     if (!selectedSourceId) return;
@@ -423,8 +477,14 @@ function VideoWorkspace({ onJobChange }: { onJobChange: (job: VideoJob | null) =
   const completed = job?.status === "completed" && job.metadata;
   const selectedSource = sources.find((source) => source.source_id === selectedSourceId);
 
+  if (!localMode) {
+    return <BrowserVideoUpload />;
+  }
+
   return (
-    <section className="panel rounded-lg p-4 md:p-5" data-testid="video-workspace">
+    <div className="flex flex-col gap-5" data-testid="video-workspace">
+      <BrowserVideoUpload />
+      <section className="panel rounded-lg p-4 md:p-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <SectionTitle icon={<Video size={18} />} title="Local Video Analysis" subtitle="本机读取，不上传云端" />
         <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
@@ -557,6 +617,8 @@ function VideoWorkspace({ onJobChange }: { onJobChange: (job: VideoJob | null) =
                   onClick={() => seek(frame.timestamp)}
                   className="w-44 shrink-0 overflow-hidden rounded-md border border-slate-800 bg-slate-950 text-left hover:border-[#35d6d0] focus:outline-none focus:ring-2 focus:ring-[#35d6d0]"
                 >
+                  {/* Keyframes are served by the authenticated analysis API, not a public image CDN. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={keyframeUrl(job.id, frame.filename)} alt={`关键帧 ${frame.index}`} className="aspect-video w-full object-cover" />
                   <span className="block px-2 py-2 text-xs text-slate-300">{formatTimestamp(frame.timestamp)}</span>
                 </button>
@@ -569,6 +631,131 @@ function VideoWorkspace({ onJobChange }: { onJobChange: (job: VideoJob | null) =
             <ReportPanel title="Video Review" report={job.report ?? "视频报告不可用。"} />
           </div>
         </>
+      )}
+      </section>
+    </div>
+  );
+}
+
+type BrowserVideoInfo = {
+  name: string;
+  size: number;
+  type: string;
+  duration: number | null;
+  width: number | null;
+  height: number | null;
+};
+
+function BrowserVideoUpload() {
+  const [videoUrl, setVideoUrl] = useState("");
+  const [previewFrame, setPreviewFrame] = useState("");
+  const [info, setInfo] = useState<BrowserVideoInfo | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    return () => {
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
+    };
+  }, [videoUrl]);
+
+  function selectVideo(file: File) {
+    if (!file.type.startsWith("video/") && !/\.(mp4|mov|m4v|webm)$/i.test(file.name)) {
+      setError("Please select an MP4, MOV, M4V or WebM video.");
+      return;
+    }
+    if (videoUrl) URL.revokeObjectURL(videoUrl);
+    const nextUrl = URL.createObjectURL(file);
+    setVideoUrl(nextUrl);
+    setPreviewFrame("");
+    setError("");
+    setInfo({
+      name: file.name,
+      size: file.size,
+      type: file.type || "video",
+      duration: null,
+      width: null,
+      height: null,
+    });
+  }
+
+  function captureFirstFrame(video: HTMLVideoElement) {
+    if (!video.videoWidth || !video.videoHeight) return;
+    const canvas = document.createElement("canvas");
+    const scale = Math.min(1, 960 / video.videoWidth);
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    setPreviewFrame(canvas.toDataURL("image/jpeg", 0.86));
+  }
+
+  return (
+    <section className="panel rounded-lg p-4 md:p-5" data-testid="browser-video-upload">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <SectionTitle icon={<Video size={18} />} title="Video Preview" subtitle="Browser-only preview; the file stays on this device" />
+        <label className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-md border border-[#f6c945] bg-[#f6c945] px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-[#ffe078]">
+          <Upload size={16} /> Upload Video
+          <input
+            className="hidden"
+            type="file"
+            accept="video/mp4,video/quicktime,video/webm,.m4v"
+            onChange={(event) => event.target.files?.[0] && selectVideo(event.target.files[0])}
+          />
+        </label>
+      </div>
+
+      {!info && (
+        <p className="mt-4 rounded-md border border-dashed border-slate-700 bg-slate-950/45 px-4 py-6 text-center text-sm text-slate-400">
+          Upload a video to inspect its file information and first frame.
+        </p>
+      )}
+
+      {info && (
+        <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
+          <div className="overflow-hidden rounded-md border border-slate-800 bg-black">
+            {previewFrame ? (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={previewFrame} alt={`First frame of ${info.name}`} className="aspect-video w-full object-contain" />
+              </>
+            ) : (
+              <div className="flex aspect-video items-center justify-center text-sm text-slate-500">Reading first frame...</div>
+            )}
+          </div>
+          <div className="grid content-start grid-cols-2 gap-3">
+            <CompactMetric label="File" value={info.name} />
+            <CompactMetric label="Size" value={formatBytes(info.size)} />
+            <CompactMetric label="Type" value={info.type} />
+            <CompactMetric label="Duration" value={info.duration === null ? "Reading..." : formatTimestamp(info.duration)} />
+            <CompactMetric label="Resolution" value={info.width && info.height ? `${info.width}x${info.height}` : "Reading..."} />
+            <CompactMetric label="Upload status" value="Ready locally" />
+          </div>
+          <video
+            className="hidden"
+            src={videoUrl}
+            muted
+            playsInline
+            preload="auto"
+            onLoadedMetadata={(event) => {
+              const video = event.currentTarget;
+              setInfo((current) => current ? {
+                ...current,
+                duration: Number.isFinite(video.duration) ? video.duration : null,
+                width: video.videoWidth || null,
+                height: video.videoHeight || null,
+              } : current);
+            }}
+            onLoadedData={(event) => captureFirstFrame(event.currentTarget)}
+            onError={() => setError("The browser could not decode this video. File information is still available.")}
+          />
+        </div>
+      )}
+
+      {error && (
+        <p className="mt-4 rounded-md border border-amber-400/25 bg-amber-400/8 px-3 py-3 text-sm text-amber-100">
+          {error}
+        </p>
       )}
     </section>
   );
@@ -610,15 +797,16 @@ function MarkerTable({ job, onSeek, onDelete }: { job: VideoJob; onSeek: (time: 
   );
 }
 
-function DataUploadPanel({ lapLoaded, telemetryLoaded, onLapFile, onTelemetryFile, onLoadDemo }: { lapLoaded: boolean; telemetryLoaded: boolean; onLapFile: (file: File) => void; onTelemetryFile: (file: File) => void; onLoadDemo: () => void }) {
+function DataUploadPanel({ lapLoaded, telemetryLoaded, error, onLapFile, onTelemetryFile, onLoadDemo }: { lapLoaded: boolean; telemetryLoaded: boolean; error: string; onLapFile: (file: File) => void; onTelemetryFile: (file: File) => void; onLoadDemo: () => void }) {
   return (
     <section className="panel rounded-lg p-4">
       <SectionTitle icon={<Upload size={18} />} title="Optional Data" subtitle="真实 CSV 与视频结果独立加载" />
       <FileInput label={lapLoaded ? "Lap/Sector CSV loaded" : "Lap/Sector CSV"} onFile={onLapFile} />
       <FileInput label={telemetryLoaded ? "Telemetry CSV loaded" : "Telemetry CSV"} onFile={onTelemetryFile} />
       <button type="button" onClick={onLoadDemo} className="mt-3 flex w-full items-center justify-between rounded-md border border-slate-700 px-3 py-3 text-sm text-slate-300 hover:border-[#f6c945]">
-        <span>加载演示数据</span><Database size={16} className="text-[#f6c945]" />
+        <span>Try Demo</span><Database size={16} className="text-[#f6c945]" />
       </button>
+      {error && <p className="mt-3 rounded-md border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs leading-5 text-red-100">{error}</p>}
       <p className="mt-3 text-xs leading-5 text-slate-500">演示数据只用于查看图表，不会与本机视频自动关联。</p>
     </section>
   );

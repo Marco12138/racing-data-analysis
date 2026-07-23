@@ -8,10 +8,11 @@ import mimetypes
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, StreamingResponse
 
 from ..analysis.video_analysis import VideoAnalysisError, analyze_video, format_timestamp
+from ..core.task_dispatcher import task_dispatcher
 from ..models.video import VideoJobCreate, VideoMarkerCreate
 from ..utils.storage import (
     add_video_marker,
@@ -31,7 +32,24 @@ from ..utils.video_library import (
     resolve_source,
 )
 
-router = APIRouter(prefix="/api/video", tags=["video"])
+
+def _require_local_video_mode(request: Request) -> None:
+    """Reject filesystem video routes when the API runs in public cloud mode."""
+    if not request.app.state.settings.local_video_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "The local video library is disabled in cloud mode. "
+                "Use the future direct-upload API backed by object storage."
+            ),
+        )
+
+
+router = APIRouter(
+    prefix="/video",
+    tags=["video"],
+    dependencies=[Depends(_require_local_video_mode)],
+)
 
 
 @router.get("/library")
@@ -41,7 +59,12 @@ def video_library() -> dict:
 
 
 @router.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
-def create_job(payload: VideoJobCreate, background_tasks: BackgroundTasks) -> dict:
+def create_job(
+    payload: VideoJobCreate,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    response: Response,
+) -> dict:
     """Queue local ZIP extraction and sparse OpenCV analysis."""
     try:
         source = resolve_source(payload.source_id)
@@ -49,7 +72,9 @@ def create_job(payload: VideoJobCreate, background_tasks: BackgroundTasks) -> di
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     job_id = uuid.uuid4().hex
     create_video_job(job_id, payload.source_id, source.name, str(source))
-    background_tasks.add_task(_run_analysis, job_id, source)
+    settings = request.app.state.settings
+    task_dispatcher(settings, background_tasks).enqueue(_run_analysis, job_id, source)
+    response.headers["Location"] = f"{settings.api_v1_prefix}/video/jobs/{job_id}"
     return {"job_id": job_id, "status": "queued"}
 
 

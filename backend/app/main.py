@@ -1,73 +1,79 @@
-"""FastAPI application entry point."""
+"""FastAPI application factory for local and hosted environments."""
 
 from __future__ import annotations
 
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
-from .analysis.lap_analysis import analyze_laps
-from .analysis.telemetry_analysis import analyze_telemetry
-from .analysis.handling_analysis import generate_handling_flags
-from .analysis.report_generator import generate_report
-from .utils.csv_utils import read_upload_csv
-from .utils.storage import init_db, save_session_record
-from .utils.video_library import cleanup_video_cache
+from .api.analysis_routes import analyze_session, router as analysis_router
+from .api.system_routes import liveness, public_health, router as system_router
 from .api.video_routes import router as video_router
+from .core.config import Settings, get_settings
+from .utils.storage import init_db
+from .utils.video_library import cleanup_video_cache
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    """Initialize local storage and remove expired video cache on startup."""
-    init_db()
-    cleanup_video_cache()
-    yield
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """Build a configured FastAPI application."""
+    active_settings = settings or get_settings()
 
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        init_db()
+        if active_settings.local_video_enabled:
+            cleanup_video_cache(active_settings.video_cache_ttl_seconds)
+        yield
 
-app = FastAPI(title="AI Racing Telemetry Analysis Platform API", lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-@app.get("/health")
-def health() -> dict:
-    """Return a basic service health check."""
-    return {"status": "ok"}
-
-
-@app.post("/api/analyze")
-async def analyze(
-    lap_file: UploadFile = File(...),
-    telemetry_file: UploadFile | None = File(default=None),
-) -> dict:
-    """Analyze uploaded lap and optional telemetry CSV files."""
-    lap_df = await read_upload_csv(lap_file)
-    telemetry_df = await read_upload_csv(telemetry_file) if telemetry_file else None
-
-    lap_result = analyze_laps(lap_df)
-    telemetry_result = analyze_telemetry(telemetry_df) if telemetry_df is not None else None
-    handling_flags = generate_handling_flags(telemetry_df) if telemetry_df is not None else []
-    report = generate_report(lap_result, telemetry_result, handling_flags)
-
-    session_id = save_session_record(
-        lap_filename=lap_file.filename or "lap.csv",
-        telemetry_filename=telemetry_file.filename if telemetry_file else None,
-        report=report,
+    application = FastAPI(
+        title=active_settings.app_name,
+        version=active_settings.app_version,
+        docs_url="/docs" if active_settings.docs_enabled else None,
+        redoc_url="/redoc" if active_settings.docs_enabled else None,
+        openapi_url="/openapi.json" if active_settings.docs_enabled else None,
+        lifespan=lifespan,
     )
-    return {
-        "session_id": session_id,
-        "lap_analysis": lap_result,
-        "telemetry_analysis": telemetry_result,
-        "handling_flags": handling_flags,
-        "report": report,
-    }
+    application.state.settings = active_settings
+    application.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=active_settings.allowed_host_list or ["*"],
+    )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=active_settings.cors_origin_list,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+        expose_headers=["X-Request-ID", "Location"],
+    )
+
+    @application.middleware("http")
+    async def request_context(request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        response.headers["X-API-Version"] = active_settings.app_version
+        return response
+
+    application.include_router(system_router, prefix=active_settings.api_v1_prefix)
+    application.include_router(analysis_router, prefix=active_settings.api_v1_prefix)
+    application.include_router(video_router, prefix=active_settings.api_v1_prefix)
+    application.add_api_route(
+        f"{active_settings.api_v1_prefix}/health",
+        public_health,
+        methods=["GET"],
+        tags=["system"],
+    )
+
+    # Backward-compatible MVP paths. New clients should use /api/v1.
+    application.add_api_route("/health", liveness, methods=["GET"], include_in_schema=False)
+    application.add_api_route("/api/analyze", analyze_session, methods=["POST"], include_in_schema=False)
+    application.include_router(video_router, prefix="/api", include_in_schema=False)
+    return application
 
 
-app.include_router(video_router)
+app = create_app()

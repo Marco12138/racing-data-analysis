@@ -7,7 +7,9 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parents[3] / "storage" / "sessions.sqlite3"
+from ..core.config import get_settings
+
+DB_PATH = get_settings().sqlite_path
 
 
 def init_db() -> None:
@@ -59,6 +61,13 @@ def init_db() -> None:
             )
             """
         )
+
+
+def check_database() -> None:
+    """Raise when the configured database cannot answer a trivial query."""
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("SELECT 1").fetchone()
 
 
 def save_session_record(lap_filename: str, telemetry_filename: str | None, report: str) -> int:

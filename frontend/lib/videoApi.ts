@@ -1,4 +1,4 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+import { apiUrl } from "./config";
 
 export type VideoSource = {
   source_id: string;
@@ -54,13 +54,28 @@ export type VideoJob = {
   updated_at: string;
 };
 
+export type DeploymentCapabilities = {
+  environment: "development" | "test" | "production";
+  mode: "local" | "cloud";
+  api_version: string;
+  local_video_library: boolean;
+  direct_uploads: boolean;
+  persistent_object_storage: boolean;
+  durable_task_queue: boolean;
+  authentication: boolean;
+};
+
+export function getDeploymentCapabilities(): Promise<DeploymentCapabilities> {
+  return apiRequest<DeploymentCapabilities>("/system/capabilities");
+}
+
 export async function getVideoLibrary(): Promise<VideoSource[]> {
-  const data = await apiRequest<{ sources: VideoSource[] }>("/api/video/library");
+  const data = await apiRequest<{ sources: VideoSource[] }>("/video/library");
   return data.sources;
 }
 
 export async function createVideoJob(sourceId: string): Promise<string> {
-  const data = await apiRequest<{ job_id: string }>("/api/video/jobs", {
+  const data = await apiRequest<{ job_id: string }>("/video/jobs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ source_id: sourceId }),
@@ -69,14 +84,14 @@ export async function createVideoJob(sourceId: string): Promise<string> {
 }
 
 export function getVideoJob(jobId: string): Promise<VideoJob> {
-  return apiRequest<VideoJob>(`/api/video/jobs/${jobId}`);
+  return apiRequest<VideoJob>(`/video/jobs/${jobId}`);
 }
 
 export async function createVideoMarker(
   jobId: string,
   marker: Pick<VideoMarker, "marker_type" | "timestamp" | "lap" | "notes">
 ): Promise<VideoMarker> {
-  const data = await apiRequest<{ marker: VideoMarker }>(`/api/video/jobs/${jobId}/markers`, {
+  const data = await apiRequest<{ marker: VideoMarker }>(`/video/jobs/${jobId}/markers`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(marker),
@@ -85,32 +100,32 @@ export async function createVideoMarker(
 }
 
 export async function deleteVideoMarker(jobId: string, markerId: number): Promise<void> {
-  await apiRequest<void>(`/api/video/jobs/${jobId}/markers/${markerId}`, { method: "DELETE" });
+  await apiRequest<void>(`/video/jobs/${jobId}/markers/${markerId}`, { method: "DELETE" });
 }
 
 export async function clearVideoJob(jobId: string): Promise<void> {
-  await apiRequest<void>(`/api/video/jobs/${jobId}`, { method: "DELETE" });
+  await apiRequest<void>(`/video/jobs/${jobId}`, { method: "DELETE" });
 }
 
 export function videoStreamUrl(jobId: string) {
-  return `${API_BASE}/api/video/jobs/${jobId}/stream`;
+  return apiUrl(`/video/jobs/${jobId}/stream`);
 }
 
 export function keyframeUrl(jobId: string, filename: string) {
-  return `${API_BASE}/api/video/jobs/${jobId}/frames/${encodeURIComponent(filename)}`;
+  return apiUrl(`/video/jobs/${jobId}/frames/${encodeURIComponent(filename)}`);
 }
 
 export function markerExportUrl(jobId: string) {
-  return `${API_BASE}/api/video/jobs/${jobId}/markers.csv`;
+  return apiUrl(`/video/jobs/${jobId}/markers.csv`);
 }
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, init);
+  const response = await fetch(apiUrl(path), init);
   if (!response.ok) {
     let message = `Request failed (${response.status})`;
     try {
       const body = await response.json();
-      message = body.detail ?? message;
+      message = body.detail ?? body.error?.message ?? message;
     } catch {
       // Preserve the status-based fallback for non-JSON errors.
     }

@@ -13,31 +13,41 @@ async function render() {
   );
 }
 
-test("server-renders the racing analysis workspace", async () => {
+test("server-renders the public racing analysis demo", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /AI Racing Telemetry Analysis/);
-  assert.match(html, /Local Video Analysis/);
+  assert.match(html, /AI Racing Telemetry Analysis Platform/);
+  assert.match(html, /Try Demo/);
+  assert.match(html, /Telemetry Analysis/);
   assert.match(html, /Lap &amp; Sector Analysis/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 
-test("keeps real video analysis separate from explicit demo data", async () => {
-  const [dashboard, videoApi, layout, packageJson] = await Promise.all([
+test("keeps the public demo, browser video preview, and local API paths explicit", async () => {
+  const [publicPage, dashboard, videoApi, frontendConfig, layout, packageJson] = await Promise.all([
+    readFile(new URL("../frontend/components/PublicDemoPage.tsx", import.meta.url), "utf8"),
     readFile(new URL("../frontend/components/RacingDashboard.tsx", import.meta.url), "utf8"),
     readFile(new URL("../frontend/lib/videoApi.ts", import.meta.url), "utf8"),
+    readFile(new URL("../frontend/lib/config.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
   assert.match(dashboard, /normalizeLapRows\(\[\]\)/);
   assert.match(dashboard, /loadDemoData/);
+  assert.match(dashboard, /BrowserVideoUpload/);
+  assert.match(dashboard, /canvas\.toDataURL/);
+  assert.match(dashboard, /Telemetry channel unavailable/);
   assert.match(dashboard, /当前为视频独立分析模式/);
-  assert.match(videoApi, /127\.0\.0\.1:8000/);
-  assert.match(videoApi, /\/api\/video\/jobs/);
+  assert.match(publicPage, /Try Demo/);
+  assert.match(publicPage, /Upload Data/);
+  assert.match(frontendConfig, /127\.0\.0\.1:8000/);
+  assert.match(frontendConfig, /\/api\/v1/);
+  assert.match(frontendConfig, /public-demo/);
+  assert.match(videoApi, /\/video\/jobs/);
   assert.match(layout, /og\.png/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 });

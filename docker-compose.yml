@@ -1,0 +1,43 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    environment:
+      APP_ENV: development
+      APP_MODE: local
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      CORS_ORIGINS: http://localhost:3000
+      ALLOWED_HOSTS: localhost,127.0.0.1,backend
+      DATABASE_URL: sqlite:////app/storage/sessions.sqlite3
+      STORAGE_BACKEND: local
+      TASK_QUEUE_BACKEND: inline
+      RACING_VIDEO_ROOTS: /videos
+    volumes:
+      - racing_storage:/app/storage
+      - ${HOME}/Movies/Videos:/videos:ro
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/system/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_API_PREFIX: /api/v1
+        NEXT_PUBLIC_DEPLOYMENT_MODE: local
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  racing_storage:

@@ -9,10 +9,12 @@ import time
 import zipfile
 from pathlib import Path, PurePosixPath
 
+from ..core.config import get_settings
+
 SUPPORTED_VIDEO_SUFFIXES = {".mp4", ".mov"}
 SUPPORTED_SOURCE_SUFFIXES = SUPPORTED_VIDEO_SUFFIXES | {".zip"}
-MAX_SOURCE_BYTES = 10 * 1024**3
-CACHE_TTL_SECONDS = 24 * 60 * 60
+MAX_SOURCE_BYTES = get_settings().max_video_source_bytes
+CACHE_TTL_SECONDS = get_settings().video_cache_ttl_seconds
 
 STORAGE_ROOT = Path(__file__).resolve().parents[3] / "storage"
 VIDEO_CACHE_ROOT = STORAGE_ROOT / "video_cache"
@@ -24,7 +26,7 @@ class VideoSourceError(ValueError):
 
 def get_video_roots() -> list[Path]:
     """Return resolved directories that the local API may inspect."""
-    configured = os.getenv("RACING_VIDEO_ROOTS")
+    configured = os.getenv("RACING_VIDEO_ROOTS") or get_settings().racing_video_roots
     values = configured.split(os.pathsep) if configured else [str(Path.home() / "Movies" / "Videos")]
     roots: list[Path] = []
     for value in values:
