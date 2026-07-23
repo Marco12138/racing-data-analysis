@@ -28,6 +28,7 @@ def capabilities(request: Request) -> DeploymentCapabilities:
         persistent_object_storage=False,
         durable_task_queue=False,
         authentication=False,
+        aim_imports=True,
     )
 
 

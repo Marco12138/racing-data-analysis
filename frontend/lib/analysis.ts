@@ -145,8 +145,10 @@ export function summarizeTelemetry(rows: TelemetryRow[]) {
     maxSpeed: speeds.length ? Math.max(...speeds) : null,
     averageSpeed: speeds.length ? average(speeds) : null,
     averageThrottle: throttle.length ? average(throttle) : null,
+    hasThrottle: throttle.length > 0,
     fullThrottlePercentage: throttle.length ? (throttle.filter((value) => value >= 95).length / throttle.length) * 100 : null,
     maxBrake: brake.length ? Math.max(...brake) : null,
+    hasBrake: brake.length > 0,
     brakingDuration: brake.length ? (brake.filter((value) => value > 5).length / brake.length) * 100 : null,
     minimumCornerSpeed: speeds.length ? Math.min(...speeds) : null,
     maxLateralG: lateralG.length ? Math.max(...lateralG.map(Math.abs)) : null,
@@ -176,7 +178,7 @@ export function generateHandlingFlags(rows: TelemetryRow[]): HandlingFlag[] {
   rows.forEach((row, index) => {
     const steering = Math.abs(row.steering_angle ?? 0);
     const lateral = Math.abs(row.lateral_g ?? 0);
-    if (steering >= 28 && lateral >= 0.85 && (row.brake ?? 0) < 35) {
+    if (isNumber(row.brake) && steering >= 28 && lateral >= 0.85 && row.brake < 35) {
       flags.push({
         lap: row.lap,
         sector: inferSector(row.distance),
@@ -189,7 +191,7 @@ export function generateHandlingFlags(rows: TelemetryRow[]): HandlingFlag[] {
     if (previous?.lap === row.lap) {
       const steeringChange = Math.abs((row.steering_angle ?? 0) - (previous.steering_angle ?? 0));
       const lateralChange = Math.abs((row.lateral_g ?? 0) - (previous.lateral_g ?? 0));
-      if (steeringChange >= 18 && lateralChange >= 0.35 && (row.throttle ?? 0) >= 55) {
+      if (isNumber(row.throttle) && steeringChange >= 18 && lateralChange >= 0.35 && row.throttle >= 55) {
         flags.push({
           lap: row.lap,
           sector: inferSector(row.distance),
@@ -224,15 +226,28 @@ export function generateDriverReport(
 ) {
   const understeer = flags.filter((flag) => flag.eventType === "Possible Understeer");
   const oversteer = flags.filter((flag) => flag.eventType === "Possible Oversteer");
+  const behaviorSummary = telemetry?.hasBrake || telemetry?.hasThrottle
+    ? [
+        understeer.length ? `Driving Behavior Assistant flagged ${understeer.length} possible understeer event(s), mainly around ${understeer[0].sector}.` : "No possible understeer events were flagged by the available channels.",
+        oversteer.length ? `Possible oversteer appeared ${oversteer.length} time(s). Confidence remains low without richer trajectory data.` : "No possible oversteer events were flagged by the available channels.",
+      ]
+    : ["Driving Behavior Assistant is unavailable because brake and throttle channels were not recorded."];
+  const focus = [
+    `${formatSector(laps.mainLossSector)} speed consistency`,
+    "steering trace",
+    "RPM trace",
+    "lateral G",
+    ...(telemetry?.hasBrake ? ["braking point stability"] : []),
+    ...(telemetry?.hasThrottle ? ["corner exit throttle application"] : []),
+  ];
   return [
     `Session Summary: The driver completed ${laps.lapDeltas.length} laps.`,
     `The fastest lap was Lap ${laps.fastestLap.lap} at ${formatSeconds(laps.fastestLap.lap_time)}.`,
     `The theoretical best lap is ${formatSeconds(laps.theoreticalBest)}, leaving ${formatSeconds(laps.potentialGain)} of potential gain.`,
     `The largest performance loss comes from ${formatSector(laps.mainLossSector)}.`,
     telemetry?.maxSpeed ? `Maximum speed reached ${telemetry.maxSpeed.toFixed(1)} km/h with average speed ${telemetry.averageSpeed?.toFixed(1)} km/h.` : "Telemetry channel unavailable. Lap and sector findings remain valid.",
-    understeer.length ? `Driving Behavior Assistant flagged ${understeer.length} possible understeer event(s), mainly around ${understeer[0].sector}.` : "No possible understeer events were flagged by the current heuristic.",
-    oversteer.length ? `Possible oversteer appeared ${oversteer.length} time(s). Confidence remains low without yaw_rate or richer trajectory data.` : "No possible oversteer events were flagged by the current heuristic.",
-    `Recommended focus: review ${formatSector(laps.mainLossSector)} braking point, entry speed consistency, and corner exit throttle application.`,
+    ...behaviorSummary,
+    `Recommended focus: review ${focus.join(", ")}.`,
   ].join("\n\n");
 }
 

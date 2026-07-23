@@ -63,6 +63,7 @@ export type DeploymentCapabilities = {
   persistent_object_storage: boolean;
   durable_task_queue: boolean;
   authentication: boolean;
+  aim_imports: boolean;
 };
 
 export function getDeploymentCapabilities(): Promise<DeploymentCapabilities> {

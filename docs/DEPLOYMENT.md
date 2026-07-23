@@ -7,11 +7,12 @@ The current public demo only needs:
 - Frontend: Vercel, built with `pnpm run build:vercel`.
 - API: Railway or Render using the root `Dockerfile`.
 
-CSV analysis and video first-frame preview run in the browser, so the hosted
+CSV analysis and video first-frame preview run in the browser. AiM XRK/XRZ
+files are sent to the FastAPI container for temporary parsing, so the hosted
 frontend remains usable even before a public API domain is configured. The API
-is needed for the optional server-side CSV endpoint and health/capability
-checks. PostgreSQL, Redis, authentication, and object storage are intentionally
-not required in this phase.
+is required only for XRK/XRZ import, the optional server-side CSV endpoint, and
+health/capability checks. PostgreSQL, Redis, authentication, and object storage
+are intentionally not required in this phase.
 
 Railway or Render is the simplest first backend host because OpenCV and FFmpeg
 need a normal container and analysis tasks may outlive serverless request limits.
@@ -85,11 +86,17 @@ DATABASE_URL=sqlite:////app/storage/sessions.sqlite3
 STORAGE_BACKEND=local
 TASK_QUEUE_BACKEND=inline
 WEB_CONCURRENCY=1
+MAX_XRK_UPLOAD_BYTES=52428800
+XRK_PARSE_TIMEOUT_SECONDS=60
+XRK_MAX_CONCURRENT_IMPORTS=2
+XRK_RATE_LIMIT_PER_HOUR=10
+XRK_MAX_RESPONSE_ROWS=30000
 ```
 
 This cloud-mode container is suitable for publishing the frontend and CSV
-analysis API, but deliberately disables local video discovery. It is **not a
-multi-user video service**.
+analysis API. XRK/XRZ files are parsed in an isolated subprocess and deleted
+with their temporary directory after every request. Cloud mode deliberately
+disables local video discovery and is **not a multi-user video service**.
 
 Use these health checks:
 

@@ -8,6 +8,7 @@ session、上传 CSV、查看图表和报告，并在浏览器中读取视频信
 
 - 公开落地页与显式 `Try Demo` 流程，无数据也能体验完整 Dashboard。
 - 在浏览器中分析 lap/sector 和 telemetry CSV，不依赖 `localhost`。
+- 通过 FastAPI 临时导入 AiM XRK/XRZ，解析完成后立即删除服务器副本。
 - 上传视频后显示文件信息、时长、分辨率和第一帧，文件不会离开浏览器。
 - 从本机白名单目录发现 MP4、MOV 和 ZIP。
 - 安全解压 ZIP 到独立缓存，原文件保持不变。
@@ -30,6 +31,7 @@ racing-ai-platform/
 │   ├── app/
 │   │   ├── api/                 # 视频 API 路由
 │   │   ├── analysis/            # 圈速、遥测、视频分析
+│   │   ├── importers/           # 本机 XRK 等格式转换
 │   │   ├── models/              # 请求模型
 │   │   └── utils/               # SQLite、视频库和安全解压
 │   └── tests/
@@ -117,6 +119,7 @@ pnpm run dev
 - `GET /api/v1/system/health/live`：进程存活检查。
 - `GET /api/v1/system/health/ready`：依赖就绪检查。
 - `POST /api/v1/analysis`：上传圈速和可选遥测 CSV。
+- `POST /api/v1/imports/aim`：临时解析 AiM XRK/XRZ 并返回标准化 session。
 - `GET /api/video/library`：列出允许访问的本机素材。
 - `POST /api/video/jobs`：创建分析任务。
 - `GET /api/video/jobs/{job_id}`：读取进度、元数据、关键帧和标记。
@@ -196,6 +199,35 @@ Telemetry CSV 可包括：
 time,lap,distance,speed,throttle,brake,steering_angle,rpm,gear,lateral_g,longitudinal_g,gps_lat,gps_lon
 0.000,1,0.0,42.1,0.0,0.0,2.1,6500,3,0.12,0.03,,
 ```
+
+## AiM XRK/XRZ 导入
+
+网站的 `AiM Session File` 输入可直接上传 `.xrk` 或 `.xrz`。FastAPI
+在随机临时目录中用独立进程解析文件，返回结果后删除原文件和所有中间产物。
+默认上限为 50 MB、超时 60 秒。
+
+需要离线转换或不希望上传素材时，也可以安装解析依赖：
+
+```bash
+python -m pip install -r requirements-xrk.txt
+```
+
+转换一个 AiM 日志：
+
+```bash
+python scripts/import_xrk.py "/absolute/path/session.xrk"
+```
+
+默认输出到 `storage/xrk_imports/<文件名>/`：
+
+- `laps.csv`：圈速及三个等距虚拟 sector；
+- `telemetry.csv`：平台可直接读取的 GPS、速度、RPM、转向和 G 值；
+- `extraction_report.json`：原文件校验值、圈过滤、通道单位和数据限制。
+
+当日志没有官方 sector 时，虚拟 sector 按有效圈中位赛道距离的 1/3、2/3
+划分，网站会明确标记为非官方计时点。
+缺失通道保持不可用，不估算油门、刹车或档位。原始 XRK 和转换结果均保留
+在本机并被 Git 忽略。
 
 ## 测试
 

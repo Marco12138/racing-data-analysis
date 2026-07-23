@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     video_cache_ttl_seconds: int = Field(default=24 * 60 * 60, ge=60)
     max_video_source_bytes: int = Field(default=10 * 1024**3, ge=1)
     max_csv_upload_bytes: int = Field(default=20 * 1024**2, ge=1024)
+    max_xrk_upload_bytes: int = Field(default=50 * 1024**2, ge=1024)
+    xrk_parse_timeout_seconds: int = Field(default=60, ge=5, le=300)
+    xrk_max_concurrent_imports: int = Field(default=2, ge=1, le=8)
+    xrk_rate_limit_per_hour: int = Field(default=10, ge=1, le=1000)
+    xrk_max_response_rows: int = Field(default=30_000, ge=1000, le=250_000)
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -26,10 +26,11 @@ test("server-renders the public racing analysis demo", async () => {
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 
-test("keeps the public demo, browser video preview, and local API paths explicit", async () => {
-  const [publicPage, dashboard, videoApi, frontendConfig, layout, packageJson] = await Promise.all([
+test("keeps public imports, browser video preview, and local API paths explicit", async () => {
+  const [publicPage, dashboard, aimImportApi, videoApi, frontendConfig, layout, packageJson] = await Promise.all([
     readFile(new URL("../frontend/components/PublicDemoPage.tsx", import.meta.url), "utf8"),
     readFile(new URL("../frontend/components/RacingDashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../frontend/lib/aimImportApi.ts", import.meta.url), "utf8"),
     readFile(new URL("../frontend/lib/videoApi.ts", import.meta.url), "utf8"),
     readFile(new URL("../frontend/lib/config.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
@@ -41,6 +42,10 @@ test("keeps the public demo, browser video preview, and local API paths explicit
   assert.match(dashboard, /BrowserVideoUpload/);
   assert.match(dashboard, /canvas\.toDataURL/);
   assert.match(dashboard, /Telemetry channel unavailable/);
+  assert.match(dashboard, /AiM Session File/);
+  assert.match(dashboard, /Virtual sectors/);
+  assert.match(aimImportApi, /\/imports\/aim/);
+  assert.match(aimImportApi, /FormData/);
   assert.match(dashboard, /当前为视频独立分析模式/);
   assert.match(publicPage, /Try Demo/);
   assert.match(publicPage, /Upload Data/);

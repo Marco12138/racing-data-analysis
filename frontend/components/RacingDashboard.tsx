@@ -46,6 +46,10 @@ import {
   parseCsv,
   summarizeTelemetry,
 } from "../lib/analysis";
+import {
+  importAimSession,
+  type AimImportResponse,
+} from "../lib/aimImportApi";
 import { frontendConfig } from "../lib/config";
 import { sampleLapCsv, sampleTelemetryCsv } from "../lib/sampleData";
 import {
@@ -72,12 +76,17 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
   const [lapRows, setLapRows] = useState(() => initialDemo ? [...demoLapRows] : normalizeLapRows([]));
   const [telemetryRows, setTelemetryRows] = useState(() => initialDemo ? [...demoTelemetryRows] : normalizeTelemetryRows([]));
   const [driverName, setDriverName] = useState(initialDemo ? "Demo Driver" : "Driver");
+  const [vehicleName, setVehicleName] = useState(initialDemo ? "Demo Kart" : "Vehicle");
   const [trackName, setTrackName] = useState(initialDemo ? "Shanghai Sprint Circuit" : "Local Kart Track");
   const [sessionDate, setSessionDate] = useState(initialDemo ? "2026-06-14" : new Date().toISOString().slice(0, 10));
   const [referenceLap, setReferenceLap] = useState(initialDemo ? 6 : 1);
   const [targetLap, setTargetLap] = useState(initialDemo ? 3 : 1);
   const [videoJob, setVideoJob] = useState<VideoJob | null>(null);
   const [dataError, setDataError] = useState("");
+  const [aimImport, setAimImport] = useState<AimImportResponse | null>(null);
+  const [aimImportStatus, setAimImportStatus] = useState<"idle" | "processing" | "loaded">(
+    "idle"
+  );
 
   const lapAnalysis = useMemo(() => (lapRows.length ? analyzeLaps(lapRows) : null), [lapRows]);
   const telemetrySummary = useMemo(
@@ -86,6 +95,10 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
   );
   const handlingFlags = useMemo(
     () => (telemetryRows.length ? generateHandlingFlags(telemetryRows) : []),
+    [telemetryRows]
+  );
+  const behaviorInputsAvailable = useMemo(
+    () => telemetryRows.some((row) => typeof row.brake === "number" || typeof row.throttle === "number"),
     [telemetryRows]
   );
   const lapOptions = lapRows.map((row) => row.lap);
@@ -100,10 +113,15 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     () => telemetryRows.filter((row) => row.lap === targetLap),
     [telemetryRows, targetLap]
   );
-  const dataReport = useMemo(
+  const generatedDataReport = useMemo(
     () => (lapAnalysis ? generateDriverReport(lapAnalysis, telemetrySummary, handlingFlags) : null),
     [lapAnalysis, telemetrySummary, handlingFlags]
   );
+  const dataReport = aimImport?.report ?? generatedDataReport;
+  const virtualSectors = aimImport?.virtual_sectors.derived_not_official ?? false;
+  const sectorSourceLabel = virtualSectors
+    ? "Virtual sectors · equal-distance thirds · not official timing"
+    : null;
 
   async function handleCsvUpload(file: File, kind: "lap" | "telemetry") {
     try {
@@ -123,8 +141,40 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
         }
         setTelemetryRows(normalized);
       }
+      setAimImport(null);
+      setAimImportStatus("idle");
       setDataError("");
     } catch (error) {
+      setDataError((error as Error).message);
+    }
+  }
+
+  async function handleAimUpload(file: File) {
+    if (!/\.(xrk|xrz)$/i.test(file.name)) {
+      setDataError("Please select an AiM .xrk or .xrz file.");
+      return;
+    }
+    setAimImportStatus("processing");
+    setDataError("");
+    try {
+      const imported = await importAimSession(file);
+      const normalizedLaps = normalizeLapRows(imported.lap_rows);
+      const normalizedTelemetry = normalizeTelemetryRows(imported.telemetry_rows);
+      if (!normalizedLaps.length) {
+        throw new Error("The AiM file did not contain any usable timed laps.");
+      }
+      setLapRows(normalizedLaps);
+      setTelemetryRows(normalizedTelemetry);
+      setReferenceLap(imported.lap_analysis.fastest_lap.lap);
+      setTargetLap(normalizedLaps[0].lap);
+      setDriverName(metadataText(imported.metadata, "Driver", "Driver"));
+      setVehicleName(metadataText(imported.metadata, "Vehicle", "Vehicle"));
+      setTrackName(metadataText(imported.metadata, "Venue", "Unknown track"));
+      setSessionDate(normalizeAimDate(imported.metadata["Log Date"]));
+      setAimImport(imported);
+      setAimImportStatus("loaded");
+    } catch (error) {
+      setAimImportStatus("idle");
       setDataError((error as Error).message);
     }
   }
@@ -135,8 +185,11 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     setReferenceLap(6);
     setTargetLap(3);
     setDriverName("Demo Driver");
+    setVehicleName("Demo Kart");
     setTrackName("Shanghai Sprint Circuit");
     setSessionDate("2026-06-14");
+    setAimImport(null);
+    setAimImportStatus("idle");
     setDataError("");
   }
 
@@ -145,7 +198,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     ? [
         [<Flag size={20} key="laps" />, "Total Laps", String(lapRows.length), "Timed laps analyzed", "#66e38f"],
         [<Gauge size={20} key="fastest" />, "Fastest Lap", formatSeconds(lapAnalysis.fastestLap.lap_time), `Lap ${lapAnalysis.fastestLap.lap}`, "#f6c945"],
-        [<Zap size={20} key="theoretical" />, "Theoretical Best", formatSeconds(lapAnalysis.theoreticalBest), "Best sectors combined", "#35d6d0"],
+        [<Zap size={20} key="theoretical" />, "Theoretical Best", formatSeconds(lapAnalysis.theoreticalBest), virtualSectors ? "Virtual sectors combined" : "Best sectors combined", "#35d6d0"],
         [<Activity size={20} key="gain" />, "Potential Gain", formatSeconds(lapAnalysis.potentialGain), formatSector(lapAnalysis.mainLossSector), "#ff5964"],
       ]
     : [
@@ -168,8 +221,9 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
               Local onboard video review with optional lap and telemetry data
             </p>
           </div>
-          <div className="grid gap-2 text-sm text-slate-300 sm:grid-cols-3 lg:min-w-[520px]">
+          <div className="grid gap-2 text-sm text-slate-300 sm:grid-cols-2 xl:min-w-[720px] xl:grid-cols-4">
             <SessionInput label="Driver" value={driverName} onChange={setDriverName} />
+            <SessionInput label="Vehicle" value={vehicleName} onChange={setVehicleName} />
             <SessionInput label="Track" value={trackName} onChange={setTrackName} />
             <SessionInput label="Date" value={sessionDate} onChange={setSessionDate} />
           </div>
@@ -180,13 +234,20 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
             <DataUploadPanel
               lapLoaded={lapRows.length > 0}
               telemetryLoaded={telemetryRows.length > 0}
+              aimImport={aimImport}
+              aimImportStatus={aimImportStatus}
               error={dataError}
+              onAimFile={handleAimUpload}
               onLapFile={(file) => handleCsvUpload(file, "lap")}
               onTelemetryFile={(file) => handleCsvUpload(file, "telemetry")}
               onLoadDemo={loadDemoData}
             />
-            <DataReadinessPanel lapLoaded={lapRows.length > 0} telemetryLoaded={telemetryRows.length > 0} />
-            <BehaviorPanel telemetryLoaded={telemetryRows.length > 0} flags={handlingFlags} />
+            <DataReadinessPanel
+              lapLoaded={lapRows.length > 0}
+              telemetryLoaded={telemetryRows.length > 0}
+              aimImport={aimImport}
+            />
+            <BehaviorPanel telemetryLoaded={telemetryRows.length > 0} behaviorInputsAvailable={behaviorInputsAvailable} flags={handlingFlags} />
           </aside>
 
           <section className="flex min-w-0 flex-col gap-5">
@@ -229,17 +290,22 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
                     title="Session Overview"
                     rows={[
                       ["Driver name", driverName],
+                      ["Vehicle", vehicleName],
                       ["Track name", trackName],
                       ["Total timed laps", String(lapRows.length)],
                       ["Fastest lap", `Lap ${lapAnalysis.fastestLap.lap}`],
                       ["Theoretical best", formatSeconds(lapAnalysis.theoreticalBest)],
+                      ["Sector source", sectorSourceLabel ?? "Provided timing sectors"],
                       ["Average lap", formatSeconds(lapAnalysis.averageLap)],
                     ]}
                   />
                 </div>
 
                 <div className="grid gap-5 xl:grid-cols-2">
-                  <ChartPanel title="Sector Loss Chart" subtitle="Per-lap loss versus each sector best">
+                  <ChartPanel
+                    title="Sector Loss Chart"
+                    subtitle={sectorSourceLabel ?? "Per-lap loss versus each sector best"}
+                  >
                     <ResponsiveContainer width="100%" height={280}>
                       <BarChart data={lapAnalysis.sectorLossRows}>
                         <CartesianGrid stroke="rgba(148, 163, 184, 0.14)" />
@@ -252,7 +318,10 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
                       </BarChart>
                     </ResponsiveContainer>
                   </ChartPanel>
-                  <ChartPanel title="Sector Performance" subtitle="Best, average, and average loss">
+                  <ChartPanel
+                    title="Sector Performance"
+                    subtitle={sectorSourceLabel ?? "Best, average, and average loss"}
+                  >
                     <ResponsiveContainer width="100%" height={280}>
                       <ComposedChart data={lapAnalysis.sectorRanking}>
                         <CartesianGrid stroke="rgba(148, 163, 184, 0.14)" />
@@ -797,48 +866,131 @@ function MarkerTable({ job, onSeek, onDelete }: { job: VideoJob; onSeek: (time: 
   );
 }
 
-function DataUploadPanel({ lapLoaded, telemetryLoaded, error, onLapFile, onTelemetryFile, onLoadDemo }: { lapLoaded: boolean; telemetryLoaded: boolean; error: string; onLapFile: (file: File) => void; onTelemetryFile: (file: File) => void; onLoadDemo: () => void }) {
+function DataUploadPanel({
+  lapLoaded,
+  telemetryLoaded,
+  aimImport,
+  aimImportStatus,
+  error,
+  onAimFile,
+  onLapFile,
+  onTelemetryFile,
+  onLoadDemo,
+}: {
+  lapLoaded: boolean;
+  telemetryLoaded: boolean;
+  aimImport: AimImportResponse | null;
+  aimImportStatus: "idle" | "processing" | "loaded";
+  error: string;
+  onAimFile: (file: File) => void;
+  onLapFile: (file: File) => void;
+  onTelemetryFile: (file: File) => void;
+  onLoadDemo: () => void;
+}) {
+  const aimLabel =
+    aimImportStatus === "processing"
+      ? "Uploading and parsing AiM file..."
+      : aimImport
+        ? `${aimImport.source.name} loaded`
+        : "AiM Session File (.xrk / .xrz)";
   return (
     <section className="panel rounded-lg p-4">
-      <SectionTitle icon={<Upload size={18} />} title="Optional Data" subtitle="真实 CSV 与视频结果独立加载" />
-      <FileInput label={lapLoaded ? "Lap/Sector CSV loaded" : "Lap/Sector CSV"} onFile={onLapFile} />
-      <FileInput label={telemetryLoaded ? "Telemetry CSV loaded" : "Telemetry CSV"} onFile={onTelemetryFile} />
+      <SectionTitle icon={<Upload size={18} />} title="Session Data" subtitle="AiM logger file or existing CSV exports" />
+      <FileInput
+        label={aimLabel}
+        accept=".xrk,.xrz"
+        disabled={aimImportStatus === "processing"}
+        icon={aimImportStatus === "processing" ? <LoaderCircle size={16} className="animate-spin text-[#35d6d0]" /> : undefined}
+        onFile={onAimFile}
+      />
+      <div className="my-3 flex items-center gap-3 text-[10px] uppercase text-slate-600">
+        <span className="h-px flex-1 bg-slate-800" /> or CSV <span className="h-px flex-1 bg-slate-800" />
+      </div>
+      <FileInput label={lapLoaded ? "Lap/Sector CSV loaded" : "Lap/Sector CSV"} accept=".csv" onFile={onLapFile} />
+      <FileInput label={telemetryLoaded ? "Telemetry CSV loaded" : "Telemetry CSV"} accept=".csv" onFile={onTelemetryFile} />
       <button type="button" onClick={onLoadDemo} className="mt-3 flex w-full items-center justify-between rounded-md border border-slate-700 px-3 py-3 text-sm text-slate-300 hover:border-[#f6c945]">
         <span>Try Demo</span><Database size={16} className="text-[#f6c945]" />
       </button>
       {error && <p className="mt-3 rounded-md border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs leading-5 text-red-100">{error}</p>}
-      <p className="mt-3 text-xs leading-5 text-slate-500">演示数据只用于查看图表，不会与本机视频自动关联。</p>
+      <p className="mt-3 text-xs leading-5 text-slate-500">XRK/XRZ is processed temporarily and deleted after import. Demo data is never linked to a local video.</p>
     </section>
   );
 }
 
-function FileInput({ label, onFile }: { label: string; onFile: (file: File) => void }) {
+function FileInput({
+  label,
+  accept,
+  disabled = false,
+  icon,
+  onFile,
+}: {
+  label: string;
+  accept: string;
+  disabled?: boolean;
+  icon?: React.ReactNode;
+  onFile: (file: File) => void;
+}) {
   return (
-    <label className="file-input mt-3 flex cursor-pointer items-center justify-between gap-3 rounded-md px-3 py-3 text-sm text-slate-300">
-      <span>{label}</span>
-      <input className="hidden" type="file" accept=".csv" onChange={(event) => event.target.files?.[0] && onFile(event.target.files[0])} />
-      <Upload size={16} className="text-[#f6c945]" />
+    <label className={`file-input mt-3 flex items-center justify-between gap-3 rounded-md px-3 py-3 text-sm text-slate-300 ${disabled ? "cursor-wait opacity-70" : "cursor-pointer"}`}>
+      <span className="min-w-0 truncate">{label}</span>
+      <input
+        className="hidden"
+        type="file"
+        accept={accept}
+        disabled={disabled}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) onFile(file);
+          event.target.value = "";
+        }}
+      />
+      {icon ?? <Upload size={16} className="shrink-0 text-[#f6c945]" />}
     </label>
   );
 }
 
-function DataReadinessPanel({ lapLoaded, telemetryLoaded }: { lapLoaded: boolean; telemetryLoaded: boolean }) {
+function DataReadinessPanel({
+  lapLoaded,
+  telemetryLoaded,
+  aimImport,
+}: {
+  lapLoaded: boolean;
+  telemetryLoaded: boolean;
+  aimImport: AimImportResponse | null;
+}) {
+  const usedChannels = aimImport?.channels
+    .filter((channel) => channel.status === "used")
+    .map((channel) => channel.name);
   return (
     <section className="panel rounded-lg p-4">
       <SectionTitle icon={<AlertTriangle size={18} />} title="Data Readiness" subtitle="量化结论的数据边界" />
       <StatusLine label="Lap / sector" value={lapLoaded ? "Loaded" : "Not provided"} />
       <StatusLine label="Telemetry" value={telemetryLoaded ? "Loaded" : "Not provided"} />
+      {aimImport && (
+        <>
+          <StatusLine label="Source" value="AiM XRK/XRZ" />
+          <StatusLine label="Valid laps" value={String(aimImport.lap_selection.valid_laps.length)} />
+          <p className="mt-3 rounded-md border border-amber-400/25 bg-amber-400/8 px-3 py-2 text-xs leading-5 text-amber-100">
+            Virtual sectors use equal-distance thirds and are not official timing splits.
+          </p>
+          <p className="mt-3 text-xs leading-5 text-slate-500">
+            Available: {usedChannels?.join(", ") || "No supported channels"}
+          </p>
+        </>
+      )}
       {!lapLoaded && <p className="mt-3 rounded-md border border-amber-400/25 bg-amber-400/8 px-3 py-2 text-xs leading-5 text-amber-100">只有视频时不计算圈速、sector loss 或理论最快圈。</p>}
     </section>
   );
 }
 
-function BehaviorPanel({ telemetryLoaded, flags }: { telemetryLoaded: boolean; flags: ReturnType<typeof generateHandlingFlags> }) {
+function BehaviorPanel({ telemetryLoaded, behaviorInputsAvailable, flags }: { telemetryLoaded: boolean; behaviorInputsAvailable: boolean; flags: ReturnType<typeof generateHandlingFlags> }) {
   return (
     <section className="panel rounded-lg p-4">
       <SectionTitle icon={<Activity size={18} />} title="Driving Behavior Assistant" subtitle="Heuristic flags only" />
       {!telemetryLoaded ? (
         <p className="mt-3 text-sm leading-6 text-slate-400">未提供遥测数据，该分析功能不可用。视频画面不会被用于自动诊断转向不足或转向过度。</p>
+      ) : !behaviorInputsAvailable ? (
+        <p className="mt-3 text-sm leading-6 text-slate-400">当前遥测缺少刹车与油门通道，驾驶行为诊断不可用；平台不会据此判断转向不足或转向过度。</p>
       ) : flags.length ? (
         <div className="thin-scrollbar mt-3 max-h-[260px] overflow-auto">
           {flags.map((flag, index) => (
@@ -937,6 +1089,25 @@ function formatBytes(bytes: number) {
 function formatCell(value: string | number | null | undefined) {
   if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(3);
   return value == null ? "" : String(value);
+}
+
+function metadataText(
+  metadata: AimImportResponse["metadata"],
+  key: string,
+  fallback: string
+) {
+  const value = metadata[key];
+  return value === null || value === undefined || String(value).trim() === ""
+    ? fallback
+    : String(value);
+}
+
+function normalizeAimDate(value: string | number | null | undefined) {
+  const text = String(value ?? "").trim();
+  const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text);
+  if (!match) return new Date().toISOString().slice(0, 10);
+  const [, month, day, year] = match;
+  return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
 }
 
 const tooltipStyle = { background: "#0b1018", border: "1px solid rgba(148, 163, 184, 0.28)", borderRadius: "8px", color: "#e9edf3" };

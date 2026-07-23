@@ -16,6 +16,7 @@ class DeploymentCapabilities(BaseModel):
     persistent_object_storage: bool
     durable_task_queue: bool
     authentication: bool
+    aim_imports: bool
 
 
 class HealthStatus(BaseModel):

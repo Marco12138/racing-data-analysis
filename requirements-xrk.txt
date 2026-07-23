@@ -1,0 +1,2 @@
+# AiM XRK/XRZ parser used by both the local converter and hosted import API.
+libxrk==0.12.0

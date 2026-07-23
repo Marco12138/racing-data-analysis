@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from contextlib import asynccontextmanager
 
@@ -10,9 +11,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from .api.analysis_routes import analyze_session, router as analysis_router
+from .api.import_routes import router as import_router
 from .api.system_routes import liveness, public_health, router as system_router
 from .api.video_routes import router as video_router
 from .core.config import Settings, get_settings
+from .importers.service import ImportRateLimiter
 from .utils.storage import init_db
 from .utils.video_library import cleanup_video_cache
 
@@ -37,6 +40,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.settings = active_settings
+    application.state.xrk_import_semaphore = asyncio.Semaphore(
+        active_settings.xrk_max_concurrent_imports
+    )
+    application.state.xrk_rate_limiter = ImportRateLimiter(
+        active_settings.xrk_rate_limit_per_hour
+    )
     application.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=active_settings.allowed_host_list or ["*"],
@@ -61,6 +70,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application.include_router(system_router, prefix=active_settings.api_v1_prefix)
     application.include_router(analysis_router, prefix=active_settings.api_v1_prefix)
+    application.include_router(import_router, prefix=active_settings.api_v1_prefix)
     application.include_router(video_router, prefix=active_settings.api_v1_prefix)
     application.add_api_route(
         f"{active_settings.api_v1_prefix}/health",
