@@ -22,6 +22,7 @@
 
 * {
   box-sizing: border-box;
+  letter-spacing: 0;
 }
 
 body {
@@ -84,4 +85,3 @@ select {
   border: 1px dashed rgba(148, 163, 184, 0.36);
   background: rgba(8, 10, 14, 0.42);
 }
-

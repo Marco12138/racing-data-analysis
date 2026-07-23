@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,8 +13,19 @@ from .analysis.handling_analysis import generate_handling_flags
 from .analysis.report_generator import generate_report
 from .utils.csv_utils import read_upload_csv
 from .utils.storage import init_db, save_session_record
+from .utils.video_library import cleanup_video_cache
+from .api.video_routes import router as video_router
 
-app = FastAPI(title="AI Racing Telemetry Analysis Platform API")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Initialize local storage and remove expired video cache on startup."""
+    init_db()
+    cleanup_video_cache()
+    yield
+
+
+app = FastAPI(title="AI Racing Telemetry Analysis Platform API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,12 +34,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-def startup() -> None:
-    """Initialize local SQLite storage."""
-    init_db()
 
 
 @app.get("/health")
@@ -62,3 +69,5 @@ async def analyze(
         "report": report,
     }
 
+
+app.include_router(video_router)
