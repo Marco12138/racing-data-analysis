@@ -81,7 +81,7 @@ API_HOST=0.0.0.0
 API_PORT=8000
 DOCS_ENABLED=false
 CORS_ORIGINS=https://www.example.com
-ALLOWED_HOSTS=api.example.com
+ALLOWED_HOSTS=api.example.com,healthcheck.railway.app
 DATABASE_URL=sqlite:////app/storage/sessions.sqlite3
 STORAGE_BACKEND=local
 TASK_QUEUE_BACKEND=inline
@@ -97,6 +97,10 @@ This cloud-mode container is suitable for publishing the frontend and CSV
 analysis API. XRK/XRZ files are parsed in an isolated subprocess and deleted
 with their temporary directory after every request. Cloud mode deliberately
 disables local video discovery and is **not a multi-user video service**.
+
+Railway sends deployment health checks with `healthcheck.railway.app` as the
+Host header. Keep that hostname in `ALLOWED_HOSTS` so Trusted Host validation
+accepts the platform health check.
 
 Use these health checks:
 

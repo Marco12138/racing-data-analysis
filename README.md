@@ -177,7 +177,8 @@ docker compose up --build
    `uvicorn app.main:app --host 0.0.0.0 --port $PORT`。
 3. 设置 `APP_ENV=production`、`APP_MODE=cloud`、
    `CORS_ORIGINS=https://<frontend-domain>` 和平台对应的
-   `ALLOWED_HOSTS`。
+   `ALLOWED_HOSTS`。Railway 部署时需同时加入
+   `healthcheck.railway.app`，否则 Trusted Host 会拒绝平台健康检查。
 4. 将健康检查路径设置为 `/api/v1/health`；成功响应为
    `{"status":"ok"}`。
 
