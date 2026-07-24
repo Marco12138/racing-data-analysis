@@ -61,6 +61,15 @@ export function XrkAnalysisWorkspace({
   const [zoneStart, setZoneStart] = useState<number | null>(null);
   const [manualZones, setManualZones] = useState<XrkAnalyzeOptions["manual_zones"]>([]);
 
+  useEffect(() => {
+    const stored = readSectorConfig(analysis.track?.track_id);
+    if (!stored) return;
+    queueMicrotask(() => {
+      setSectorCount(stored.sectorCount);
+      setCustomBoundaries(stored.boundaries);
+    });
+  }, [analysis.track?.track_id]);
+
   const lapOptions = analysis.lap_rows.map((row) => Number(row.lap));
   const selectedEvent = nearestEvent(analysis.events, cursorDistance);
 
@@ -70,6 +79,15 @@ export function XrkAnalysisWorkspace({
   }
 
   async function applySectors() {
+    if (analysis.track) {
+      window.localStorage.setItem(
+        `racing-sectors:${analysis.track.track_id}`,
+        JSON.stringify({
+          sectorCount,
+          boundaries: customBoundaries.length === sectorCount - 1 ? customBoundaries : [],
+        })
+      );
+    }
     await onAnalyze({
       sector_count: sectorCount,
       sector_boundaries_m:
@@ -544,7 +562,7 @@ function VideoSyncPanel({
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoUrl, setVideoUrl] = useState("");
   const [videoName, setVideoName] = useState("");
-  const storageKey = `racing-video-sync:${analysis.track?.track_id ?? "unknown"}:${analysis.inspection_id}`;
+  const storageKey = `racing-video-sync:${analysis.track?.track_id ?? "unknown"}:${analysis.file_fingerprint}`;
   const [offsetMs, setOffsetMs] = useState(() => {
     if (typeof window === "undefined") return 0;
     return Number(window.localStorage.getItem(storageKey) ?? "0") || 0;
@@ -907,6 +925,28 @@ function formatPercent(analysis: XrkAnalysis, key: string) {
   const quality = analysis as XrkAnalysis & { gps_quality?: Record<string, number> };
   const value = quality.gps_quality?.[key];
   return typeof value === "number" ? `${(value * 100).toFixed(1)}%` : "Unavailable";
+}
+
+function readSectorConfig(trackId?: string) {
+  if (typeof window === "undefined" || !trackId) return null;
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(`racing-sectors:${trackId}`) ?? "null"
+    ) as { sectorCount?: number; boundaries?: number[] } | null;
+    if (
+      !parsed
+      || !Number.isInteger(parsed.sectorCount)
+      || (parsed.sectorCount ?? 0) < 2
+      || (parsed.sectorCount ?? 0) > 6
+      || !Array.isArray(parsed.boundaries)
+    ) return null;
+    return {
+      sectorCount: parsed.sectorCount as number,
+      boundaries: parsed.boundaries.filter((value) => typeof value === "number" && Number.isFinite(value)),
+    };
+  } catch {
+    return null;
+  }
 }
 
 const tooltipStyle = {

@@ -115,6 +115,7 @@ def test_inspect_analyze_delete_contract(
         result = analyzed.json()
         assert result["reference_lap"] == 1
         assert result["target_lap"] == 2
+        assert result["file_fingerprint"] == "fixture"
         assert result["fastest_lap"]["lap_time"] == pytest.approx(10.0)
         assert min(row["lap_time"] for row in result["sectors"]["lap_rows"]) == pytest.approx(10.0)
         assert result["track"]["reference"]

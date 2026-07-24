@@ -996,6 +996,21 @@ function DataUploadPanel({
             {xrkInspection.channels.filter((channel) => channel.available).length} usable channels ·
             official sectors {xrkInspection.has_predefined_sectors ? "available" : "unavailable"}
           </p>
+          <details className="mt-2 text-xs text-slate-400">
+            <summary className="cursor-pointer text-slate-300">Inspect available channels</summary>
+            <div className="thin-scrollbar mt-2 max-h-40 space-y-1 overflow-auto border-t border-slate-800 pt-2">
+              {xrkInspection.channels.map((channel) => (
+                <div key={channel.name} className="flex items-center justify-between gap-3">
+                  <span className={channel.available ? "text-slate-200" : "text-slate-600"}>
+                    {channel.name}
+                  </span>
+                  <span className="shrink-0 text-slate-500">
+                    {channel.available ? `${channel.sample_count.toLocaleString()} · ${channel.unit ?? "unit n/a"}` : channel.all_zero ? "all zero" : "unavailable"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </details>
           {aimImportStatus !== "loaded" && (
             <button
               type="button"

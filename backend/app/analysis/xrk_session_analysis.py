@@ -209,6 +209,7 @@ def basic_response(
         "format": "aim_xrk_analysis",
         "inspection_id": manifest.get("inspection_id"),
         "expires_at": manifest.get("expires_at"),
+        "file_fingerprint": manifest.get("fingerprint"),
         "metadata": manifest.get("metadata", {}),
         "channels": manifest.get("channels", []),
         "capabilities": {

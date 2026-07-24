@@ -83,6 +83,7 @@ export type XrkAnalysis = {
   format: "aim_xrk_analysis";
   inspection_id: string;
   expires_at: string;
+  file_fingerprint: string;
   metadata: Record<string, string | number | null>;
   capabilities: {
     gps: boolean;
