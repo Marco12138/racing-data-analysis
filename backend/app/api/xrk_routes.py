@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -26,6 +27,11 @@ from ..importers.service import (
 router = APIRouter(prefix="/xrk", tags=["xrk"])
 logger = logging.getLogger("racing.xrk")
 logger.setLevel(logging.INFO)
+logger.propagate = False
+if not logger.handlers:
+    log_handler = logging.StreamHandler(sys.stdout)
+    log_handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(log_handler)
 
 
 class ManualZoneRequest(BaseModel):
