@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     xrk_inspection_cache_dir: str = "/tmp/racing-xrk-inspections"
     xrk_default_distance_step_m: float = Field(default=1.0, ge=0.25, le=10.0)
     xrk_max_comparison_points: int = Field(default=5_000, ge=100, le=50_000)
+    xrk_server_import_enabled: bool = True
+    xrk_parser: str = "auto"
+    xrk_test_file_path: str | None = None
 
     @property
     def cors_origin_list(self) -> list[str]:

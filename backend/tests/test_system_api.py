@@ -33,7 +33,12 @@ def test_cloud_mode_disables_local_video_library(
         )
         assert capabilities.status_code == 200
         assert capabilities.json()["local_video_library"] is False
+        assert "xrk_server_import" in capabilities.json()
         assert capabilities.headers["X-Request-ID"] == "test-request-id"
+
+        alias = client.get("/api/v1/capabilities")
+        assert alias.status_code == 200
+        assert alias.json()["aim_imports"] == alias.json()["xrk_server_import"]["available"]
 
         library = client.get("/api/v1/video/library")
         assert library.status_code == 503

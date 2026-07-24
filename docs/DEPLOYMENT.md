@@ -8,9 +8,8 @@ The current public demo only needs:
 - API: Railway or Render using the root `Dockerfile`.
 
 CSV analysis and video first-frame preview run in the browser. AiM XRK/XRZ
-files are sent to the FastAPI container for temporary parsing, so the hosted
-frontend remains usable even before a public API domain is configured. The API
-is required only for XRK/XRZ import, the optional server-side CSV endpoint, and
+files are sent to the FastAPI container for temporary parsing. The API is
+required for XRK/XRZ import, the optional server-side CSV endpoint, and
 health/capability checks. PostgreSQL, Redis, authentication, and object storage
 are intentionally not required in this phase.
 
@@ -70,6 +69,22 @@ NEXT_PUBLIC_DEPLOYMENT_MODE=public-demo
 
 These values are embedded in browser assets at build time. Redeploy after they change.
 
+## Sites frontend
+
+Set these Worker runtime values in Sites:
+
+```text
+API_URL=https://api.example.com
+API_PREFIX=/api/v1
+DEPLOYMENT_MODE=public-demo
+```
+
+The Worker exposes only these public values through same-origin
+`GET /api/runtime-config`. The browser uses that response for XRK inspection,
+analysis, deletion, and capability requests. HTTPS pages reject loopback or
+non-HTTPS API origins. `pnpm run build` scans client assets and fails when a
+literal `http://127.0.0.1:8000` or `http://localhost:8000` is present.
+
 ## FastAPI container
 
 Deploy the root `Dockerfile`. For the current public Demo adapter:
@@ -95,6 +110,8 @@ XRK_INSPECTION_TTL_SECONDS=1800
 XRK_INSPECTION_CACHE_DIR=/tmp/racing-xrk-inspections
 XRK_DEFAULT_DISTANCE_STEP_M=1.0
 XRK_MAX_COMPARISON_POINTS=5000
+XRK_SERVER_IMPORT_ENABLED=true
+XRK_PARSER=auto
 ```
 
 This cloud-mode container is suitable for publishing the frontend and CSV
@@ -118,6 +135,7 @@ Use these health checks:
 GET /api/v1/health
 GET /api/v1/system/health/live
 GET /api/v1/system/health/ready
+GET /api/v1/capabilities
 ```
 
 `GET /api/v1/health` has the stable response:
@@ -162,7 +180,8 @@ docker compose config
 ```
 
 Check CORS with the real frontend domain and confirm cloud mode returns
-`local_video_library: false` before exposing the API publicly.
+`local_video_library: false` and `xrk_server_import.available: true` before
+exposing the API publicly.
 
 ## Provider references
 

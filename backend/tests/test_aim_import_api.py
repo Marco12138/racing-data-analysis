@@ -111,7 +111,7 @@ def test_aim_import_returns_normalized_path_free_response(
     async def fake_conversion(source: Path, output_dir: Path, _: int) -> None:
         nonlocal observed_temp
         observed_temp = source.parent
-        assert source.read_bytes() == b"synthetic-xrk"
+        assert source.read_bytes() == b"<hCNFsynthetic-xrk"
         write_converter_output(output_dir)
 
     monkeypatch.setattr(import_routes, "run_xrk_conversion", fake_conversion)
@@ -127,7 +127,7 @@ def test_aim_import_returns_normalized_path_free_response(
     with TestClient(create_app(settings)) as client:
         response = client.post(
             "/api/v1/imports/aim",
-            files={"file": ("session.xrk", b"synthetic-xrk", "application/octet-stream")},
+            files={"file": ("session.xrk", b"<hCNFsynthetic-xrk", "application/octet-stream")},
         )
 
     assert response.status_code == 200
@@ -187,7 +187,7 @@ def test_aim_import_enforces_size_and_timeout_errors(
         monkeypatch.setattr(import_routes, "run_xrk_conversion", timeout)
         timed_out = client.post(
             "/api/v1/imports/aim",
-            files={"file": ("slow.xrk", b"xrk", "application/octet-stream")},
+            files={"file": ("slow.xrk", b"<hCNFxrk", "application/octet-stream")},
         )
         assert timed_out.status_code == 504
 
@@ -221,7 +221,7 @@ def test_aim_import_preserves_parser_error_contract(
     with TestClient(create_app(settings)) as client:
         response = client.post(
             "/api/v1/imports/aim",
-            files={"file": ("session.xrk", b"xrk", "application/octet-stream")},
+            files={"file": ("session.xrk", b"<hCNFxrk", "application/octet-stream")},
         )
         preflight = client.options(
             "/api/v1/imports/aim",

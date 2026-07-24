@@ -117,7 +117,8 @@ pnpm run dev
 
 ## 本地视频 API
 
-- `GET /api/v1/system/capabilities`：查询当前部署支持的能力。
+- `GET /api/v1/capabilities`：查询真实 XRK parser 与当前部署能力。
+- `GET /api/v1/system/capabilities`：保留的兼容能力查询路径。
 - `GET /api/v1/system/health/live`：进程存活检查。
 - `GET /api/v1/system/health/ready`：依赖就绪检查。
 - `POST /api/v1/analysis`：上传圈速和可选遥测 CSV。
@@ -152,7 +153,7 @@ docker compose up --build
 
 第一阶段公开 Demo 推荐：
 
-- Vercel：Next.js 前端；
+- Sites 或 Vercel：Next.js 前端；
 - Railway / Render：使用根目录 `Dockerfile` 部署可选 FastAPI 服务。
 
 当前公开 Dashboard 的 Demo 数据、CSV 分析和视频首帧预览都可在浏览器
@@ -164,6 +165,20 @@ docker compose up --build
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。
 
 ## Frontend Deployment
+
+Sites 部署使用 Worker 运行时变量，避免构建产物意外写入本机地址：
+
+```text
+API_URL=https://<backend-domain>
+API_PREFIX=/api/v1
+DEPLOYMENT_MODE=public-demo
+```
+
+前端会先读取同源 `/api/runtime-config`，再连接 FastAPI。HTTPS 公网页面会
+拒绝 localhost、`127.0.0.1` 和非 HTTPS API。生产构建还会扫描 client
+bundle，发现 loopback API URL 时直接失败。
+
+Vercel 部署步骤：
 
 1. 将仓库连接到 GitHub。
 2. 在 Vercel 中导入仓库，保持项目根目录不变。
@@ -186,6 +201,7 @@ docker compose up --build
    `healthcheck.railway.app`，否则 Trusted Host 会拒绝平台健康检查。
    XRK Demo 还需设置 `XRK_INSPECTION_TTL_SECONDS=1800`、
    `XRK_INSPECTION_CACHE_DIR=/tmp/racing-xrk-inspections` 和
+   `XRK_SERVER_IMPORT_ENABLED=true`、`XRK_PARSER=auto`、
    `WEB_CONCURRENCY=1`。
 4. 将健康检查路径设置为 `/api/v1/health`；成功响应为
    `{"status":"ok"}`。
@@ -212,7 +228,9 @@ time,lap,distance,speed,throttle,brake,steering_angle,rpm,gear,lateral_g,longitu
 ## AiM XRK/XRZ 导入
 
 网站的 `Import XRK / XRZ (Beta)` 输入可直接上传 `.xrk` 或 `.xrz`。
-流程为“选择文件 → Inspect channels → Run Analysis”。FastAPI 在随机临时
+流程为“选择文件 → Inspect channels → Continue to Analysis”。上传前页面会
+读取 `/api/v1/capabilities`，显示 parser、版本、平台、上传上限和真实可用性。
+FastAPI 在随机临时
 目录和隔离子进程中使用 `libxrk==0.12.0` 的真实 PyArrow 时间序列解析；
 不使用二进制字符串搜索。原始文件在解析完成、失败、超时或请求取消后立即
 删除。标准化 Parquet 与 manifest 使用不可猜测令牌保留 30 分钟，固定到期，
@@ -249,6 +267,13 @@ sector，也可在轨迹上设置 2–6 个 sector。网站会明确标记为非
 G 和弯前曲率证据，才输出最高 medium confidence 的
 `BRAKING_LIKELY`。报告分别列出 Measured、Calculated 和 Inferred 结果。
 真实 `.xrk`、`.xrz` 已从 Git 和 Docker build context 排除。
+
+私有真实样本验收通过环境变量启用，不会把文件加入测试 fixture：
+
+```bash
+XRK_TEST_FILE_PATH="/absolute/path/ren_kosmic_WUHAN_a_0809.xrk" \
+  python -m pytest backend/tests/test_xrk_real_sample.py -q
+```
 
 ## 测试
 

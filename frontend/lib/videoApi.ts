@@ -1,4 +1,4 @@
-import { apiUrl } from "./config";
+import { apiUrl, resolveApiUrl } from "./config";
 
 export type VideoSource = {
   source_id: string;
@@ -64,10 +64,23 @@ export type DeploymentCapabilities = {
   durable_task_queue: boolean;
   authentication: boolean;
   aim_imports: boolean;
+  xrk_server_import: {
+    enabled: boolean;
+    available: boolean;
+    parser: string;
+    version: string | null;
+    license: string | null;
+    status: string;
+    platform: string;
+    max_upload_bytes: number;
+    timeout_seconds: number;
+    error_code: string | null;
+    message: string | null;
+  };
 };
 
 export function getDeploymentCapabilities(): Promise<DeploymentCapabilities> {
-  return apiRequest<DeploymentCapabilities>("/system/capabilities");
+  return apiRequest<DeploymentCapabilities>("/capabilities");
 }
 
 export async function getVideoLibrary(): Promise<VideoSource[]> {
@@ -121,12 +134,12 @@ export function markerExportUrl(jobId: string) {
 }
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(apiUrl(path), init);
+  const response = await fetch(await resolveApiUrl(path), init);
   if (!response.ok) {
     let message = `Request failed (${response.status})`;
     try {
       const body = await response.json();
-      message = body.detail ?? body.error?.message ?? message;
+      message = body.message ?? body.detail ?? body.error?.message ?? message;
     } catch {
       // Preserve the status-based fallback for non-JSON errors.
     }

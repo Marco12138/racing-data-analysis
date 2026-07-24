@@ -92,7 +92,7 @@ def test_inspect_analyze_delete_contract(
     with TestClient(create_app(settings)) as client:
         inspected = client.post(
             "/api/v1/xrk/inspect",
-            files={"file": ("fixture.xrk", b"real-parser-mocked", "application/octet-stream")},
+            files={"file": ("fixture.xrk", b"<hCNFreal-parser-mocked", "application/octet-stream")},
         )
         assert inspected.status_code == 200
         body = inspected.json()
@@ -133,7 +133,64 @@ def test_inspect_analyze_delete_contract(
             json={"inspection_id": token},
         )
         assert expired.status_code == 410
-        assert "expired" in expired.json()["detail"]
+        assert expired.json()["error_code"] == "XRK_INSPECTION_EXPIRED"
+        assert "expired" in expired.json()["message"]
+
+
+def test_inspect_rejects_invalid_signature_with_structured_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Renamed files should never reach the native parser process."""
+    monkeypatch.setattr(storage, "DB_PATH", tmp_path / "sessions.sqlite3")
+    settings = Settings(
+        app_env="test",
+        app_mode="cloud",
+        database_url=f"sqlite:///{tmp_path / 'sessions.sqlite3'}",
+        allowed_hosts="testserver",
+        xrk_inspection_cache_dir=str(tmp_path / "cache"),
+    )
+    with TestClient(create_app(settings)) as client:
+        response = client.post(
+            "/api/v1/xrk/inspect",
+            files={"file": ("renamed.xrk", b"not-an-aim-file", "application/octet-stream")},
+            headers={"X-Request-ID": "signature-test"},
+        )
+    assert response.status_code == 400
+    assert response.json() == {
+        "status": "error",
+        "error_code": "XRK_UNSUPPORTED_FORMAT",
+        "message": "The uploaded file does not have a supported AiM XRK/XRZ signature.",
+        "request_id": "signature-test",
+    }
+    assert response.headers["X-Request-ID"] == "signature-test"
+
+
+def test_inspect_reports_disabled_parser_capability(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The upload endpoint should use the same real capability as the UI."""
+    monkeypatch.setattr(storage, "DB_PATH", tmp_path / "sessions.sqlite3")
+    settings = Settings(
+        app_env="test",
+        app_mode="cloud",
+        database_url=f"sqlite:///{tmp_path / 'sessions.sqlite3'}",
+        allowed_hosts="testserver",
+        xrk_inspection_cache_dir=str(tmp_path / "cache"),
+        xrk_server_import_enabled=False,
+    )
+    with TestClient(create_app(settings)) as client:
+        capability = client.get("/api/v1/capabilities").json()
+        response = client.post(
+            "/api/v1/xrk/inspect",
+            files={"file": ("fixture.xrk", b"<hCNFfixture", "application/octet-stream")},
+        )
+
+    assert capability["aim_imports"] is False
+    assert capability["xrk_server_import"]["status"] == "disabled"
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "XRK_UPLOAD_REJECTED"
 
 
 def test_inspection_store_has_fixed_expiry(tmp_path: Path) -> None:

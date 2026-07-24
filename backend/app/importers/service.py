@@ -25,9 +25,17 @@ from ..analysis.telemetry_analysis import analyze_telemetry
 class AimImportError(RuntimeError):
     """An XRK import failure with an intended HTTP status."""
 
-    def __init__(self, message: str, status_code: int = 400) -> None:
+    def __init__(
+        self,
+        message: str,
+        status_code: int = 400,
+        error_code: str = "XRK_PARSE_FAILED",
+        error_type: str = "import_error",
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.error_code = error_code
+        self.error_type = error_type
 
 
 class ImportRateLimiter:
@@ -50,6 +58,8 @@ class ImportRateLimiter:
                 raise AimImportError(
                     "XRK import limit reached. Please try again later.",
                     status_code=429,
+                    error_code="XRK_UPLOAD_REJECTED",
+                    error_type="rate_limit",
                 )
             requests.append(now)
 
@@ -62,7 +72,11 @@ async def save_limited_upload(
     """Stream an upload to disk while enforcing the configured byte limit."""
     filename = upload.filename or "session.xrk"
     if Path(filename).suffix.lower() not in {".xrk", ".xrz"}:
-        raise AimImportError("Only AiM .xrk and .xrz files are accepted.")
+        raise AimImportError(
+            "Only AiM .xrk and .xrz files are accepted.",
+            error_code="XRK_UPLOAD_REJECTED",
+            error_type="file_extension",
+        )
 
     total = 0
     try:
@@ -73,14 +87,46 @@ async def save_limited_upload(
                     raise AimImportError(
                         f"XRK/XRZ file exceeds the {max_bytes // (1024**2)} MB limit.",
                         status_code=413,
+                        error_code="XRK_FILE_TOO_LARGE",
+                        error_type="file_size",
                     )
                 output.write(chunk)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
     finally:
         await upload.close()
 
     if total == 0:
-        raise AimImportError("The uploaded XRK/XRZ file is empty.")
+        destination.unlink(missing_ok=True)
+        raise AimImportError(
+            "The uploaded XRK/XRZ file is empty.",
+            error_code="XRK_UPLOAD_REJECTED",
+            error_type="empty_file",
+        )
+    validate_xrk_signature(destination)
     return total
+
+
+def validate_xrk_signature(path: Path) -> None:
+    """Reject renamed or malformed files before invoking native parser code."""
+    with path.open("rb") as source:
+        header = source.read(5)
+    is_native_xrk = header.startswith(b"<hCNF")
+    is_zlib_xrz = len(header) >= 2 and header[0] == 0x78 and header[1] in {
+        0x01,
+        0x9C,
+        0xDA,
+    }
+    if is_native_xrk or is_zlib_xrz:
+        return
+    path.unlink(missing_ok=True)
+    raise AimImportError(
+        "The uploaded file does not have a supported AiM XRK/XRZ signature.",
+        status_code=400,
+        error_code="XRK_UNSUPPORTED_FORMAT",
+        error_type="file_signature",
+    )
 
 
 async def run_xrk_conversion(
@@ -148,6 +194,8 @@ async def run_xrk_worker(
         raise AimImportError(
             f"XRK parsing exceeded the {timeout_seconds} second limit.",
             status_code=504,
+            error_code="XRK_TIMEOUT",
+            error_type="timeout",
         ) from exc
     except asyncio.CancelledError:
         process.kill()
@@ -157,16 +205,38 @@ async def run_xrk_worker(
     if process.returncode == 0:
         return
 
-    message = stderr.decode("utf-8", errors="replace").strip()
-    if "XRK support is not installed" in message:
-        raise AimImportError("XRK parser is unavailable on this server.", status_code=503)
-    if (
-        "missing required GPS channels" in message
-        or "No complete timed laps" in message
-        or "No usable numeric telemetry channels" in message
-    ):
-        raise AimImportError(message, status_code=422)
-    raise AimImportError(message or "Unable to parse the XRK/XRZ file.")
+    payload = parse_worker_error(stderr)
+    raise AimImportError(
+        payload["message"],
+        status_code=int(payload["status_code"]),
+        error_code=str(payload["error_code"]),
+        error_type=str(payload["error_type"]),
+    )
+
+
+def parse_worker_error(stderr: bytes) -> dict[str, Any]:
+    """Parse the worker's final machine-readable error line."""
+    text = stderr.decode("utf-8", errors="replace").strip()
+    for line in reversed(text.splitlines()):
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and payload.get("status") == "error":
+            return {
+                "status_code": int(payload.get("status_code", 400)),
+                "error_code": str(payload.get("error_code", "XRK_PARSE_FAILED")),
+                "message": str(
+                    payload.get("message") or "Unable to parse the XRK/XRZ file."
+                ),
+                "error_type": str(payload.get("error_type", "parser_error")),
+            }
+    return {
+        "status_code": 400,
+        "error_code": "XRK_PARSE_FAILED",
+        "message": "Unable to parse the XRK/XRZ file.",
+        "error_type": "worker_failure",
+    }
 
 
 def build_import_response(

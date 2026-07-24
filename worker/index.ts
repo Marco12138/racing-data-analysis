@@ -5,6 +5,12 @@ import handler from "vinext/server/app-router-entry";
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
+  API_URL?: string;
+  API_PREFIX?: string;
+  DEPLOYMENT_MODE?: string;
+  NEXT_PUBLIC_API_URL?: string;
+  NEXT_PUBLIC_API_PREFIX?: string;
+  NEXT_PUBLIC_DEPLOYMENT_MODE?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -38,6 +44,32 @@ const worker = {
           return result.response();
         },
       }, allowedWidths);
+    }
+
+    if (url.pathname === "/api/runtime-config") {
+      const apiOrigin = (
+        env.API_URL ??
+        env.NEXT_PUBLIC_API_URL ??
+        ""
+      ).replace(/\/+$/, "");
+      const apiPrefix =
+        env.API_PREFIX ??
+        env.NEXT_PUBLIC_API_PREFIX ??
+        "/api/v1";
+      const deploymentMode =
+        env.DEPLOYMENT_MODE ??
+        env.NEXT_PUBLIC_DEPLOYMENT_MODE ??
+        "public-demo";
+      return Response.json(
+        { apiOrigin, apiPrefix, deploymentMode },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+            "Content-Security-Policy": "default-src 'none'",
+            "X-Content-Type-Options": "nosniff",
+          },
+        }
+      );
     }
 
     return handler.fetch(request, env, ctx);

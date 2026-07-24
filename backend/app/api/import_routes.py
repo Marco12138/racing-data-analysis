@@ -26,6 +26,18 @@ async def import_aim_session(
     settings = request.app.state.settings
     client_key = request.client.host if request.client else "unknown"
     try:
+        parser_probe = request.app.state.xrk_parser_registry.probe()
+        if not parser_probe.available:
+            raise AimImportError(
+                parser_probe.message or "XRK parser is unavailable on this server.",
+                status_code=(
+                    400
+                    if parser_probe.error_code == "XRK_UPLOAD_REJECTED"
+                    else 503
+                ),
+                error_code=parser_probe.error_code or "XRK_PARSER_NOT_INSTALLED",
+                error_type="parser_capability",
+            )
         await request.app.state.xrk_rate_limiter.check(client_key)
         async with request.app.state.xrk_import_semaphore:
             with tempfile.TemporaryDirectory(prefix="racing-aim-import-") as temp:

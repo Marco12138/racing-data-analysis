@@ -5,11 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import platform
 import re
-from dataclasses import dataclass
+import time
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -60,41 +61,9 @@ CHANNEL_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
-class XrkParserAdapter(Protocol):
-    """Adapter contract shared by cross-platform and official parsers."""
-
-    name: str
-
-    def inspect_and_extract(self, source: Path, output_dir: Path) -> dict[str, Any]:
-        """Inspect a logger file and create normalized temporary artifacts."""
-
-
-@dataclass(frozen=True)
-class LibXrkAdapter:
-    """Cross-platform libxrk implementation used by the public Demo."""
-
-    name: str = "libxrk"
-
-    def inspect_and_extract(self, source: Path, output_dir: Path) -> dict[str, Any]:
-        return inspect_xrk_file(source, output_dir)
-
-
-@dataclass(frozen=True)
-class AimOfficialDllAdapter:
-    """Compatibility placeholder for a Windows-only AiM DLL converter."""
-
-    name: str = "aim_official_dll"
-
-    def inspect_and_extract(self, source: Path, output_dir: Path) -> dict[str, Any]:
-        del source, output_dir
-        raise XrkImportError(
-            "The AiM official DLL adapter is available only through the "
-            "documented Windows native converter."
-        )
-
-
 def inspect_xrk_file(source: Path, output_dir: Path) -> dict[str, Any]:
     """Read real channel samples and create a normalized Parquet session."""
+    started_at = time.monotonic()
     source = source.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
     if not source.is_file():
@@ -127,7 +96,7 @@ def inspect_xrk_file(source: Path, output_dir: Path) -> dict[str, Any]:
             "version": parser_version,
             "license": PARSER_LICENSE,
             "status": PARSER_STATUS,
-            "platform": "cross-platform",
+            "platform": platform.system().lower(),
         },
         "metadata": json_safe(dict(log.metadata)),
         "laps": len(valid_laps),
@@ -148,12 +117,20 @@ def inspect_xrk_file(source: Path, output_dir: Path) -> dict[str, Any]:
         "excluded_laps": excluded_laps,
         "channels": channel_descriptions,
         "has_gps": {"gps_lat", "gps_lon", "speed"}.issubset(resolved),
+        "has_gps_speed": "speed" in resolved,
         "has_rpm": "rpm" in resolved,
+        "has_accelerometer": bool(
+            {"longitudinal_g", "lateral_g", "vertical_g"}.intersection(resolved)
+        ),
+        "has_gyro": bool({"gyro_x", "gyro_y", "yaw_rate"}.intersection(resolved)),
         "has_lap_timing": bool(valid_laps),
         "has_predefined_sectors": has_structured_sectors(log),
         "available_canonical_channels": sorted(resolved),
         "telemetry_rows": int(len(normalized)),
+        "session_summary": session_summary(lap_segments, valid_laps),
+        "warning_codes": inspection_warning_codes(resolved, log),
         "warnings": inspection_warnings(resolved, log),
+        "processing_duration_ms": round((time.monotonic() - started_at) * 1000),
         "artifacts": {"telemetry": telemetry_path.name},
     }
     (output_dir / "inspection.json").write_text(
@@ -178,12 +155,23 @@ def inspect_channels(
         sample_count = int(getattr(table, "num_rows", 0))
         all_zero = False
         available = False
+        first_timestamp_s: float | None = None
+        last_timestamp_s: float | None = None
+        sample_rate_hz: float | None = None
         try:
-            _, values = channel_arrays(table, name)
+            timecodes, values = channel_arrays(table, name)
             finite = values[np.isfinite(values)]
             available = bool(len(finite))
             all_zero = bool(available and np.allclose(finite, 0.0))
             available = available and not all_zero
+            if len(timecodes):
+                first_timestamp_s = json_number(float(timecodes[0]) / 1000.0)
+                last_timestamp_s = json_number(float(timecodes[-1]) / 1000.0)
+            if len(timecodes) > 1 and timecodes[-1] > timecodes[0]:
+                sample_rate_hz = json_number(
+                    (len(timecodes) - 1)
+                    / ((float(timecodes[-1]) - float(timecodes[0])) / 1000.0)
+                )
         except XrkImportError:
             pass
         normalized_name = normalize_channel_name(name)
@@ -191,11 +179,26 @@ def inspect_channels(
         descriptions.append(
             {
                 "name": name,
+                "normalized_name": normalized_name,
                 "canonical_name": canonical,
                 "unit": channel_units(table, name),
                 "sample_count": sample_count,
+                "sample_rate_hz": (
+                    round(sample_rate_hz, 3) if sample_rate_hz is not None else None
+                ),
+                "first_timestamp_s": (
+                    round(first_timestamp_s, 3)
+                    if first_timestamp_s is not None
+                    else None
+                ),
+                "last_timestamp_s": (
+                    round(last_timestamp_s, 3)
+                    if last_timestamp_s is not None
+                    else None
+                ),
                 "available": available,
                 "all_zero": all_zero,
+                "analysis_usage": analysis_usage(canonical, available),
             }
         )
         if available:
@@ -367,6 +370,77 @@ def inspection_warnings(resolved: dict[str, str], log: Any) -> list[str]:
             "No parser-confirmed official sectors are available; virtual sectors may be generated."
         )
     return warnings
+
+
+def inspection_warning_codes(resolved: dict[str, str], log: Any) -> list[str]:
+    """Return stable codes for optional channel limitations."""
+    codes: list[str] = []
+    if not {"gps_lat", "gps_lon", "speed"}.issubset(resolved):
+        codes.append("XRK_GPS_UNAVAILABLE")
+    if "rpm" not in resolved:
+        codes.append("XRK_RPM_UNAVAILABLE")
+    if "brake" not in resolved:
+        codes.append("XRK_BRAKE_UNAVAILABLE")
+    if "throttle" not in resolved:
+        codes.append("XRK_THROTTLE_UNAVAILABLE")
+    if not has_structured_sectors(log):
+        codes.append("XRK_OFFICIAL_SECTORS_UNAVAILABLE")
+    return codes
+
+
+def session_summary(
+    segments: list[dict[str, int]],
+    valid_laps: list[dict[str, int]],
+) -> dict[str, Any]:
+    """Summarize logger timing without inferring absent sectors."""
+    fastest = min(
+        valid_laps,
+        key=lambda row: row["end_time"] - row["start_time"],
+        default=None,
+    )
+    if segments:
+        duration_s = (max(row["end_time"] for row in segments) - min(
+            row["start_time"] for row in segments
+        )) / 1000.0
+    else:
+        duration_s = 0.0
+    return {
+        "lap_segments": len(segments),
+        "timed_laps": len(valid_laps),
+        "session_duration_s": round(duration_s, 3),
+        "fastest_lap": (
+            {
+                "lap": int(fastest["num"]),
+                "lap_time_s": round(
+                    (fastest["end_time"] - fastest["start_time"]) / 1000.0,
+                    3,
+                ),
+            }
+            if fastest
+            else None
+        ),
+    }
+
+
+def analysis_usage(canonical: str | None, available: bool) -> list[str]:
+    """Describe which analysis surfaces can consume a channel."""
+    if not canonical or not available:
+        return []
+    usage = {
+        "rpm": ["rpm_analysis", "driver_actions", "lap_comparison"],
+        "speed": ["track_map", "driver_actions", "lap_comparison"],
+        "gps_lat": ["track_map", "distance_alignment"],
+        "gps_lon": ["track_map", "distance_alignment"],
+        "longitudinal_g": ["driver_actions", "lap_comparison"],
+        "lateral_g": ["track_map", "lap_comparison"],
+        "yaw_rate": ["track_map", "zone_detection"],
+        "brake": ["confirmed_braking"],
+        "throttle": ["throttle_analysis"],
+        "gear": ["shift_filtering"],
+        "predictive_time": ["lap_comparison"],
+        "best_run_diff": ["lap_comparison"],
+    }
+    return usage.get(canonical, ["channel_inspection"])
 
 
 def normalize_channel_name(name: str) -> str:

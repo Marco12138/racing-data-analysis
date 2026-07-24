@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request, status
 
-from ..models.system import DeploymentCapabilities, HealthStatus
+from ..models.system import (
+    DeploymentCapabilities,
+    HealthStatus,
+    XrkServerImportCapability,
+)
 from ..utils.storage import check_database
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -19,6 +23,7 @@ def public_health() -> dict[str, str]:
 def capabilities(request: Request) -> DeploymentCapabilities:
     """Describe active deployment capabilities for the frontend."""
     settings = request.app.state.settings
+    parser_probe = request.app.state.xrk_parser_registry.probe()
     return DeploymentCapabilities(
         environment=settings.app_env,
         mode=settings.app_mode,
@@ -28,7 +33,20 @@ def capabilities(request: Request) -> DeploymentCapabilities:
         persistent_object_storage=False,
         durable_task_queue=False,
         authentication=False,
-        aim_imports=True,
+        aim_imports=parser_probe.available,
+        xrk_server_import=XrkServerImportCapability(
+            enabled=settings.xrk_server_import_enabled,
+            available=parser_probe.available,
+            parser=parser_probe.name,
+            version=parser_probe.version,
+            license=parser_probe.license,
+            status=parser_probe.status,
+            platform=parser_probe.platform,
+            max_upload_bytes=settings.max_xrk_upload_bytes,
+            timeout_seconds=settings.xrk_parse_timeout_seconds,
+            error_code=parser_probe.error_code,
+            message=parser_probe.message,
+        ),
     )
 
 

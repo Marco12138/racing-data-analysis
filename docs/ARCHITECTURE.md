@@ -15,8 +15,9 @@ The repository intentionally keeps two deployment modes:
 
 `APP_MODE=local` preserves the existing filesystem video library. `APP_MODE=cloud`
 disables those routes so a public server cannot accidentally scan its host
-filesystem. Cloud mode reports upload/auth/queue capabilities through
-`GET /api/v1/system/capabilities`.
+filesystem. Cloud mode reports upload/auth/queue capabilities and the native
+XRK parser probe through `GET /api/v1/capabilities`;
+`GET /api/v1/system/capabilities` remains a compatibility alias.
 
 ## Deployable modules
 

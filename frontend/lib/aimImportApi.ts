@@ -1,5 +1,5 @@
 import type { CsvRow } from "./analysis";
-import { apiUrl } from "./config";
+import { resolveApiUrl } from "./config";
 
 export type AimChannel = {
   name: string;
@@ -49,7 +49,7 @@ export async function importAimSession(file: File): Promise<AimImportResponse> {
   form.append("file", file);
   let response: Response;
   try {
-    response = await fetch(apiUrl("/imports/aim"), {
+    response = await fetch(await resolveApiUrl("/imports/aim"), {
       method: "POST",
       body: form,
     });

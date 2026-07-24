@@ -26,13 +26,51 @@ test("server-renders the public racing analysis demo", async () => {
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 
-test("keeps public imports, browser video preview, and local API paths explicit", async () => {
-  const [publicPage, dashboard, aimImportApi, videoApi, frontendConfig, layout, packageJson] = await Promise.all([
+test("serves the Sites API origin from Worker runtime configuration", async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("runtime-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const response = await worker.fetch(
+    new Request("https://frontend.example/api/runtime-config"),
+    {
+      ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
+      API_URL: "https://backend.example/",
+      API_PREFIX: "/api/v1",
+      DEPLOYMENT_MODE: "public-demo",
+    },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await response.json(), {
+    apiOrigin: "https://backend.example",
+    apiPrefix: "/api/v1",
+    deploymentMode: "public-demo",
+  });
+});
+
+test("keeps public imports, browser video preview, and runtime API routing explicit", async () => {
+  const [
+    publicPage,
+    dashboard,
+    inspectionWorkspace,
+    aimImportApi,
+    xrkAnalysisApi,
+    videoApi,
+    frontendConfig,
+    worker,
+    layout,
+    packageJson,
+  ] = await Promise.all([
     readFile(new URL("../frontend/components/PublicDemoPage.tsx", import.meta.url), "utf8"),
     readFile(new URL("../frontend/components/RacingDashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../frontend/components/XrkInspectionWorkspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../frontend/lib/aimImportApi.ts", import.meta.url), "utf8"),
+    readFile(new URL("../frontend/lib/xrkAnalysisApi.ts", import.meta.url), "utf8"),
     readFile(new URL("../frontend/lib/videoApi.ts", import.meta.url), "utf8"),
     readFile(new URL("../frontend/lib/config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
@@ -42,14 +80,22 @@ test("keeps public imports, browser video preview, and local API paths explicit"
   assert.match(dashboard, /BrowserVideoUpload/);
   assert.match(dashboard, /canvas\.toDataURL/);
   assert.match(dashboard, /Telemetry channel unavailable/);
-  assert.match(dashboard, /AiM Session File/);
+  assert.match(dashboard, /XRK Server Import/);
   assert.match(dashboard, /Virtual sectors/);
+  assert.match(inspectionWorkspace, /Continue to Analysis/);
+  assert.match(inspectionWorkspace, /Available channels/);
   assert.match(aimImportApi, /\/imports\/aim/);
   assert.match(aimImportApi, /FormData/);
+  assert.match(xrkAnalysisApi, /resolveApiUrl/);
+  assert.match(xrkAnalysisApi, /XRK_FRONTEND_API_MISCONFIGURED|FrontendApiConfigError/);
   assert.match(dashboard, /当前为视频独立分析模式/);
   assert.match(publicPage, /Try Demo/);
   assert.match(publicPage, /Upload Data/);
-  assert.match(frontendConfig, /127\.0\.0\.1:8000/);
+  assert.doesNotMatch(frontendConfig, /http:\/\/127\.0\.0\.1:8000/);
+  assert.match(frontendConfig, /\/api\/runtime-config/);
+  assert.match(frontendConfig, /XRK_FRONTEND_API_MISCONFIGURED/);
+  assert.match(worker, /\/api\/runtime-config/);
+  assert.match(worker, /API_URL/);
   assert.match(frontendConfig, /\/api\/v1/);
   assert.match(frontendConfig, /public-demo/);
   assert.match(videoApi, /\/video\/jobs/);
