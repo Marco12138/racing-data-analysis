@@ -53,6 +53,8 @@ class XrkAnalyzeRequest(BaseModel):
     sector_count: int = Field(default=3, ge=2, le=6)
     sector_boundaries_m: list[float] | None = None
     manual_zones: list[ManualZoneRequest] = Field(default_factory=list, max_length=30)
+    lap_quality_absolute_gap_s: float = Field(default=0.5, ge=0.05, le=5.0)
+    lap_quality_relative_gap_pct: float = Field(default=1.0, ge=0.1, le=10.0)
 
 
 @router.post("/inspect")
@@ -261,6 +263,10 @@ async def analyze_xrk(
                 zone.model_dump()
                 for zone in payload.manual_zones
             ],
+            lap_quality_config={
+                "absolute_gap_threshold_s": payload.lap_quality_absolute_gap_s,
+                "relative_gap_threshold_pct": payload.lap_quality_relative_gap_pct,
+            },
             max_comparison_points=settings.xrk_max_comparison_points,
         )
         return result

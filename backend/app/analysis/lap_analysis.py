@@ -11,7 +11,7 @@ def sector_columns(df: pd.DataFrame) -> list[str]:
 
 
 def analyze_laps(df: pd.DataFrame) -> dict:
-    """Calculate fastest lap, theoretical best, deltas, sector loss, and ranking."""
+    """Calculate real fastest lap, deltas, per-sector loss, and consistency."""
     required = {"lap", "lap_time"}
     missing = required - set(df.columns)
     if missing:
@@ -27,7 +27,6 @@ def analyze_laps(df: pd.DataFrame) -> dict:
 
     fastest = working.loc[working["lap_time"].idxmin()]
     sector_best = {sector: float(working[sector].min()) for sector in sectors}
-    theoretical_best = float(sum(sector_best.values()))
     fastest_lap_time = float(fastest["lap_time"])
 
     lap_deltas = []
@@ -73,13 +72,12 @@ def analyze_laps(df: pd.DataFrame) -> dict:
             "lap_time": fastest_lap_time,
             "sectors": {sector: float(fastest[sector]) for sector in sectors},
         },
-        "theoretical_best_lap": theoretical_best,
-        "potential_gain": fastest_lap_time - theoretical_best,
         "average_lap_time": float(working["lap_time"].mean()),
+        "lap_time_standard_deviation": float(working["lap_time"].std(ddof=0)),
         "sector_best": sector_best,
         "lap_deltas": lap_deltas,
         "sector_loss": sector_loss_rows,
         "sector_ranking": sector_ranking,
         "main_loss_sector": main_loss["sector"],
+        "reference_policy": "real_completed_laps_only",
     }
-

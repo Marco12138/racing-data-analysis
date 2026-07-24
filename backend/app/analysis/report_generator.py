@@ -13,8 +13,8 @@ def generate_report(lap_result: dict, telemetry_result: dict | None, handling_fl
     lines = [
         f"Session Summary: The driver completed {lap_result['total_laps']} laps.",
         f"The fastest lap was Lap {lap_result['fastest_lap']['lap']} at {lap_result['fastest_lap']['lap_time']:.3f}s.",
-        f"The theoretical best lap is {lap_result['theoretical_best_lap']:.3f}s, leaving {lap_result['potential_gain']:.3f}s of potential gain.",
         f"The largest performance loss comes from {lap_result['main_loss_sector'].replace('sector_', 'Sector ')}.",
+        "All lap references are real completed laps; sector best values are local diagnostics and are not combined into a target lap.",
     ]
     if telemetry_result:
         if telemetry_result.get("maximum_speed") is not None:
@@ -44,5 +44,8 @@ def generate_report(lap_result: dict, telemetry_result: dict | None, handling_fl
     if has_throttle:
         focus.append("corner exit throttle application")
     lines.append(f"Recommended focus: review {', '.join(focus)}.")
+    lines.append(
+        "No synthetic target lap or RPM trace is generated, and no combination of local improvements is guaranteed to coexist in one lap."
+    )
     lines.append("Handling analysis is heuristic and must be validated by a driver or coach.")
     return "\n\n".join(lines)

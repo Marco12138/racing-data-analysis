@@ -83,3 +83,56 @@ def align_laps_by_distance(
     aligned["reference_lap"] = reference_lap
     aligned["target_lap"] = target_lap
     return aligned
+
+
+def align_multiple_laps_by_distance(
+    telemetry_df: pd.DataFrame,
+    lap_numbers: list[int],
+    distance_step_m: float = 1.0,
+) -> tuple[pd.DataFrame, dict[int, pd.DataFrame]]:
+    """Align real laps to one common distance grid without synthesizing a lap."""
+    unique_laps = list(dict.fromkeys(int(lap) for lap in lap_numbers))
+    source_laps = {
+        lap: telemetry_df[telemetry_df["lap"] == lap]
+        for lap in unique_laps
+    }
+    source_laps = {
+        lap: frame
+        for lap, frame in source_laps.items()
+        if not frame.empty and "distance_m" in frame
+    }
+    if not source_laps:
+        return pd.DataFrame(), {}
+    common_distance = min(
+        float(frame["distance_m"].max()) for frame in source_laps.values()
+    )
+    if not np.isfinite(common_distance) or common_distance <= 0:
+        return pd.DataFrame(), {}
+
+    resampled = {
+        lap: resample_lap_by_distance(
+            frame,
+            distance_step_m,
+            max_distance_m=common_distance,
+        )
+        for lap, frame in source_laps.items()
+    }
+    resampled = {lap: frame for lap, frame in resampled.items() if not frame.empty}
+    if not resampled:
+        return pd.DataFrame(), {}
+
+    length = min(len(frame) for frame in resampled.values())
+    resampled = {
+        lap: frame.iloc[:length].reset_index(drop=True)
+        for lap, frame in resampled.items()
+    }
+    first = next(iter(resampled.values()))
+    aligned = pd.DataFrame(
+        {"distance_m": first["distance_m"].to_numpy(dtype=float)}
+    )
+    for lap, frame in resampled.items():
+        for channel in COMPARISON_CHANNELS:
+            if channel in frame:
+                aligned[f"lap_{lap}_{channel}"] = frame[channel]
+        aligned[f"lap_{lap}_interpolated"] = 1.0
+    return aligned, resampled

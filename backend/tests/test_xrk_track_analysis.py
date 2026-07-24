@@ -133,7 +133,8 @@ def test_virtual_sectors_and_multisignal_events() -> None:
 
     assert len(lap_rows) == 2
     assert len(boundaries) == 2
-    assert result["analysis"]["theoretical_best_lap"] > 0
+    assert result["analysis"]["fastest_lap"]["lap_time"] > 0
+    assert "theoretical_best_lap" not in result["analysis"]
     assert "BRAKING_CONFIRMED" not in event_types
     assert event_types & {"BRAKING_LIKELY", "LIFTING"}
     assert "MINIMUM_RPM" in event_types

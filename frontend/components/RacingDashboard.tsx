@@ -253,6 +253,14 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
           sector_count: options.sector_count ?? xrkAnalysis?.sectors?.count ?? 3,
           sector_boundaries_m: options.sector_boundaries_m,
           manual_zones: options.manual_zones,
+          lap_quality_absolute_gap_s:
+            options.lap_quality_absolute_gap_s
+            ?? xrkAnalysis?.lap_quality.config.absolute_gap_threshold_s
+            ?? 0.5,
+          lap_quality_relative_gap_pct:
+            options.lap_quality_relative_gap_pct
+            ?? xrkAnalysis?.lap_quality.config.relative_gap_threshold_pct
+            ?? 1,
         },
         controller.signal
       );
@@ -294,11 +302,11 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
 
   const videoMetadata = videoJob?.metadata;
   const metrics = lapAnalysis
-    ? [
+      ? [
         [<Flag size={20} key="laps" />, "Total Laps", String(lapRows.length), "Timed laps analyzed", "#66e38f"],
         [<Gauge size={20} key="fastest" />, "Fastest Lap", formatSeconds(lapAnalysis.fastestLap.lap_time), `Lap ${lapAnalysis.fastestLap.lap}`, "#f6c945"],
-        [<Zap size={20} key="theoretical" />, "Theoretical Best", formatSeconds(lapAnalysis.theoreticalBest), virtualSectors ? "Virtual sectors combined" : "Best sectors combined", "#35d6d0"],
-        [<Activity size={20} key="gain" />, "Potential Gain", formatSeconds(lapAnalysis.potentialGain), formatSector(lapAnalysis.mainLossSector), "#ff5964"],
+        [<BarChart3 size={20} key="references" />, "Valid References", String(lapAnalysis.topValidLaps.length), "Real completed laps only", "#35d6d0"],
+        [<Activity size={20} key="consistency" />, "Consistency", `${lapAnalysis.consistencyScore.toFixed(0)}%`, `σ ${lapAnalysis.lapTimeStandardDeviation.toFixed(3)}s`, "#ff5964"],
       ]
     : [
         [<CirclePlay size={20} key="duration" />, "Video Duration", videoMetadata ? formatTimestamp(videoMetadata.duration_seconds) : "--", videoJob?.source_name ?? "No video analyzed", "#f6c945"],
@@ -413,7 +421,8 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
                       ["Track name", trackName],
                       ["Total timed laps", String(lapRows.length)],
                       ["Fastest lap", `Lap ${lapAnalysis.fastestLap.lap}`],
-                      ["Theoretical best", formatSeconds(lapAnalysis.theoreticalBest)],
+                      ["Reference policy", "Real completed laps only"],
+                      ["Top valid laps", lapAnalysis.topValidLaps.map((lap) => `Lap ${lap.lap}`).join(", ") || "Unavailable"],
                       ["Sector source", sectorSourceLabel ?? "Provided timing sectors"],
                       ["Average lap", formatSeconds(lapAnalysis.averageLap)],
                     ]}

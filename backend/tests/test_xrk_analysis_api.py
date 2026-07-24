@@ -122,7 +122,11 @@ def test_inspect_analyze_delete_contract(
         assert result["comparison"]
         assert result["sectors"]["official"] is False
         assert result["sectors"]["sector_best"]
-        assert result["sectors"]["theoretical_best"] > 0
+        assert "theoretical_best" not in result["sectors"]
+        assert result["lap_quality"]["top_valid_laps"][0]["lap"] == 1
+        assert result["top_laps_comparison"]["synthetic_curve_generated"] is False
+        assert result["consensus_benchmark"]["synthetic_curve_generated"] is False
+        assert "theoretical" not in result["report"].lower()
         assert set(result["evidence_catalog"]) == {"measured", "calculated", "inferred"}
 
         assert client.delete(f"/api/v1/xrk/inspections/{token}").json() == {

@@ -85,7 +85,6 @@ export function analyzeLaps(rows: LapRow[]) {
   const sectorBest = Object.fromEntries(
     sectors.map((sector) => [sector, Math.min(...rows.map((row) => Number(row[sector])))])
   );
-  const theoreticalBest = Object.values(sectorBest).reduce((sum, value) => sum + value, 0);
   const averageLap = rows.reduce((sum, row) => sum + row.lap_time, 0) / rows.length;
   const lapDeltas = rows.map((row) => ({
     ...row,
@@ -120,19 +119,26 @@ export function analyzeLaps(rows: LapRow[]) {
   });
   const bestSector = [...sectorRanking].sort((a, b) => a.averageLoss - b.averageLoss)[0]?.sector ?? "N/A";
   const mainLossSector = [...sectorRanking].sort((a, b) => b.averageLoss - a.averageLoss)[0]?.sector ?? "N/A";
-  const consistencyScore = Math.max(0, 100 - standardDeviation(rows.map((row) => row.lap_time)) * 18);
+  const lapTimeStandardDeviation = standardDeviation(rows.map((row) => row.lap_time));
+  const consistencyScore = Math.max(0, 100 - lapTimeStandardDeviation * 18);
+  const eligibilityThreshold = Math.max(0.5, fastestLap.lap_time * 0.01);
+  const topValidLaps = rows
+    .filter((row) => row.lap_time - fastestLap.lap_time <= eligibilityThreshold)
+    .sort((a, b) => a.lap_time - b.lap_time)
+    .slice(0, 3);
   return {
     sectors,
     fastestLap,
-    theoreticalBest,
     averageLap,
+    lapTimeStandardDeviation,
     lapDeltas,
     sectorLossRows,
     sectorRanking,
     bestSector,
     mainLossSector,
     consistencyScore,
-    potentialGain: fastestLap.lap_time - theoreticalBest,
+    topValidLaps,
+    referencePolicy: "real_completed_laps_only" as const,
   };
 }
 
@@ -243,11 +249,13 @@ export function generateDriverReport(
   return [
     `Session Summary: The driver completed ${laps.lapDeltas.length} laps.`,
     `The fastest lap was Lap ${laps.fastestLap.lap} at ${formatSeconds(laps.fastestLap.lap_time)}.`,
-    `The theoretical best lap is ${formatSeconds(laps.theoreticalBest)}, leaving ${formatSeconds(laps.potentialGain)} of potential gain.`,
+    `Reference laps: ${laps.topValidLaps.map((lap) => `Lap ${lap.lap} (${formatSeconds(lap.lap_time)})`).join(", ")}.`,
+    "All references are real completed laps. Sector-best values remain local diagnostics and are not stitched into a target lap.",
     `The largest performance loss comes from ${formatSector(laps.mainLossSector)}.`,
     telemetry?.maxSpeed ? `Maximum speed reached ${telemetry.maxSpeed.toFixed(1)} km/h with average speed ${telemetry.averageSpeed?.toFixed(1)} km/h.` : "Telemetry channel unavailable. Lap and sector findings remain valid.",
     ...behaviorSummary,
     `Recommended focus: review ${focus.join(", ")}.`,
+    "No synthetic target lap or RPM curve is generated. Improvements observed in different laps are not assumed to coexist in one lap.",
   ].join("\n\n");
 }
 

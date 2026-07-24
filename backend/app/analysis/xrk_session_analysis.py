@@ -8,7 +8,13 @@ import numpy as np
 import pandas as pd
 
 from .gps_processing import clean_gps_points, resample_lap_by_distance
+from .corner_consensus import (
+    build_ai_coach_summary,
+    build_top3_consensus_benchmark,
+    estimate_achievable_improvement_range,
+)
 from .lap_analysis import analyze_laps
+from .lap_quality import build_lap_quality_summary, classify_lap_quality
 from .rpm_analysis import (
     compare_rpm_behavior_by_lap,
     detect_driver_actions,
@@ -21,7 +27,10 @@ from .sector_zone_analysis import (
     generate_auto_zones,
     generate_sector_boundaries,
 )
-from .telemetry_alignment import align_laps_by_distance
+from .telemetry_alignment import (
+    align_laps_by_distance,
+    align_multiple_laps_by_distance,
+)
 
 
 def analyze_xrk_session(
@@ -34,6 +43,7 @@ def analyze_xrk_session(
     sector_count: int = 3,
     sector_boundaries_m: list[float] | None = None,
     manual_zones: list[dict[str, Any]] | None = None,
+    lap_quality_config: dict[str, float] | None = None,
     max_comparison_points: int = 5_000,
 ) -> dict[str, Any]:
     """Run all supported analyses while preserving unavailable capabilities."""
@@ -44,11 +54,20 @@ def analyze_xrk_session(
     }
     if not timing:
         raise ValueError("No usable timed laps are available.")
-    fastest_lap = min(timing, key=lambda lap: float(timing[lap]["duration_s"]))
     available_laps = sorted(timing)
-    reference_lap = reference_lap if reference_lap in timing else fastest_lap
+    quality_rows = classify_lap_quality(timing, telemetry, lap_quality_config)
+    quality_summary = build_lap_quality_summary(
+        quality_rows, telemetry, lap_quality_config
+    )
+    eligible_laps = [
+        int(row["lap"]) for row in quality_summary["top_valid_laps"]
+    ]
+    if not eligible_laps:
+        raise ValueError("No laps passed the Lap Quality Gate.")
+    fastest_lap = eligible_laps[0]
+    reference_lap = reference_lap if reference_lap in eligible_laps else fastest_lap
     default_target = next(
-        (lap for lap in available_laps if lap != reference_lap),
+        (lap for lap in eligible_laps if lap != reference_lap),
         reference_lap,
     )
     target_lap = target_lap if target_lap in timing else default_target
@@ -58,11 +77,13 @@ def analyze_xrk_session(
         timing,
         reference_lap,
         target_lap,
+        quality_summary,
     )
     if not manifest.get("has_gps"):
         base["warnings"].append(
             "GPS is unavailable; track, distance alignment, sectors, and zones were skipped."
         )
+        base["report"] = generate_xrk_report(base)
         return base
 
     cleaned, gps_quality = clean_gps_points(telemetry)
@@ -74,16 +95,36 @@ def analyze_xrk_session(
         return base
     processed = calculate_track_curvature(cleaned)
     available_after_cleaning = sorted(int(value) for value in processed["lap"].unique())
-    if reference_lap not in available_after_cleaning:
-        reference_lap = min(
-            available_after_cleaning,
-            key=lambda lap: timing.get(lap, {}).get("duration_s", float("inf")),
+    quality_rows = classify_lap_quality(timing, processed, lap_quality_config)
+    quality_summary = build_lap_quality_summary(
+        quality_rows, processed, lap_quality_config
+    )
+    eligible_after_cleaning = [
+        int(row["lap"])
+        for row in quality_summary["top_valid_laps"]
+        if int(row["lap"]) in available_after_cleaning
+    ]
+    if not eligible_after_cleaning:
+        base["warnings"].append(
+            "No GPS-complete laps passed the Lap Quality Gate; distance comparison is unavailable."
         )
+        base["lap_quality"] = quality_summary
+        base["report"] = generate_xrk_report(base)
+        return base
+    if reference_lap not in eligible_after_cleaning:
+        reference_lap = eligible_after_cleaning[0]
     if target_lap not in available_after_cleaning:
         target_lap = next(
-            (lap for lap in available_after_cleaning if lap != reference_lap),
+            (lap for lap in eligible_after_cleaning if lap != reference_lap),
             reference_lap,
         )
+    base["reference_lap"] = reference_lap
+    base["target_lap"] = target_lap
+    base["fastest_lap"] = {
+        "lap": int(quality_summary["top_valid_laps"][0]["lap"]),
+        "lap_time": float(quality_summary["top_valid_laps"][0]["lap_time"]),
+    }
+    base["lap_quality"] = quality_summary
 
     lap_lengths = processed.groupby("lap")["distance_m"].max()
     lap_length_m = float(lap_lengths.median())
@@ -109,6 +150,26 @@ def analyze_xrk_session(
     if len(aligned) > max_comparison_points:
         indexes = np.linspace(0, len(aligned) - 1, max_comparison_points, dtype=int)
         aligned = aligned.iloc[np.unique(indexes)].reset_index(drop=True)
+    top_lap_numbers = [
+        int(row["lap"]) for row in quality_summary["top_valid_laps"]
+    ]
+    comparison_lap_numbers = list(top_lap_numbers)
+    consistent_lap = quality_summary.get("fastest_consistent_lap")
+    if (
+        consistent_lap
+        and int(consistent_lap["lap"]) not in comparison_lap_numbers
+    ):
+        comparison_lap_numbers.append(int(consistent_lap["lap"]))
+    top_aligned, top_resampled = align_multiple_laps_by_distance(
+        classified,
+        comparison_lap_numbers,
+        distance_step_m,
+    )
+    if len(top_aligned) > max_comparison_points:
+        indexes = np.linspace(
+            0, len(top_aligned) - 1, max_comparison_points, dtype=int
+        )
+        top_aligned = top_aligned.iloc[np.unique(indexes)].reset_index(drop=True)
 
     reference_trace = classified[classified["lap"] == reference_lap]
     reference_resampled = resample_lap_by_distance(
@@ -128,6 +189,32 @@ def analyze_xrk_session(
         zones,
         reference_lap,
         target_lap,
+    )
+    consensus = build_top3_consensus_benchmark(
+        {
+            lap: frame
+            for lap, frame in top_resampled.items()
+            if lap in top_lap_numbers
+        },
+        zones,
+        {
+            "lap_order": top_lap_numbers,
+            "lap_times": {
+                int(row["lap"]): float(row["lap_time"])
+                for row in quality_summary["top_valid_laps"]
+            },
+        },
+    )
+    achievable_range = estimate_achievable_improvement_range(
+        quality_summary["top_valid_laps"],
+        consensus["corners"],
+    )
+    coach_summary = build_ai_coach_summary(
+        quality_summary["top_valid_laps"],
+        consensus,
+        achievable_range,
+        direct_brake_available="brake"
+        in manifest.get("available_canonical_channels", []),
     )
     reference_events = [event for event in events if event["lap"] == reference_lap]
     target_events = [event for event in events if event["lap"] == target_lap]
@@ -156,6 +243,15 @@ def analyze_xrk_session(
                 "target": track_points(aligned, "target"),
             },
             "comparison": dataframe_records(aligned),
+            "top_laps_comparison": {
+                "laps": quality_summary["top_valid_laps"],
+                "fastest_consistent_lap": quality_summary[
+                    "fastest_consistent_lap"
+                ],
+                "aligned": dataframe_records(top_aligned),
+                "distance_step_m": distance_step_m,
+                "synthetic_curve_generated": False,
+            },
             "events": visible_events,
             "event_comparison": event_comparison,
             "action_analysis": {
@@ -173,7 +269,6 @@ def analyze_xrk_session(
                 ],
                 "lap_rows": lap_rows,
                 "sector_best": sector_analysis["sector_best"],
-                "theoretical_best": sector_analysis["theoretical_best_lap"],
                 **sector_result,
             },
             "zones": {
@@ -182,6 +277,9 @@ def analyze_xrk_session(
                 "comparisons": zone_comparisons,
             },
             "evidence_catalog": evidence_catalog(manifest),
+            "consensus_benchmark": consensus,
+            "achievable_improvement_range": achievable_range,
+            "ai_coach_summary": coach_summary,
             "video_sync": video_sync_payload(timing),
         }
     )
@@ -195,6 +293,7 @@ def basic_response(
     timing: dict[int, dict[str, Any]],
     reference_lap: int,
     target_lap: int,
+    quality_summary: dict[str, Any],
 ) -> dict[str, Any]:
     """Create a capability-aware response before optional GPS analysis."""
     lap_rows = [
@@ -231,11 +330,55 @@ def basic_response(
         "lap_rows": lap_rows,
         "track": None,
         "comparison": [],
+        "lap_quality": quality_summary,
+        "top_laps_comparison": {
+            "laps": quality_summary["top_valid_laps"],
+            "fastest_consistent_lap": quality_summary["fastest_consistent_lap"],
+            "aligned": [],
+            "distance_step_m": None,
+            "synthetic_curve_generated": False,
+        },
         "events": [],
         "event_comparison": [],
         "sectors": None,
         "zones": {"automatic": [], "active": [], "comparisons": []},
         "evidence_catalog": evidence_catalog(manifest),
+        "consensus_benchmark": {
+            "reference_policy": "real_completed_reference_eligible_laps_only",
+            "lap_order": [
+                int(row["lap"]) for row in quality_summary["top_valid_laps"]
+            ],
+            "lap_count": len(quality_summary["top_valid_laps"]),
+            "synthetic_curve_generated": False,
+            "corners": [],
+        },
+        "achievable_improvement_range": {
+            "minimum_improvement_s": 0.0,
+            "maximum_improvement_s": 0.0,
+            "confidence": "low",
+            "basis": [],
+            "source_laps": [
+                int(row["lap"]) for row in quality_summary["top_valid_laps"]
+            ],
+            "limitations": ["Distance-based corner evidence is unavailable."],
+        },
+        "ai_coach_summary": {
+            "reference_statement": (
+                "All benchmarks come from real, completed laps that passed the Lap Quality Gate."
+            ),
+            "top_valid_laps": quality_summary["top_valid_laps"],
+            "common_fast_patterns": [],
+            "fastest_lap_net_differences": [],
+            "fastest_lap_unique_features": [],
+            "emerging_improvements": [],
+            "rejected_apparent_improvements": [],
+            "training_priorities": [],
+            "stable_strengths": [],
+            "limitations": [
+                "No synthetic target lap or synthetic RPM curve is produced.",
+                "GPS is required for corner consensus and downstream validation.",
+            ],
+        },
         "video_sync": video_sync_payload(timing),
         "warnings": list(manifest.get("warnings", [])),
         "report": "",
@@ -389,8 +532,10 @@ def evidence_catalog(manifest: dict[str, Any]) -> dict[str, list[str]]:
 def generate_xrk_report(result: dict[str, Any]) -> str:
     """Generate a measured/calculated/inferred driver review."""
     fastest = result["fastest_lap"]
-    sectors = result.get("sectors") or {}
-    analysis = sectors.get("analysis") or {}
+    quality = result.get("lap_quality") or {}
+    top_laps = quality.get("top_valid_laps", [])
+    coach = result.get("ai_coach_summary") or {}
+    improvement = result.get("achievable_improvement_range") or {}
     zone_comparisons = result.get("zones", {}).get("comparisons", [])
     largest_zone = max(
         (
@@ -405,6 +550,7 @@ def generate_xrk_report(result: dict[str, Any]) -> str:
         "Measured",
         f"- {len(result['lap_rows'])} timed laps were read from the logger.",
         f"- The fastest logger lap is Lap {fastest['lap']} at {fastest['lap_time']:.3f}s.",
+        "- Every benchmark in this report is a real completed lap that passed the Lap Quality Gate.",
     ]
     if result["capabilities"]["rpm"]:
         lines.append("- RPM is available as a directly recorded channel.")
@@ -415,12 +561,24 @@ def generate_xrk_report(result: dict[str, Any]) -> str:
             "",
             "Calculated",
             f"- Reference Lap: {result['reference_lap']}; Selected Lap: {result['target_lap']}.",
+            (
+                "- Top valid laps: "
+                + ", ".join(
+                    f"Lap {row['lap']} ({row['lap_time']:.3f}s)"
+                    for row in top_laps
+                )
+                + "."
+                if top_laps
+                else "- No reference-eligible Top laps are available."
+            ),
         ]
     )
-    if analysis:
+    if improvement.get("maximum_improvement_s", 0) > 0:
         lines.append(
-            f"- The virtual-sector theoretical best is "
-            f"{analysis['theoretical_best_lap']:.3f}s."
+            "- Empirical achievable improvement range: "
+            f"{improvement['minimum_improvement_s']:.3f}–"
+            f"{improvement['maximum_improvement_s']:.3f}s "
+            f"({improvement['confidence']} confidence)."
         )
     if largest_zone:
         lines.append(
@@ -460,6 +618,36 @@ def generate_xrk_report(result: dict[str, Any]) -> str:
         )
     lines.append(
         "- Virtual sectors and Suggested Zones are calculated analysis aids, not official timing points."
+    )
+    priorities = coach.get("training_priorities", [])
+    if priorities:
+        lines.extend(["", "AI Coach Summary"])
+        for index, priority in enumerate(priorities[:3], start=1):
+            lines.append(
+                f"- Priority {index}, {priority['corner']}: {priority['what_to_test']}"
+            )
+    rejected = coach.get("rejected_apparent_improvements", [])
+    for item in rejected[:3]:
+        lines.append(
+            f"- Rejected {item['corner']}: local gain {item['local_gain_s']:.3f}s, "
+            f"downstream cost {item['downstream_cost_s']:.3f}s, "
+            f"net {item['net_gain_s']:+.3f}s."
+        )
+    unique_features = coach.get("fastest_lap_unique_features", [])
+    for item in unique_features[:3]:
+        lines.append(
+            f"- Fastest-lap-only {item['corner']}: "
+            + "; ".join(item["features"])
+            + ". This is not a stable training reference."
+        )
+    lines.extend(
+        [
+            "",
+            "Reference policy",
+            "- No stitched target lap or synthetic RPM trace is generated.",
+            "- The improvement range is empirical and conservative.",
+            "- Valid improvements are not guaranteed to coexist in the same lap.",
+        ]
     )
     return "\n".join(lines)
 

@@ -68,6 +68,56 @@ export type XrkTrackPoint = {
 
 export type XrkComparisonRow = Record<string, number | null>;
 
+export type XrkLapQualityRow = {
+  lap: number;
+  lap_time: number;
+  gap_to_fastest: number;
+  quality_status: string;
+  quality_score: number;
+  reasons: string[];
+  analysis_eligible: boolean;
+  consistency_score?: number;
+  behavior_anomaly_score?: number;
+};
+
+export type XrkConsensusCorner = {
+  corner_id: string;
+  corner: string;
+  entry_distance_m: number;
+  exit_distance_m: number;
+  downstream_end_distance_m: number;
+  source_laps: number[];
+  common_fast_pattern: string[];
+  fastest_lap_unique_features: string[];
+  repeatability_score: number;
+  occurrence_count: number;
+  supporting_laps: number[];
+  local_gain: number;
+  downstream_cost: number;
+  net_gain: number;
+  transferable_improvement: boolean;
+  evidence: {
+    features_by_lap: Array<Record<string, number | string | string[] | null>>;
+    channels: string[];
+    similarity_by_lap: Record<string, number>;
+    lap_times: Record<string, number | null>;
+    provenance: string;
+  };
+  confidence: "low" | "medium" | "high";
+};
+
+export type XrkTrainingPriority = {
+  corner: string;
+  why: string;
+  what_to_test: string;
+  training_drill: string;
+  success_criteria: string[];
+  stop_condition: string;
+  evidence: XrkConsensusCorner["evidence"];
+  confidence: "low" | "medium" | "high";
+  limitation: string | null;
+};
+
 export type XrkEvent = {
   lap: number;
   sector: number | null;
@@ -129,6 +179,25 @@ export type XrkAnalysis = {
     target: XrkTrackPoint[];
   };
   comparison: XrkComparisonRow[];
+  lap_quality: {
+    config: {
+      absolute_gap_threshold_s: number;
+      relative_gap_threshold_pct: number;
+    };
+    laps: XrkLapQualityRow[];
+    reference_eligible_count: number;
+    top_valid_laps: XrkLapQualityRow[];
+    fastest_consistent_lap: XrkLapQualityRow | null;
+    minimum_top_laps_met: boolean;
+    notice: string | null;
+  };
+  top_laps_comparison: {
+    laps: XrkLapQualityRow[];
+    fastest_consistent_lap: XrkLapQualityRow | null;
+    aligned: XrkComparisonRow[];
+    distance_step_m: number | null;
+    synthetic_curve_generated: false;
+  };
   events: XrkEvent[];
   event_comparison: Array<Record<string, unknown>>;
   sectors: null | {
@@ -138,7 +207,6 @@ export type XrkAnalysis = {
     boundaries_m: number[];
     lap_rows: CsvRow[];
     sector_best: Record<string, number>;
-    theoretical_best: number;
     warnings: string[];
   };
   zones: {
@@ -147,6 +215,60 @@ export type XrkAnalysis = {
     comparisons: XrkZoneComparison[];
   };
   evidence_catalog: Record<string, string[]>;
+  consensus_benchmark: {
+    reference_policy: "real_completed_reference_eligible_laps_only";
+    lap_order: number[];
+    lap_count: number;
+    synthetic_curve_generated: false;
+    corners: XrkConsensusCorner[];
+  };
+  achievable_improvement_range: {
+    minimum_improvement_s: number;
+    maximum_improvement_s: number;
+    confidence: "low" | "medium" | "high";
+    basis: string[];
+    source_laps: number[];
+    limitations: string[];
+  };
+  ai_coach_summary: {
+    reference_statement: string;
+    top_valid_laps: XrkLapQualityRow[];
+    common_fast_patterns: Array<Record<string, unknown>>;
+    fastest_lap_net_differences: Array<{
+      corner: string;
+      local_gain_s: number;
+      downstream_cost_s: number;
+      net_gain_s: number;
+      confidence: string;
+    }>;
+    fastest_lap_unique_features: Array<{
+      corner: string;
+      features: string[];
+      transferable_improvement: false;
+      confidence: string;
+      reason: string;
+    }>;
+    emerging_improvements: Array<{
+      corner: string;
+      reason: string;
+      supporting_laps: number[];
+      confidence: string;
+    }>;
+    rejected_apparent_improvements: Array<{
+      corner: string;
+      local_gain_s: number;
+      downstream_cost_s: number;
+      net_gain_s: number;
+      reason: string;
+    }>;
+    training_priorities: XrkTrainingPriority[];
+    stable_strengths: Array<{
+      corner: string;
+      finding: string;
+      evidence: Array<Record<string, unknown>>;
+    }>;
+    limitations: string[];
+  };
   video_sync: {
     video_time_offset_ms: number;
     lap_video_ranges: Array<{
@@ -168,6 +290,8 @@ export type XrkAnalyzeOptions = {
   distance_step_m?: number;
   sector_count?: number;
   sector_boundaries_m?: number[] | null;
+  lap_quality_absolute_gap_s?: number;
+  lap_quality_relative_gap_pct?: number;
   manual_zones?: Array<{
     id?: string;
     name?: string;

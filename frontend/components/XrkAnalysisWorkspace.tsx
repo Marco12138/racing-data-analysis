@@ -5,12 +5,14 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
+  FileText,
   Flag,
   Gauge,
   Map,
+  ShieldCheck,
   SlidersHorizontal,
+  Target,
   Video,
-  Zap,
 } from "lucide-react";
 import {
   CartesianGrid,
@@ -32,12 +34,14 @@ import type {
 
 const tabs = [
   ["overview", "Overview", Gauge],
+  ["quality", "Lap Quality", ShieldCheck],
   ["track", "Track Map", Map],
   ["comparison", "Lap Comparison", BarChart3],
-  ["actions", "RPM & Driver Actions", Activity],
+  ["actions", "Driver Benchmark", Activity],
   ["sectors", "Sector / Zones", Flag],
   ["video", "Video Sync", Video],
-  ["report", "Report", Zap],
+  ["coach", "AI Coach Summary", Target],
+  ["report", "Report", FileText],
 ] as const;
 
 type TabId = (typeof tabs)[number][0];
@@ -147,6 +151,10 @@ export function XrkAnalysisWorkspace({
         <Overview analysis={analysis} selectedEvent={selectedEvent} />
       )}
 
+      {activeTab === "quality" && (
+        <LapQualityPanel analysis={analysis} analyzing={analyzing} onAnalyze={onAnalyze} />
+      )}
+
       {activeTab === "track" && (
         analysis.track ? (
           <TrackMapPanel
@@ -212,6 +220,8 @@ export function XrkAnalysisWorkspace({
         />
       )}
 
+      {activeTab === "coach" && <CoachSummaryPanel analysis={analysis} onCursor={selectDistance} />}
+
       {activeTab === "report" && <ReportPanel analysis={analysis} />}
     </section>
   );
@@ -225,10 +235,10 @@ function Overview({
   selectedEvent?: XrkEvent;
 }) {
   const metrics = [
-    ["Reference lap", `Lap ${analysis.reference_lap}`],
+    ["Fastest valid lap", analysis.lap_quality.top_valid_laps[0] ? `Lap ${analysis.lap_quality.top_valid_laps[0].lap}` : "Unavailable"],
     ["Target lap", `Lap ${analysis.target_lap}`],
+    ["Reference-eligible", String(analysis.lap_quality.reference_eligible_count)],
     ["Track length", analysis.track ? `${analysis.track.lap_length_m.toFixed(1)} m` : "Unavailable"],
-    ["Events", String(analysis.events.length)],
   ];
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
@@ -245,11 +255,123 @@ function Overview({
           Virtual sectors and suggested zones are calculated from GPS distance. They are not
           official timing splits or named circuit corners.
         </p>
+        <p className="mt-3 text-sm leading-6 text-slate-300">
+          Every comparison reference is a real completed lap that passed the quality gate.
+          The system does not construct a stitched target lap or RPM trace.
+        </p>
       </Panel>
       <Panel title="Evidence at cursor" subtitle="Measured, calculated and inferred">
         {selectedEvent ? <EventEvidence event={selectedEvent} /> : (
           <p className="text-sm text-slate-400">Select a track point or event to inspect its evidence.</p>
         )}
+      </Panel>
+    </div>
+  );
+}
+
+function LapQualityPanel({
+  analysis,
+  analyzing,
+  onAnalyze,
+}: {
+  analysis: XrkAnalysis;
+  analyzing: boolean;
+  onAnalyze: (options: Partial<XrkAnalyzeOptions>) => Promise<void>;
+}) {
+  const top = new Set(analysis.lap_quality.top_valid_laps.map((lap) => lap.lap));
+  const [absoluteGap, setAbsoluteGap] = useState(
+    analysis.lap_quality.config.absolute_gap_threshold_s
+  );
+  const [relativeGap, setRelativeGap] = useState(
+    analysis.lap_quality.config.relative_gap_threshold_pct
+  );
+  return (
+    <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
+      <Panel title="Lap Quality Gate" subtitle="Only eligible real laps can enter the reference Top 3">
+        <div className="thin-scrollbar overflow-auto">
+          <table className="w-full min-w-[720px] text-left text-sm">
+            <thead className="text-xs uppercase text-slate-500">
+              <tr>
+                <th className="py-2">Lap</th>
+                <th>Lap time</th>
+                <th>Gap</th>
+                <th>Status</th>
+                <th>Score</th>
+                <th>AI reference</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {analysis.lap_quality.laps.map((lap) => (
+                <tr key={lap.lap} className="border-t border-slate-800 text-slate-300">
+                  <td className="py-2 font-semibold text-white">Lap {lap.lap}</td>
+                  <td>{lap.lap_time.toFixed(3)}s</td>
+                  <td>{lap.gap_to_fastest >= 0 ? "+" : ""}{lap.gap_to_fastest.toFixed(3)}s</td>
+                  <td><span className={qualityClass(lap.quality_status)}>{humanEvent(lap.quality_status)}</span></td>
+                  <td>{Math.round(lap.quality_score * 100)}%</td>
+                  <td>{top.has(lap.lap) ? "Top reference" : lap.analysis_eligible ? "Eligible" : "No"}</td>
+                  <td className="max-w-[280px] text-xs text-slate-500">{lap.reasons.join(" ") || "Passed timing and telemetry checks."}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+      <Panel title="Reference policy" subtitle="Real completed laps only">
+        <dl className="space-y-3 text-sm">
+          <QualityFact label="Absolute gap" value={`${analysis.lap_quality.config.absolute_gap_threshold_s.toFixed(3)}s`} />
+          <QualityFact label="Relative gap" value={`${analysis.lap_quality.config.relative_gap_threshold_pct.toFixed(1)}%`} />
+          <QualityFact label="Available Top laps" value={String(analysis.lap_quality.top_valid_laps.length)} />
+          <QualityFact
+            label="Fastest consistent"
+            value={analysis.lap_quality.fastest_consistent_lap
+              ? `Lap ${analysis.lap_quality.fastest_consistent_lap.lap}`
+              : "Unavailable"}
+          />
+        </dl>
+        {analysis.lap_quality.notice && (
+          <p className="mt-4 rounded-md border border-amber-400/25 bg-amber-400/8 p-3 text-xs leading-5 text-amber-100">
+            {analysis.lap_quality.notice}
+          </p>
+        )}
+        <div className="mt-5 border-t border-slate-800 pt-4">
+          <p className="text-xs font-semibold uppercase text-slate-500">Coach thresholds</p>
+          <label className="mt-3 block text-xs text-slate-400">
+            Absolute gap (seconds)
+            <input
+              type="number"
+              min={0.05}
+              max={5}
+              step={0.05}
+              value={absoluteGap}
+              onChange={(event) => setAbsoluteGap(Number(event.target.value))}
+              className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white"
+            />
+          </label>
+          <label className="mt-3 block text-xs text-slate-400">
+            Relative gap (%)
+            <input
+              type="number"
+              min={0.1}
+              max={10}
+              step={0.1}
+              value={relativeGap}
+              onChange={(event) => setRelativeGap(Number(event.target.value))}
+              className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white"
+            />
+          </label>
+          <button
+            type="button"
+            disabled={analyzing || !Number.isFinite(absoluteGap) || !Number.isFinite(relativeGap)}
+            onClick={() => void onAnalyze({
+              lap_quality_absolute_gap_s: absoluteGap,
+              lap_quality_relative_gap_pct: relativeGap,
+            })}
+            className="mt-4 w-full rounded-md bg-[#f6c945] px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-50"
+          >
+            Apply quality gate
+          </button>
+        </div>
       </Panel>
     </div>
   );
@@ -273,7 +395,7 @@ function TrackMapPanel({
       action={
         <div className="flex flex-wrap gap-2">
           <Select value={mode} onChange={(value) => setMode(value as MapMode)} options={[
-            ["reference", "Best"],
+            ["reference", "Reference"],
             ["target", "Selected"],
             ["overlay", "Overlay"],
           ]} />
@@ -296,7 +418,7 @@ function TrackMapPanel({
         onSelect={onSelect}
       />
       <div className="mt-4 flex flex-wrap gap-4 text-xs text-slate-400">
-        <span>Best Lap {analysis.reference_lap}</span>
+        <span>Reference Lap {analysis.reference_lap}</span>
         <span>Selected Lap {analysis.target_lap}</span>
         <span>GPS clean retention: {formatPercent(analysis, "retained_ratio")}</span>
       </div>
@@ -317,17 +439,58 @@ function ComparisonPanel({
   onCursor: (value: number) => void;
   onAnalyze: (options: Partial<XrkAnalyzeOptions>) => Promise<void>;
 }) {
+  const topLaps = analysis.top_laps_comparison.laps;
+  const topColors = ["#f6c945", "#35d6d0", "#ff5964"];
+  const referenceOptions = analysis.lap_quality.laps
+    .filter((lap) => lap.analysis_eligible)
+    .map((lap) => lap.lap);
+  const topRpmLines = topLaps.map((lap, index) => (
+    [
+      `lap_${lap.lap}_rpm`,
+      `${index + 1}. Lap ${lap.lap} · ${lap.lap_time.toFixed(3)}s`,
+      topColors[index % topColors.length],
+    ] as [string, string, string]
+  ));
+  const consistentLap = analysis.top_laps_comparison.fastest_consistent_lap;
+  if (consistentLap && !topLaps.some((lap) => lap.lap === consistentLap.lap)) {
+    topRpmLines.push([
+      `lap_${consistentLap.lap}_rpm`,
+      `Consistent · Lap ${consistentLap.lap} · ${consistentLap.lap_time.toFixed(3)}s`,
+      "#66e38f",
+    ]);
+  }
   return (
     <>
       <Panel
-        title="Distance-aligned lap comparison"
-        subtitle="Interpolated on track distance, never matched by array index"
+        title="Top valid laps · RPM consensus"
+        subtitle="Fastest, second and third fastest quality-gated real laps aligned by distance"
+      >
+        {analysis.top_laps_comparison.aligned.length && topRpmLines.length ? (
+          <TelemetryChart
+            data={analysis.top_laps_comparison.aligned}
+            lines={topRpmLines}
+            cursorDistance={cursorDistance}
+            onCursor={onCursor}
+            height={320}
+          />
+        ) : (
+          <p className="text-sm text-slate-400">No distance-aligned eligible lap overlay is available.</p>
+        )}
+        <p className="mt-3 text-xs leading-5 text-slate-500">
+          {analysis.lap_quality.minimum_top_laps_met
+            ? "All three traces are real completed laps. No RPM segments are stitched or averaged into a target curve."
+            : analysis.lap_quality.notice}
+        </p>
+      </Panel>
+      <Panel
+        title="Selected real-lap comparison"
+        subtitle="Reference must pass the quality gate; the selected lap may be used for context"
         action={
           <div className="flex flex-wrap gap-2">
             <LapPicker
               label="Reference"
               value={analysis.reference_lap}
-              options={lapOptions}
+              options={referenceOptions}
               onChange={(reference_lap) => onAnalyze({ reference_lap })}
             />
             <LapPicker
@@ -387,7 +550,7 @@ function ActionsPanel({
   return (
     <>
       <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
-        <Panel title="RPM & Longitudinal G" subtitle="Driver-action evidence by distance">
+        <Panel title="Driver Benchmark & Corner Dynamics" subtitle="RPM with longitudinal G as supporting evidence">
           <TelemetryChart
             data={analysis.comparison}
             lines={[
@@ -645,6 +808,132 @@ function VideoSyncPanel({
   );
 }
 
+function CoachSummaryPanel({
+  analysis,
+  onCursor,
+}: {
+  analysis: XrkAnalysis;
+  onCursor: (distance: number) => void;
+}) {
+  const summary = analysis.ai_coach_summary;
+  const improvement = analysis.achievable_improvement_range;
+  const rangeAvailable = improvement.maximum_improvement_s > 0;
+  return (
+    <div className="space-y-5">
+      <Panel title="AI Driver Improvement Summary" subtitle="Structured evidence from quality-gated real laps">
+        <div className="grid gap-4 sm:grid-cols-3">
+          <QualityFact
+            label="Primary focus"
+            value={summary.training_priorities[0]?.corner ?? "No validated focus"}
+          />
+          <QualityFact
+            label="Achievable range"
+            value={rangeAvailable
+              ? `${improvement.minimum_improvement_s.toFixed(3)}–${improvement.maximum_improvement_s.toFixed(3)}s`
+              : "Insufficient evidence"}
+          />
+          <QualityFact label="Confidence" value={humanEvent(improvement.confidence)} />
+        </div>
+        <p className="mt-4 text-sm leading-6 text-slate-300">{summary.reference_statement}</p>
+        <p className="mt-2 text-xs leading-5 text-slate-500">
+          This range is empirical and conservative. It is not a target lap time, and the
+          listed changes are not assumed to coexist in one lap.
+        </p>
+      </Panel>
+
+      <Panel title="Next-session priorities" subtitle="At most three transferable, downstream-safe patterns">
+        {summary.training_priorities.length ? (
+          <div>
+            {summary.training_priorities.map((priority, index) => {
+              const corner = analysis.consensus_benchmark.corners.find(
+                (item) => item.corner === priority.corner
+              );
+              return (
+                <section key={priority.corner} className="border-t border-slate-800 py-5 first:border-t-0 first:pt-0 last:pb-0">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase text-[#35d6d0]">Priority {index + 1}</p>
+                      <h3 className="mt-1 text-lg font-semibold text-white">{priority.corner}</h3>
+                    </div>
+                    {corner && (
+                      <button
+                        type="button"
+                        onClick={() => onCursor((corner.entry_distance_m + corner.exit_distance_m) / 2)}
+                        className="rounded-md border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:border-[#35d6d0]"
+                      >
+                        Show on track
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-3 text-sm leading-6 text-slate-300">{priority.why}</p>
+                  <CoachField label="What to test" value={priority.what_to_test} />
+                  <CoachField label="Training drill" value={priority.training_drill} />
+                  <CoachField label="Stop condition" value={priority.stop_condition} />
+                  <div className="mt-3">
+                    <p className="text-xs font-semibold uppercase text-slate-500">Success criteria</p>
+                    <ul className="mt-2 space-y-1 text-sm leading-6 text-slate-300">
+                      {priority.success_criteria.map((criterion) => <li key={criterion}>- {criterion}</li>)}
+                    </ul>
+                  </div>
+                  <p className="mt-3 text-xs text-slate-500">
+                    Evidence: {priority.evidence.channels.join(", ")} · Confidence: {priority.confidence}
+                    {priority.limitation ? ` · ${priority.limitation}` : ""}
+                  </p>
+                </section>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm leading-6 text-slate-400">
+            No corner pattern currently meets the repeatability, net-gain and downstream-cost
+            requirements. Review the emerging evidence without treating it as a training target.
+          </p>
+        )}
+      </Panel>
+
+      <div className="grid gap-5 xl:grid-cols-2">
+        <Panel title="Stable strengths" subtitle="Repeatable behavior that should not be changed casually">
+          {summary.stable_strengths.length ? summary.stable_strengths.map((strength) => (
+            <div key={`${strength.corner}-${strength.finding}`} className="border-t border-slate-800 py-3 first:border-t-0 first:pt-0">
+              <strong className="text-sm text-white">{strength.corner}</strong>
+              <p className="mt-1 text-sm leading-6 text-slate-400">{strength.finding}</p>
+            </div>
+          )) : <p className="text-sm text-slate-400">No stable strength passed the current repeatability threshold.</p>}
+        </Panel>
+        <Panel title="Rejected apparent improvements" subtitle="Local gains that did not survive downstream validation">
+          {summary.rejected_apparent_improvements.length ? summary.rejected_apparent_improvements.map((item) => (
+            <div key={item.corner} className="border-t border-slate-800 py-3 first:border-t-0 first:pt-0">
+              <strong className="text-sm text-white">{item.corner}</strong>
+              <p className="mt-1 text-sm leading-6 text-slate-400">
+                Local gain {item.local_gain_s.toFixed(3)}s · downstream cost {item.downstream_cost_s.toFixed(3)}s · net {item.net_gain_s >= 0 ? "+" : ""}{item.net_gain_s.toFixed(3)}s.
+              </p>
+              <p className="mt-1 text-xs text-slate-500">{item.reason}</p>
+            </div>
+          )) : <p className="text-sm text-slate-400">No downstream-compromised local gain was found in the current Top laps.</p>}
+        </Panel>
+      </div>
+
+      {(summary.fastest_lap_unique_features.length > 0 || summary.emerging_improvements.length > 0) && (
+        <Panel title="Observed but not yet transferable" subtitle="Real-lap differences that need repetition or coach confirmation">
+          {[...summary.fastest_lap_unique_features, ...summary.emerging_improvements].map((item) => (
+            <div key={`${item.corner}-${item.reason}`} className="border-t border-slate-800 py-3 first:border-t-0 first:pt-0">
+              <strong className="text-sm text-white">{item.corner}</strong>
+              {"features" in item && (
+                <p className="mt-1 text-sm leading-6 text-slate-300">{item.features.join("; ")}</p>
+              )}
+              <p className="mt-1 text-xs leading-5 text-slate-500">{item.reason} Confidence: {item.confidence}.</p>
+            </div>
+          ))}
+        </Panel>
+      )}
+
+      <div className="rounded-md border border-amber-400/25 bg-amber-400/8 px-4 py-3 text-xs leading-5 text-amber-100">
+        {summary.limitations.join(" ")}
+      </div>
+    </div>
+  );
+}
+
 function ReportPanel({ analysis }: { analysis: XrkAnalysis }) {
   return (
     <Panel title="Evidence-aware driver review" subtitle="Measured, calculated and inferred are kept separate">
@@ -659,6 +948,24 @@ function ReportPanel({ analysis }: { analysis: XrkAnalysis }) {
         </div>
       )}
     </Panel>
+  );
+}
+
+function QualityFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[11px] uppercase text-slate-500">{label}</p>
+      <p className="mt-1 text-base font-semibold text-white">{value}</p>
+    </div>
+  );
+}
+
+function CoachField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="mt-3">
+      <p className="text-xs font-semibold uppercase text-slate-500">{label}</p>
+      <p className="mt-1 text-sm leading-6 text-slate-300">{value}</p>
+    </div>
   );
 }
 
@@ -915,6 +1222,15 @@ function confidenceClass(confidence: string) {
         ? "bg-amber-400/15 text-amber-100"
         : "bg-slate-700 text-slate-300"
   }`;
+}
+
+function qualityClass(status: string) {
+  const color = status === "REFERENCE_ELIGIBLE"
+    ? "bg-emerald-400/15 text-emerald-200"
+    : status === "CONTEXT_ONLY"
+      ? "bg-slate-700 text-slate-300"
+      : "bg-amber-400/15 text-amber-100";
+  return `rounded px-2 py-1 text-[10px] uppercase ${color}`;
 }
 
 function numberCell(value: unknown) {

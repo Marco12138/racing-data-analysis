@@ -9,8 +9,6 @@ def lap_result() -> dict:
     return {
         "total_laps": 2,
         "fastest_lap": {"lap": 2, "lap_time": 41.2},
-        "theoretical_best_lap": 41.0,
-        "potential_gain": 0.2,
         "main_loss_sector": "sector_2",
     }
 
@@ -38,6 +36,8 @@ def test_report_does_not_invent_brake_or_throttle_findings() -> None:
     assert "corner exit throttle application" not in report
     assert "steering trace" in report
     assert "RPM trace" in report
+    assert "synthetic target lap" in report
+    assert "theoretical" not in report.lower()
 
 
 def test_report_adds_recommendations_only_for_recorded_inputs() -> None:
@@ -52,4 +52,3 @@ def test_report_adds_recommendations_only_for_recorded_inputs() -> None:
     assert "braking point stability" in report
     assert "corner exit throttle application" in report
     assert "flagged 0 possible understeer" in report
-

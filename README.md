@@ -9,7 +9,8 @@ session、上传 CSV、查看图表和报告，并在浏览器中读取视频信
 - 公开落地页与显式 `Try Demo` 流程，无数据也能体验完整 Dashboard。
 - 在浏览器中分析 lap/sector 和 telemetry CSV，不依赖 `localhost`。
 - 通过 FastAPI 两阶段导入 AiM XRK/XRZ，检查真实通道后再运行分析。
-- 绘制真实 GPS 赛道轨迹，将最佳圈与目标圈按距离插值对齐。
+- 使用 Lap Quality Gate 筛选真实有效圈，并将前三快有效圈按距离插值对齐。
+- 逐弯检查局部收益、下游代价、净收益和重复性，再给出保守训练重点。
 - 基于 RPM、GPS speed、纵向 G 和曲率输出带证据与置信度的保守行为事件。
 - 上传视频后显示文件信息、时长、分辨率和第一帧，文件不会离开浏览器。
 - 从本机白名单目录发现 MP4、MOV 和 ZIP。
@@ -124,7 +125,8 @@ pnpm run dev
 - `POST /api/v1/analysis`：上传圈速和可选遥测 CSV。
 - `POST /api/v1/imports/aim`：临时解析 AiM XRK/XRZ 并返回标准化 session。
 - `POST /api/v1/xrk/inspect`：读取圈段、metadata 和所有真实通道，返回 30 分钟令牌。
-- `POST /api/v1/xrk/analyze`：复用令牌执行距离对齐、sector、zone 和行为分析。
+- `POST /api/v1/xrk/analyze`：复用令牌执行圈质量门控、真实 Top 3
+  距离对齐、sector、zone、行为分析和教练总结。
 - `DELETE /api/v1/xrk/inspections/{inspection_id}`：主动删除标准化临时数据。
 - `GET /api/video/library`：列出允许访问的本机素材。
 - `POST /api/video/jobs`：创建分析任务。
@@ -235,6 +237,13 @@ FastAPI 在随机临时
 不使用二进制字符串搜索。原始文件在解析完成、失败、超时或请求取消后立即
 删除。标准化 Parquet 与 manifest 使用不可猜测令牌保留 30 分钟，固定到期，
 用户也可主动删除。默认上传上限 50 MB、解析超时 60 秒。
+
+XRK 分析不会把不同圈的最快 sector 或局部 RPM 片段拼成目标圈。默认参考为
+最快有效圈，第二、第三参考也只从 `REFERENCE_ELIGIBLE` 中选择；不足三圈时
+按实际数量展示，不会用低质量圈补足。页面可调整绝对圈速差和相对圈速差门槛。
+逐弯提升只有在真实有效圈中重复、净收益为正且没有明显下游代价时才进入训练
+建议。输出的是经验性保守区间，不生成虚构目标圈速，也不保证不同改进能在
+同一圈同时实现。
 
 `libxrk` 使用 MIT 许可证，并提供 macOS、Windows 与 manylinux wheel。
 公开 Linux 容器使用该 adapter。AiM 官方 XRK DLL 仅作为 Windows 本地转换
