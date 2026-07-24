@@ -8,7 +8,9 @@ session、上传 CSV、查看图表和报告，并在浏览器中读取视频信
 
 - 公开落地页与显式 `Try Demo` 流程，无数据也能体验完整 Dashboard。
 - 在浏览器中分析 lap/sector 和 telemetry CSV，不依赖 `localhost`。
-- 通过 FastAPI 临时导入 AiM XRK/XRZ，解析完成后立即删除服务器副本。
+- 通过 FastAPI 两阶段导入 AiM XRK/XRZ，检查真实通道后再运行分析。
+- 绘制真实 GPS 赛道轨迹，将最佳圈与目标圈按距离插值对齐。
+- 基于 RPM、GPS speed、纵向 G 和曲率输出带证据与置信度的保守行为事件。
 - 上传视频后显示文件信息、时长、分辨率和第一帧，文件不会离开浏览器。
 - 从本机白名单目录发现 MP4、MOV 和 ZIP。
 - 安全解压 ZIP 到独立缓存，原文件保持不变。
@@ -26,12 +28,12 @@ racing-ai-platform/
 ├── app/                         # Next/Sites 页面入口与元数据
 ├── frontend/
 │   ├── components/              # 仪表盘与视频工作区
-│   └── lib/                     # CSV 分析和本地视频 API 客户端
+│   └── lib/                     # CSV、视频和 XRK API 客户端
 ├── backend/
 │   ├── app/
-│   │   ├── api/                 # 视频 API 路由
-│   │   ├── analysis/            # 圈速、遥测、视频分析
-│   │   ├── importers/           # 本机 XRK 等格式转换
+│   │   ├── api/                 # 视频、CSV 和 XRK API 路由
+│   │   ├── analysis/            # 圈速、GPS、距离对齐、RPM、视频分析
+│   │   ├── importers/           # XRK adapters 与短期 inspection 缓存
 │   │   ├── models/              # 请求模型
 │   │   └── utils/               # SQLite、视频库和安全解压
 │   └── tests/
@@ -120,6 +122,9 @@ pnpm run dev
 - `GET /api/v1/system/health/ready`：依赖就绪检查。
 - `POST /api/v1/analysis`：上传圈速和可选遥测 CSV。
 - `POST /api/v1/imports/aim`：临时解析 AiM XRK/XRZ 并返回标准化 session。
+- `POST /api/v1/xrk/inspect`：读取圈段、metadata 和所有真实通道，返回 30 分钟令牌。
+- `POST /api/v1/xrk/analyze`：复用令牌执行距离对齐、sector、zone 和行为分析。
+- `DELETE /api/v1/xrk/inspections/{inspection_id}`：主动删除标准化临时数据。
 - `GET /api/video/library`：列出允许访问的本机素材。
 - `POST /api/video/jobs`：创建分析任务。
 - `GET /api/video/jobs/{job_id}`：读取进度、元数据、关键帧和标记。
@@ -179,6 +184,9 @@ docker compose up --build
    `CORS_ORIGINS=https://<frontend-domain>` 和平台对应的
    `ALLOWED_HOSTS`。Railway 部署时需同时加入
    `healthcheck.railway.app`，否则 Trusted Host 会拒绝平台健康检查。
+   XRK Demo 还需设置 `XRK_INSPECTION_TTL_SECONDS=1800`、
+   `XRK_INSPECTION_CACHE_DIR=/tmp/racing-xrk-inspections` 和
+   `WEB_CONCURRENCY=1`。
 4. 将健康检查路径设置为 `/api/v1/health`；成功响应为
    `{"status":"ok"}`。
 
@@ -203,9 +211,16 @@ time,lap,distance,speed,throttle,brake,steering_angle,rpm,gear,lateral_g,longitu
 
 ## AiM XRK/XRZ 导入
 
-网站的 `AiM Session File` 输入可直接上传 `.xrk` 或 `.xrz`。FastAPI
-在随机临时目录中用独立进程解析文件，返回结果后删除原文件和所有中间产物。
-默认上限为 50 MB、超时 60 秒。
+网站的 `Import XRK / XRZ (Beta)` 输入可直接上传 `.xrk` 或 `.xrz`。
+流程为“选择文件 → Inspect channels → Run Analysis”。FastAPI 在随机临时
+目录和隔离子进程中使用 `libxrk==0.12.0` 的真实 PyArrow 时间序列解析；
+不使用二进制字符串搜索。原始文件在解析完成、失败、超时或请求取消后立即
+删除。标准化 Parquet 与 manifest 使用不可猜测令牌保留 30 分钟，固定到期，
+用户也可主动删除。默认上传上限 50 MB、解析超时 60 秒。
+
+`libxrk` 使用 MIT 许可证，并提供 macOS、Windows 与 manylinux wheel。
+公开 Linux 容器使用该 adapter。AiM 官方 XRK DLL 仅作为 Windows 本地转换
+方案，不打包进 Railway Docker 镜像。
 
 需要离线转换或不希望上传素材时，也可以安装解析依赖：
 
@@ -225,10 +240,15 @@ python scripts/import_xrk.py "/absolute/path/session.xrk"
 - `telemetry.csv`：平台可直接读取的 GPS、速度、RPM、转向和 G 值；
 - `extraction_report.json`：原文件校验值、圈过滤、通道单位和数据限制。
 
-当日志没有官方 sector 时，虚拟 sector 按有效圈中位赛道距离的 1/3、2/3
-划分，网站会明确标记为非官方计时点。
-缺失通道保持不可用，不估算油门、刹车或档位。原始 XRK 和转换结果均保留
-在本机并被 Git 忽略。
+当日志没有官方 sector 时，默认按有效圈中位赛道距离生成三个等距 virtual
+sector，也可在轨迹上设置 2–6 个 sector。网站会明确标记为非官方计时点。
+最佳圈和目标圈在共同赛道距离上默认每 1m 插值，不按数组索引比较。
+
+缺失通道保持 unavailable，不估算油门、刹车或档位。只有直接 brake 通道
+才能输出 `BRAKING_CONFIRMED`；否则必须同时满足 RPM 下降、速度减速、负纵向
+G 和弯前曲率证据，才输出最高 medium confidence 的
+`BRAKING_LIKELY`。报告分别列出 Measured、Calculated 和 Inferred 结果。
+真实 `.xrk`、`.xrz` 已从 Git 和 Docker build context 排除。
 
 ## 测试
 
@@ -240,4 +260,7 @@ pnpm run build:vercel
 
 ## 边界与 Roadmap
 
-当前不做自动分圈、视频计算机视觉驾驶诊断、自动视频切割或云端大文件上传。生产化下一步优先完成 PostgreSQL repository、对象存储直传、用户身份和独立任务 worker；分析功能仍优先加入对应圈速 CSV 与人工圈段的关联，再加入 Race Studio 3 遥测按距离对齐。
+当前不判断转向不足/过度，不推断精确油门或制动力度，也不将 Suggested Zone
+或 virtual sector 描述为官方赛道数据。公开 Demo 保持单 Railway worker；
+横向扩容前必须把临时令牌数据迁移到共享对象存储。商业化下一步优先完成
+账户、对象存储直传、PostgreSQL session repository 和独立任务队列。

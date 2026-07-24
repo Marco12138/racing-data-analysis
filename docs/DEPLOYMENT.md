@@ -91,12 +91,22 @@ XRK_PARSE_TIMEOUT_SECONDS=60
 XRK_MAX_CONCURRENT_IMPORTS=2
 XRK_RATE_LIMIT_PER_HOUR=10
 XRK_MAX_RESPONSE_ROWS=30000
+XRK_INSPECTION_TTL_SECONDS=1800
+XRK_INSPECTION_CACHE_DIR=/tmp/racing-xrk-inspections
+XRK_DEFAULT_DISTANCE_STEP_M=1.0
+XRK_MAX_COMPARISON_POINTS=5000
 ```
 
 This cloud-mode container is suitable for publishing the frontend and CSV
-analysis API. XRK/XRZ files are parsed in an isolated subprocess and deleted
-with their temporary directory after every request. Cloud mode deliberately
+analysis API. XRK/XRZ files are parsed in an isolated subprocess. The raw file
+is deleted immediately; normalized Parquet and its manifest use an opaque token
+with a fixed 30-minute expiry so users can change laps, sectors, or zones
+without uploading again. Cloud mode deliberately
 disables local video discovery and is **not a multi-user video service**.
+
+Keep `WEB_CONCURRENCY=1` while inspection artifacts are on the container's
+local `/tmp` filesystem. Before horizontal scaling, move these artifacts to
+shared object storage and retain the same opaque-token contract.
 
 Railway sends deployment health checks with `healthcheck.railway.app` as the
 Host header. Keep that hostname in `ALLOWED_HOSTS` so Trusted Host validation

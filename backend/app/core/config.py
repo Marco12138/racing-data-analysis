@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     xrk_max_concurrent_imports: int = Field(default=2, ge=1, le=8)
     xrk_rate_limit_per_hour: int = Field(default=10, ge=1, le=1000)
     xrk_max_response_rows: int = Field(default=30_000, ge=1000, le=250_000)
+    xrk_inspection_ttl_seconds: int = Field(default=30 * 60, ge=60, le=24 * 60 * 60)
+    xrk_inspection_cache_dir: str = "/tmp/racing-xrk-inspections"
+    xrk_default_distance_step_m: float = Field(default=1.0, ge=0.25, le=10.0)
+    xrk_max_comparison_points: int = Field(default=5_000, ge=100, le=50_000)
 
     @property
     def cors_origin_list(self) -> list[str]:

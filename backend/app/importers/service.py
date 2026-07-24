@@ -89,6 +89,36 @@ async def run_xrk_conversion(
     timeout_seconds: int,
 ) -> None:
     """Parse an untrusted logger file in a separate Python process."""
+    await run_xrk_worker(
+        source,
+        output_dir,
+        timeout_seconds,
+        mode="convert",
+    )
+
+
+async def run_xrk_inspection(
+    source: Path,
+    output_dir: Path,
+    timeout_seconds: int,
+) -> None:
+    """Inspect and normalize an untrusted logger file in a subprocess."""
+    await run_xrk_worker(
+        source,
+        output_dir,
+        timeout_seconds,
+        mode="inspect",
+    )
+
+
+async def run_xrk_worker(
+    source: Path,
+    output_dir: Path,
+    timeout_seconds: int,
+    *,
+    mode: str,
+) -> None:
+    """Run one XRK worker mode with timeout and cancellation cleanup."""
     backend_root = Path(__file__).resolve().parents[2]
     environment = os.environ.copy()
     existing_pythonpath = environment.get("PYTHONPATH", "")
@@ -101,6 +131,7 @@ async def run_xrk_conversion(
         "app.importers.worker",
         str(source),
         str(output_dir),
+        mode,
         cwd=str(backend_root),
         env=environment,
         stdout=asyncio.subprocess.PIPE,
@@ -118,6 +149,10 @@ async def run_xrk_conversion(
             f"XRK parsing exceeded the {timeout_seconds} second limit.",
             status_code=504,
         ) from exc
+    except asyncio.CancelledError:
+        process.kill()
+        await process.wait()
+        raise
 
     if process.returncode == 0:
         return
@@ -125,7 +160,11 @@ async def run_xrk_conversion(
     message = stderr.decode("utf-8", errors="replace").strip()
     if "XRK support is not installed" in message:
         raise AimImportError("XRK parser is unavailable on this server.", status_code=503)
-    if "missing required GPS channels" in message or "No complete timed laps" in message:
+    if (
+        "missing required GPS channels" in message
+        or "No complete timed laps" in message
+        or "No usable numeric telemetry channels" in message
+    ):
         raise AimImportError(message, status_code=422)
     raise AimImportError(message or "Unable to parse the XRK/XRZ file.")
 

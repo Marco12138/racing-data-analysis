@@ -47,11 +47,19 @@ import {
   summarizeTelemetry,
 } from "../lib/analysis";
 import {
-  importAimSession,
   type AimImportResponse,
 } from "../lib/aimImportApi";
+import {
+  analyzeXrkInspection,
+  deleteXrkInspection,
+  inspectXrkFile,
+  type XrkAnalysis,
+  type XrkAnalyzeOptions,
+  type XrkInspection,
+} from "../lib/xrkAnalysisApi";
 import { frontendConfig } from "../lib/config";
 import { sampleLapCsv, sampleTelemetryCsv } from "../lib/sampleData";
+import { XrkAnalysisWorkspace } from "./XrkAnalysisWorkspace";
 import {
   clearVideoJob,
   createVideoJob,
@@ -84,9 +92,12 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
   const [videoJob, setVideoJob] = useState<VideoJob | null>(null);
   const [dataError, setDataError] = useState("");
   const [aimImport, setAimImport] = useState<AimImportResponse | null>(null);
-  const [aimImportStatus, setAimImportStatus] = useState<"idle" | "processing" | "loaded">(
+  const [xrkInspection, setXrkInspection] = useState<XrkInspection | null>(null);
+  const [xrkAnalysis, setXrkAnalysis] = useState<XrkAnalysis | null>(null);
+  const [aimImportStatus, setAimImportStatus] = useState<"idle" | "inspecting" | "inspected" | "analyzing" | "loaded">(
     "idle"
   );
+  const xrkAbortRef = useRef<AbortController | null>(null);
 
   const lapAnalysis = useMemo(() => (lapRows.length ? analyzeLaps(lapRows) : null), [lapRows]);
   const telemetrySummary = useMemo(
@@ -141,7 +152,11 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
         }
         setTelemetryRows(normalized);
       }
+      xrkAbortRef.current?.abort();
+      if (xrkInspection) void deleteXrkInspection(xrkInspection.inspection_id);
       setAimImport(null);
+      setXrkInspection(null);
+      setXrkAnalysis(null);
       setAimImportStatus("idle");
       setDataError("");
     } catch (error) {
@@ -154,32 +169,75 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       setDataError("Please select an AiM .xrk or .xrz file.");
       return;
     }
-    setAimImportStatus("processing");
+    xrkAbortRef.current?.abort();
+    if (xrkInspection) void deleteXrkInspection(xrkInspection.inspection_id);
+    const controller = new AbortController();
+    xrkAbortRef.current = controller;
+    setAimImportStatus("inspecting");
+    setXrkInspection(null);
+    setXrkAnalysis(null);
     setDataError("");
     try {
-      const imported = await importAimSession(file);
-      const normalizedLaps = normalizeLapRows(imported.lap_rows);
-      const normalizedTelemetry = normalizeTelemetryRows(imported.telemetry_rows);
-      if (!normalizedLaps.length) {
-        throw new Error("The AiM file did not contain any usable timed laps.");
+      const inspected = await inspectXrkFile(file, controller.signal);
+      setXrkInspection(inspected);
+      setDriverName(metadataText(inspected.metadata, "Driver", "Driver"));
+      setVehicleName(metadataText(inspected.metadata, "Vehicle", "Vehicle"));
+      setTrackName(metadataText(inspected.metadata, "Venue", "Unknown track"));
+      setSessionDate(normalizeAimDate(inspected.metadata["Log Date"]));
+      setAimImportStatus("inspected");
+    } catch (error) {
+      if ((error as Error).name === "AbortError") {
+        setDataError("XRK upload was cancelled.");
+      } else {
+        setDataError((error as Error).message);
       }
+      setAimImportStatus("idle");
+    } finally {
+      if (xrkAbortRef.current === controller) xrkAbortRef.current = null;
+    }
+  }
+
+  async function runXrkAnalysis(options: Partial<XrkAnalyzeOptions> = {}) {
+    if (!xrkInspection) return;
+    const controller = new AbortController();
+    xrkAbortRef.current?.abort();
+    xrkAbortRef.current = controller;
+    setAimImportStatus("analyzing");
+    setDataError("");
+    try {
+      const result = await analyzeXrkInspection(
+        {
+          inspection_id: xrkInspection.inspection_id,
+          reference_lap: options.reference_lap ?? xrkAnalysis?.reference_lap ?? null,
+          target_lap: options.target_lap ?? xrkAnalysis?.target_lap ?? null,
+          distance_step_m: options.distance_step_m ?? 1,
+          sector_count: options.sector_count ?? xrkAnalysis?.sectors?.count ?? 3,
+          sector_boundaries_m: options.sector_boundaries_m,
+          manual_zones: options.manual_zones,
+        },
+        controller.signal
+      );
+      const normalizedLaps = normalizeLapRows(result.sectors?.lap_rows ?? result.lap_rows);
       setLapRows(normalizedLaps);
-      setTelemetryRows(normalizedTelemetry);
-      setReferenceLap(imported.lap_analysis.fastest_lap.lap);
-      setTargetLap(normalizedLaps[0].lap);
-      setDriverName(metadataText(imported.metadata, "Driver", "Driver"));
-      setVehicleName(metadataText(imported.metadata, "Vehicle", "Vehicle"));
-      setTrackName(metadataText(imported.metadata, "Venue", "Unknown track"));
-      setSessionDate(normalizeAimDate(imported.metadata["Log Date"]));
-      setAimImport(imported);
+      setTelemetryRows([]);
+      setReferenceLap(result.reference_lap);
+      setTargetLap(result.target_lap);
+      setXrkAnalysis(result);
+      setAimImport(null);
       setAimImportStatus("loaded");
     } catch (error) {
-      setAimImportStatus("idle");
-      setDataError((error as Error).message);
+      if ((error as Error).name !== "AbortError") {
+        setDataError((error as Error).message);
+      }
+      setAimImportStatus(xrkAnalysis ? "loaded" : "inspected");
+    } finally {
+      if (xrkAbortRef.current === controller) xrkAbortRef.current = null;
     }
   }
 
   function loadDemoData() {
+    xrkAbortRef.current?.abort();
+    if (xrkInspection) void deleteXrkInspection(xrkInspection.inspection_id);
     setLapRows([...demoLapRows]);
     setTelemetryRows([...demoTelemetryRows]);
     setReferenceLap(6);
@@ -189,6 +247,8 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     setTrackName("Shanghai Sprint Circuit");
     setSessionDate("2026-06-14");
     setAimImport(null);
+    setXrkInspection(null);
+    setXrkAnalysis(null);
     setAimImportStatus("idle");
     setDataError("");
   }
@@ -235,9 +295,12 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
               lapLoaded={lapRows.length > 0}
               telemetryLoaded={telemetryRows.length > 0}
               aimImport={aimImport}
+              xrkInspection={xrkInspection}
               aimImportStatus={aimImportStatus}
               error={dataError}
               onAimFile={handleAimUpload}
+              onRunXrk={() => void runXrkAnalysis()}
+              onCancelXrk={() => xrkAbortRef.current?.abort()}
               onLapFile={(file) => handleCsvUpload(file, "lap")}
               onTelemetryFile={(file) => handleCsvUpload(file, "telemetry")}
               onLoadDemo={loadDemoData}
@@ -246,8 +309,9 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
               lapLoaded={lapRows.length > 0}
               telemetryLoaded={telemetryRows.length > 0}
               aimImport={aimImport}
+              xrkInspection={xrkInspection}
             />
-            <BehaviorPanel telemetryLoaded={telemetryRows.length > 0} behaviorInputsAvailable={behaviorInputsAvailable} flags={handlingFlags} />
+            {!xrkAnalysis && <BehaviorPanel telemetryLoaded={telemetryRows.length > 0} behaviorInputsAvailable={behaviorInputsAvailable} flags={handlingFlags} />}
           </aside>
 
           <section className="flex min-w-0 flex-col gap-5">
@@ -264,9 +328,15 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
               ))}
             </div>
 
-            <VideoWorkspace onJobChange={setVideoJob} />
+            {!xrkAnalysis && <VideoWorkspace onJobChange={setVideoJob} />}
 
-            {lapAnalysis ? (
+            {xrkAnalysis ? (
+              <XrkAnalysisWorkspace
+                analysis={xrkAnalysis}
+                analyzing={aimImportStatus === "analyzing"}
+                onAnalyze={runXrkAnalysis}
+              />
+            ) : lapAnalysis ? (
               <>
                 <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
                   <ChartPanel title="Lap Time Chart" subtitle="X: lap number, Y: lap time">
@@ -870,9 +940,12 @@ function DataUploadPanel({
   lapLoaded,
   telemetryLoaded,
   aimImport,
+  xrkInspection,
   aimImportStatus,
   error,
   onAimFile,
+  onRunXrk,
+  onCancelXrk,
   onLapFile,
   onTelemetryFile,
   onLoadDemo,
@@ -880,29 +953,67 @@ function DataUploadPanel({
   lapLoaded: boolean;
   telemetryLoaded: boolean;
   aimImport: AimImportResponse | null;
-  aimImportStatus: "idle" | "processing" | "loaded";
+  xrkInspection: XrkInspection | null;
+  aimImportStatus: "idle" | "inspecting" | "inspected" | "analyzing" | "loaded";
   error: string;
   onAimFile: (file: File) => void;
+  onRunXrk: () => void;
+  onCancelXrk: () => void;
   onLapFile: (file: File) => void;
   onTelemetryFile: (file: File) => void;
   onLoadDemo: () => void;
 }) {
   const aimLabel =
-    aimImportStatus === "processing"
-      ? "Uploading and parsing AiM file..."
-      : aimImport
+    aimImportStatus === "inspecting"
+      ? "Uploading and inspecting channels..."
+      : aimImportStatus === "analyzing"
+        ? "Cleaning GPS and aligning laps..."
+        : xrkInspection
+          ? `${xrkInspection.filename} inspected`
+          : aimImport
         ? `${aimImport.source.name} loaded`
-        : "AiM Session File (.xrk / .xrz)";
+        : "Import XRK / XRZ (Beta)";
+  const busy = aimImportStatus === "inspecting" || aimImportStatus === "analyzing";
   return (
     <section className="panel rounded-lg p-4">
       <SectionTitle icon={<Upload size={18} />} title="Session Data" subtitle="AiM logger file or existing CSV exports" />
       <FileInput
         label={aimLabel}
         accept=".xrk,.xrz"
-        disabled={aimImportStatus === "processing"}
-        icon={aimImportStatus === "processing" ? <LoaderCircle size={16} className="animate-spin text-[#35d6d0]" /> : undefined}
+        disabled={busy}
+        icon={busy ? <LoaderCircle size={16} className="animate-spin text-[#35d6d0]" /> : undefined}
         onFile={onAimFile}
       />
+      {xrkInspection && (
+        <div className="mt-3 rounded-md border border-slate-700 bg-slate-950/60 p-3">
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <StatusLine label="File size" value={formatBytes(xrkInspection.file_size_bytes)} />
+            <StatusLine label="Timed laps" value={String(xrkInspection.laps)} />
+            <StatusLine label="GPS" value={xrkInspection.has_gps ? "Available" : "Unavailable"} />
+            <StatusLine label="RPM" value={xrkInspection.has_rpm ? "Available" : "Unavailable"} />
+          </div>
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            {xrkInspection.channels.filter((channel) => channel.available).length} usable channels ·
+            official sectors {xrkInspection.has_predefined_sectors ? "available" : "unavailable"}
+          </p>
+          {aimImportStatus !== "loaded" && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onRunXrk}
+              className="mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[#f6c945] px-3 text-sm font-semibold text-slate-950 disabled:opacity-50"
+            >
+              {aimImportStatus === "analyzing" ? <LoaderCircle size={16} className="animate-spin" /> : <Play size={16} fill="currentColor" />}
+              Run Analysis
+            </button>
+          )}
+        </div>
+      )}
+      {busy && (
+        <button type="button" onClick={onCancelXrk} className="mt-2 w-full rounded-md border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-red-400">
+          Cancel
+        </button>
+      )}
       <div className="my-3 flex items-center gap-3 text-[10px] uppercase text-slate-600">
         <span className="h-px flex-1 bg-slate-800" /> or CSV <span className="h-px flex-1 bg-slate-800" />
       </div>
@@ -912,7 +1023,10 @@ function DataUploadPanel({
         <span>Try Demo</span><Database size={16} className="text-[#f6c945]" />
       </button>
       {error && <p className="mt-3 rounded-md border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs leading-5 text-red-100">{error}</p>}
-      <p className="mt-3 text-xs leading-5 text-slate-500">XRK/XRZ is processed temporarily and deleted after import. Demo data is never linked to a local video.</p>
+      <p className="mt-3 text-xs leading-5 text-slate-500">
+        Uploaded XRK files are processed temporarily and are not permanently stored in the current demo.
+        Normalized data expires after 30 minutes.
+      </p>
     </section>
   );
 }
@@ -953,10 +1067,12 @@ function DataReadinessPanel({
   lapLoaded,
   telemetryLoaded,
   aimImport,
+  xrkInspection,
 }: {
   lapLoaded: boolean;
   telemetryLoaded: boolean;
   aimImport: AimImportResponse | null;
+  xrkInspection: XrkInspection | null;
 }) {
   const usedChannels = aimImport?.channels
     .filter((channel) => channel.status === "used")
@@ -976,6 +1092,19 @@ function DataReadinessPanel({
           <p className="mt-3 text-xs leading-5 text-slate-500">
             Available: {usedChannels?.join(", ") || "No supported channels"}
           </p>
+        </>
+      )}
+      {xrkInspection && !aimImport && (
+        <>
+          <StatusLine label="Source" value="AiM XRK/XRZ · Beta" />
+          <StatusLine label="Channels" value={String(xrkInspection.channels.length)} />
+          <StatusLine label="GPS / RPM" value={`${xrkInspection.has_gps ? "yes" : "no"} / ${xrkInspection.has_rpm ? "yes" : "no"}`} />
+          <StatusLine label="Parser" value={`${xrkInspection.parser.library} · ${xrkInspection.parser.license}`} />
+          {!xrkInspection.has_predefined_sectors && (
+            <p className="mt-3 rounded-md border border-amber-400/25 bg-amber-400/8 px-3 py-2 text-xs leading-5 text-amber-100">
+              Official sectors unavailable. Analysis uses explicitly labelled virtual sectors.
+            </p>
+          )}
         </>
       )}
       {!lapLoaded && <p className="mt-3 rounded-md border border-amber-400/25 bg-amber-400/8 px-3 py-2 text-xs leading-5 text-amber-100">只有视频时不计算圈速、sector loss 或理论最快圈。</p>}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,7 +15,9 @@ from .api.analysis_routes import analyze_session, router as analysis_router
 from .api.import_routes import router as import_router
 from .api.system_routes import liveness, public_health, router as system_router
 from .api.video_routes import router as video_router
+from .api.xrk_routes import router as xrk_router
 from .core.config import Settings, get_settings
+from .importers.inspection_store import InspectionStore
 from .importers.service import ImportRateLimiter
 from .utils.storage import init_db
 from .utils.video_library import cleanup_video_cache
@@ -23,10 +26,15 @@ from .utils.video_library import cleanup_video_cache
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build a configured FastAPI application."""
     active_settings = settings or get_settings()
+    inspection_store = InspectionStore(
+        Path(active_settings.xrk_inspection_cache_dir),
+        active_settings.xrk_inspection_ttl_seconds,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         init_db()
+        inspection_store.cleanup()
         if active_settings.local_video_enabled:
             cleanup_video_cache(active_settings.video_cache_ttl_seconds)
         yield
@@ -46,6 +54,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.xrk_rate_limiter = ImportRateLimiter(
         active_settings.xrk_rate_limit_per_hour
     )
+    application.state.xrk_inspection_store = inspection_store
     application.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=active_settings.allowed_host_list or ["*"],
@@ -71,6 +80,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(system_router, prefix=active_settings.api_v1_prefix)
     application.include_router(analysis_router, prefix=active_settings.api_v1_prefix)
     application.include_router(import_router, prefix=active_settings.api_v1_prefix)
+    application.include_router(xrk_router, prefix=active_settings.api_v1_prefix)
     application.include_router(video_router, prefix=active_settings.api_v1_prefix)
     application.add_api_route(
         f"{active_settings.api_v1_prefix}/health",

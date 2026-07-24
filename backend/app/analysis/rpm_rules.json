@@ -1,0 +1,18 @@
+{
+  "smooth_window_seconds": 0.28,
+  "minimum_event_seconds": 0.24,
+  "sustained_acceleration_seconds": 0.9,
+  "merge_gap_seconds": 0.16,
+  "rpm_drop_quantile": 0.12,
+  "rpm_severe_drop_quantile": 0.05,
+  "rpm_rise_quantile": 0.78,
+  "speed_deceleration_quantile": 0.18,
+  "negative_g_quantile": 0.20,
+  "curvature_quantile": 0.65,
+  "brake_active_quantile": 0.70,
+  "minimum_rpm_drop_floor": 600.0,
+  "minimum_rpm_severe_drop_floor": 1200.0,
+  "minimum_rpm_rise_floor": 350.0,
+  "minimum_speed_deceleration": 0.8,
+  "minimum_negative_g": 0.12
+}

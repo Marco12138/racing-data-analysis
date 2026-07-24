@@ -32,3 +32,13 @@ services:
         value: "10"
       - key: XRK_MAX_RESPONSE_ROWS
         value: "30000"
+      - key: XRK_INSPECTION_TTL_SECONDS
+        value: "1800"
+      - key: XRK_INSPECTION_CACHE_DIR
+        value: /tmp/racing-xrk-inspections
+      - key: XRK_DEFAULT_DISTANCE_STEP_M
+        value: "1.0"
+      - key: XRK_MAX_COMPARISON_POINTS
+        value: "5000"
+      - key: WEB_CONCURRENCY
+        value: "1"
