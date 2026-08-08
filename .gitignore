@@ -43,6 +43,7 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+/tmp/
 /storage/
 /data/
 __pycache__/

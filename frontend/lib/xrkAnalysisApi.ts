@@ -300,6 +300,88 @@ export type XrkAnalyzeOptions = {
   }>;
 };
 
+export type DriverComparisonResult = {
+  format: "cross_session_real_lap_comparison";
+  sessions: {
+    a: CrossSessionSummary;
+    b: CrossSessionSummary;
+  };
+  lap_time_difference_s: number;
+  comparison: Array<Record<string, number | null>>;
+  track: null | {
+    lap_length_a_m: number;
+    lap_length_b_m: number;
+    common_distance_m: number;
+    a: XrkTrackPoint[];
+    b: XrkTrackPoint[];
+  };
+  zones: Array<{
+    id: string;
+    name: string;
+    entry_distance_m: number;
+    exit_distance_m: number;
+    a: Record<string, number | string | null>;
+    b: Record<string, number | string | null>;
+    time_difference_s: number | null;
+  }>;
+  evidence_catalog: Record<string, string[]>;
+  warnings: string[];
+  synthetic_curve_generated: false;
+  reference_policy: string;
+  report: string;
+};
+
+export type CrossSessionSummary = {
+  inspection_id: string;
+  metadata: Record<string, string | number | null>;
+  selected_lap: number;
+  selected_lap_time_s: number;
+  lap_quality: XrkAnalysis["lap_quality"];
+  gps_quality: Record<string, unknown>;
+  available_channels: string[];
+};
+
+export type SetupExperimentResult = {
+  format: "setup_experiment_real_lap_analysis";
+  experiment: Record<string, unknown>;
+  baseline: SetupSessionSummary;
+  modified: SetupSessionSummary;
+  zones: Array<{
+    id: string;
+    name: string;
+    entry_distance_m: number;
+    exit_distance_m: number;
+    baseline_top3: Record<string, number | null>;
+    modified_top3: Record<string, number | null>;
+    source_laps: { baseline: number[]; modified: number[] };
+    local_gain_s: number;
+    downstream_cost_s: number;
+    net_gain_s: number;
+    repeatability_score: number;
+    confidence: "low" | "medium" | "high";
+    evidence: string[];
+  }>;
+  measured: string[];
+  calculated: string[];
+  driver_feedback: Record<string, string>;
+  inferred: Array<{ zone: string; finding: string; confidence: string }>;
+  confounders: string[];
+  next_test: Array<{ priority: number; candidate: string; basis: string; confidence: string }>;
+  warnings: string[];
+  synthetic_curve_generated: false;
+  report: string;
+};
+
+export type SetupSessionSummary = {
+  inspection_id: string;
+  metadata: Record<string, string | number | null>;
+  top_valid_laps: XrkLapQualityRow[];
+  lap_count: number;
+  median_lap_time_s: number;
+  lap_time_range_s: number;
+  lap_quality: XrkAnalysis["lap_quality"];
+};
+
 export class XrkApiError extends Error {
   readonly code: string;
   readonly requestId: string | null;
@@ -361,6 +443,14 @@ export async function inspectXrkFile(
   return response.json() as Promise<XrkInspection>;
 }
 
+export async function getXrkInspection(inspectionId: string): Promise<XrkInspection> {
+  const response = await fetch(await resolveApiUrl(`/xrk/inspections/${inspectionId}`));
+  if (!response.ok) {
+    throw await responseError(response, `XRK session restore failed (${response.status}).`);
+  }
+  return response.json() as Promise<XrkInspection>;
+}
+
 export async function analyzeXrkInspection(
   options: XrkAnalyzeOptions,
   signal?: AbortSignal
@@ -383,4 +473,52 @@ export async function deleteXrkInspection(inspectionId: string): Promise<void> {
   await fetch(url, { method: "DELETE" }).catch(() => {
     // Temporary data also expires automatically.
   });
+}
+
+export async function compareDriverLaps(options: {
+  session_a: { inspection_id: string; lap?: number | null };
+  session_b: { inspection_id: string; lap?: number | null };
+  distance_step_m?: number;
+  manual_zones?: XrkAnalyzeOptions["manual_zones"];
+}): Promise<DriverComparisonResult> {
+  const response = await fetch(await resolveApiUrl("/comparisons/laps"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options),
+  });
+  if (!response.ok) {
+    throw await responseError(response, `Driver comparison failed (${response.status}).`);
+  }
+  return response.json() as Promise<DriverComparisonResult>;
+}
+
+export async function analyzeSetupExperiment(options: {
+  baseline_inspection_id: string;
+  modified_inspection_id: string;
+  experiment: {
+    id?: string;
+    name: string;
+    primary_change: {
+      category: string;
+      parameter: string;
+      before: string | number | null;
+      after: string | number | null;
+      unit?: string | null;
+    };
+    secondary_changes?: Array<Record<string, string | number | null>>;
+    conditions?: Record<string, string | number | null>;
+    driver_feedback?: Record<string, string>;
+  };
+  distance_step_m?: number;
+  manual_zones?: XrkAnalyzeOptions["manual_zones"];
+}): Promise<SetupExperimentResult> {
+  const response = await fetch(await resolveApiUrl("/setup-experiments/analyze"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options),
+  });
+  if (!response.ok) {
+    throw await responseError(response, `Setup experiment failed (${response.status}).`);
+  }
+  return response.json() as Promise<SetupExperimentResult>;
 }

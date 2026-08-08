@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from .api.analysis_routes import analyze_session, router as analysis_router
+from .api.cross_session_routes import router as cross_session_router
 from .api.errors import PublicApiError
 from .api.import_routes import router as import_router
 from .api.system_routes import (
@@ -110,6 +111,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(analysis_router, prefix=active_settings.api_v1_prefix)
     application.include_router(import_router, prefix=active_settings.api_v1_prefix)
     application.include_router(xrk_router, prefix=active_settings.api_v1_prefix)
+    application.include_router(cross_session_router, prefix=active_settings.api_v1_prefix)
     application.include_router(video_router, prefix=active_settings.api_v1_prefix)
     application.add_api_route(
         f"{active_settings.api_v1_prefix}/health",

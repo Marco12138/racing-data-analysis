@@ -143,13 +143,13 @@ async def inspect_xrk(
                 output_dir,
                 expires_at,
             )
-            public = {
-                key: value
-                for key, value in record.manifest.items()
-                if key != "artifacts"
-            }
-            public["filename"] = original_name
-            public["file_size_bytes"] = size_bytes
+            record.manifest["filename"] = original_name
+            record.manifest["file_size_bytes"] = size_bytes
+            (record.directory / "inspection.json").write_text(
+                json.dumps(record.manifest, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            public = public_inspection(record.manifest)
             parsing_duration_ms = round(
                 (time.monotonic() - parsing_started_at) * 1000
             ) if parsing_started_at is not None else None
@@ -286,11 +286,37 @@ async def analyze_xrk(
         ) from exc
 
 
+@router.get("/inspections/{inspection_id}")
+async def get_xrk_inspection(request: Request, inspection_id: str) -> dict[str, Any]:
+    """Restore public metadata for one non-expired temporary inspection."""
+    try:
+        record = request.app.state.xrk_inspection_store.load(inspection_id)
+    except InspectionExpiredError as exc:
+        raise PublicApiError(
+            status_code=410,
+            error_code="XRK_INSPECTION_EXPIRED",
+            message=str(exc),
+            error_type="expired_token",
+        ) from exc
+    public = public_inspection(record.manifest)
+    public["request_id"] = getattr(request.state, "request_id", "unknown")
+    return public
+
+
 @router.delete("/inspections/{inspection_id}")
 async def delete_xrk_inspection(request: Request, inspection_id: str) -> dict[str, bool]:
     """Explicitly delete temporary normalized telemetry."""
     deleted = request.app.state.xrk_inspection_store.delete(inspection_id)
     return {"deleted": deleted}
+
+
+def public_inspection(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Remove server-only artifact paths from an inspection response."""
+    return {
+        key: value
+        for key, value in manifest.items()
+        if key != "artifacts"
+    }
 
 
 def log_xrk_event(
