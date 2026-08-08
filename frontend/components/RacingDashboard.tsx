@@ -52,16 +52,24 @@ import {
 import {
   analyzeXrkInspection,
   deleteXrkInspection,
+  getXrkInspection,
   inspectXrkFile,
   type XrkAnalysis,
   type XrkAnalyzeOptions,
   type XrkInspection,
   XrkApiError,
 } from "../lib/xrkAnalysisApi";
+import {
+  MAX_TEMPORARY_SESSIONS,
+  SESSION_STORAGE_KEY,
+  parseStoredSessions,
+  toStoredSession,
+} from "../lib/sessionWorkspace";
 import { FrontendApiConfigError, frontendConfig } from "../lib/config";
 import { sampleLapCsv, sampleTelemetryCsv } from "../lib/sampleData";
 import { XrkAnalysisWorkspace } from "./XrkAnalysisWorkspace";
 import { XrkInspectionWorkspace } from "./XrkInspectionWorkspace";
+import { MultiSessionWorkspace } from "./MultiSessionWorkspace";
 import {
   clearVideoJob,
   createVideoJob,
@@ -97,6 +105,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
   const [aimImport, setAimImport] = useState<AimImportResponse | null>(null);
   const [xrkInspection, setXrkInspection] = useState<XrkInspection | null>(null);
   const [xrkAnalysis, setXrkAnalysis] = useState<XrkAnalysis | null>(null);
+  const [xrkSessions, setXrkSessions] = useState<XrkInspection[]>([]);
   const [deploymentCapabilities, setDeploymentCapabilities] =
     useState<DeploymentCapabilities | null>(null);
   const [capabilityError, setCapabilityError] = useState("");
@@ -120,6 +129,24 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       })
       .finally(() => {
         if (active) setCapabilityLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const stored = parseStoredSessions(window.localStorage.getItem(SESSION_STORAGE_KEY));
+    Promise.allSettled(stored.map((session) => getXrkInspection(session.inspection_id)))
+      .then((results) => {
+        if (!active) return;
+        const restored = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+        setXrkSessions(restored);
+        window.localStorage.setItem(
+          SESSION_STORAGE_KEY,
+          JSON.stringify(restored.map(toStoredSession))
+        );
       });
     return () => {
       active = false;
@@ -180,7 +207,6 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
         setTelemetryRows(normalized);
       }
       xrkAbortRef.current?.abort();
-      if (xrkInspection) void deleteXrkInspection(xrkInspection.inspection_id);
       setAimImport(null);
       setXrkInspection(null);
       setXrkAnalysis(null);
@@ -196,6 +222,13 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       setDataError("Please select an AiM .xrk or .xrz file.");
       return;
     }
+    const activeTemporarySessions = xrkSessions.filter(
+      (session) => Date.parse(session.expires_at) > Date.now()
+    );
+    if (activeTemporarySessions.length >= MAX_TEMPORARY_SESSIONS) {
+      setDataError("Temporary Session Workspace is full. Remove one session before importing another XRK.");
+      return;
+    }
     const serverImport = deploymentCapabilities?.xrk_server_import;
     if (!serverImport?.available) {
       setDataError(
@@ -206,12 +239,9 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       return;
     }
     xrkAbortRef.current?.abort();
-    if (xrkInspection) void deleteXrkInspection(xrkInspection.inspection_id);
     const controller = new AbortController();
     xrkAbortRef.current = controller;
     setAimImportStatus("inspecting");
-    setXrkInspection(null);
-    setXrkAnalysis(null);
     setDataError("");
     try {
       const inspected = await inspectXrkFile(file, controller.signal);
@@ -219,6 +249,18 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       setTelemetryRows(normalizeTelemetryRows([]));
       setAimImport(null);
       setXrkInspection(inspected);
+      setXrkAnalysis(null);
+      setXrkSessions((current) => {
+        const next = [
+          ...current.filter((session) => session.inspection_id !== inspected.inspection_id),
+          inspected,
+        ].slice(-MAX_TEMPORARY_SESSIONS);
+        window.localStorage.setItem(
+          SESSION_STORAGE_KEY,
+          JSON.stringify(next.map(toStoredSession))
+        );
+        return next;
+      });
       setDriverName(metadataText(inspected.metadata, "Driver", "Driver"));
       setVehicleName(metadataText(inspected.metadata, "Vehicle", "Vehicle"));
       setTrackName(metadataText(inspected.metadata, "Venue", "Unknown track"));
@@ -284,7 +326,6 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
 
   function loadDemoData() {
     xrkAbortRef.current?.abort();
-    if (xrkInspection) void deleteXrkInspection(xrkInspection.inspection_id);
     setLapRows([...demoLapRows]);
     setTelemetryRows([...demoTelemetryRows]);
     setReferenceLap(6);
@@ -298,6 +339,37 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     setXrkAnalysis(null);
     setAimImportStatus("idle");
     setDataError("");
+  }
+
+  function selectTemporarySession(inspectionId: string) {
+    const session = xrkSessions.find((item) => item.inspection_id === inspectionId);
+    if (!session) return;
+    setXrkInspection(session);
+    setXrkAnalysis(null);
+    setAimImport(null);
+    setAimImportStatus("inspected");
+    setDriverName(metadataText(session.metadata, "Driver", "Driver"));
+    setVehicleName(metadataText(session.metadata, "Vehicle", "Vehicle"));
+    setTrackName(metadataText(session.metadata, "Venue", "Unknown track"));
+    setSessionDate(normalizeAimDate(session.metadata["Log Date"]));
+    setDataError("");
+  }
+
+  function removeTemporarySession(inspectionId: string) {
+    void deleteXrkInspection(inspectionId);
+    setXrkSessions((current) => {
+      const next = current.filter((session) => session.inspection_id !== inspectionId);
+      window.localStorage.setItem(
+        SESSION_STORAGE_KEY,
+        JSON.stringify(next.map(toStoredSession))
+      );
+      return next;
+    });
+    if (xrkInspection?.inspection_id === inspectionId) {
+      setXrkInspection(null);
+      setXrkAnalysis(null);
+      setAimImportStatus("idle");
+    }
   }
 
   const videoMetadata = videoJob?.metadata;
@@ -517,13 +589,19 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
             ) : (
               <UnavailablePanel
                 title="Lap & Sector Analysis"
-                message="当前为视频独立分析模式。上传对应圈速 CSV 后，才会显示最快圈、理论最快圈、lap delta 和 sector loss。"
+                message="当前为视频独立分析模式。上传对应圈速 CSV 后，才会显示真实圈速、lap delta 和 sector loss。"
               />
             )}
               </>
             )}
           </section>
         </section>
+        <MultiSessionWorkspace
+          sessions={xrkSessions}
+          activeInspectionId={xrkInspection?.inspection_id ?? null}
+          onSelect={selectTemporarySession}
+          onRemove={removeTemporarySession}
+        />
       </section>
     </main>
   );
@@ -1181,7 +1259,7 @@ function DataReadinessPanel({
           )}
         </>
       )}
-      {!lapLoaded && <p className="mt-3 rounded-md border border-amber-400/25 bg-amber-400/8 px-3 py-2 text-xs leading-5 text-amber-100">只有视频时不计算圈速、sector loss 或理论最快圈。</p>}
+      {!lapLoaded && <p className="mt-3 rounded-md border border-amber-400/25 bg-amber-400/8 px-3 py-2 text-xs leading-5 text-amber-100">只有视频时不计算圈速或 sector loss。</p>}
     </section>
   );
 }

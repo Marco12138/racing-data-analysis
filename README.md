@@ -10,6 +10,8 @@ session、上传 CSV、查看图表和报告，并在浏览器中读取视频信
 - 在浏览器中分析 lap/sector 和 telemetry CSV，不依赖 `localhost`。
 - 通过 FastAPI 两阶段导入 AiM XRK/XRZ，检查真实通道后再运行分析。
 - 使用 Lap Quality Gate 筛选真实有效圈，并将前三快有效圈按距离插值对齐。
+- 在临时 Session 工作区中保留最多四个 XRK 检查结果，支持两个车手的真实单圈按距离比较。
+- 使用同一车手的 Baseline/Modified Session 评估单项底盘调校变化，并区分测量、计算、反馈和推断。
 - 逐弯检查局部收益、下游代价、净收益和重复性，再给出保守训练重点。
 - 基于 RPM、GPS speed、纵向 G 和曲率输出带证据与置信度的保守行为事件。
 - 上传视频后显示文件信息、时长、分辨率和第一帧，文件不会离开浏览器。
@@ -127,6 +129,9 @@ pnpm run dev
 - `POST /api/v1/xrk/inspect`：读取圈段、metadata 和所有真实通道，返回 30 分钟令牌。
 - `POST /api/v1/xrk/analyze`：复用令牌执行圈质量门控、真实 Top 3
   距离对齐、sector、zone、行为分析和教练总结。
+- `GET /api/v1/xrk/inspections/{inspection_id}`：恢复仍在有效期内的临时 Session 描述。
+- `POST /api/v1/comparisons/laps`：比较两个临时 Session 中通过质量门的真实单圈。
+- `POST /api/v1/setup-experiments/analyze`：使用同车手、同赛道两个 Session 的真实 Top 3 评估调校实验。
 - `DELETE /api/v1/xrk/inspections/{inspection_id}`：主动删除标准化临时数据。
 - `GET /api/video/library`：列出允许访问的本机素材。
 - `POST /api/video/jobs`：创建分析任务。
@@ -140,6 +145,11 @@ pnpm run dev
 新客户端使用 `/api/v1/video/...`；原 `/api/video/...` 路径作为 MVP
 兼容接口保留。缓存和 SQLite 位于项目的 `storage/`，默认保留 24
 小时，并已排除在 Git 之外。
+
+临时 XRK Session 固定在 30 分钟后过期。浏览器只保存 Session 描述和调校实验表单，
+不保存原始 XRK；页面刷新后会重新确认 token 是否仍有效。Driver Comparison 可以比较
+不同车手，但 Setup Experiment 要求同一车手和同一赛道，避免把车手差异解释为底盘因果。
+所有比较都使用真实完成圈，不生成拼接目标圈或虚拟 RPM 曲线。
 
 ## Docker
 
