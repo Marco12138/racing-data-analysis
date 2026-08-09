@@ -5,6 +5,15 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 
+class PersistenceCapability(BaseModel):
+    """Non-secret status of the active metadata ownership boundary."""
+
+    metadata_backend: str
+    ownership_mode: str
+    owner_scoped_entities: list[str]
+    multi_user_ready: bool
+
+
 class XrkServerImportCapability(BaseModel):
     """Runtime XRK parser capability safe to expose to browser clients."""
 
@@ -33,6 +42,7 @@ class DeploymentCapabilities(BaseModel):
     durable_task_queue: bool
     authentication: bool
     aim_imports: bool
+    persistence: PersistenceCapability
     xrk_server_import: XrkServerImportCapability
 
 

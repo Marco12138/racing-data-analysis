@@ -163,7 +163,12 @@ GET /api/v1/capabilities
 
 Do not enable public video uploads until all of the following are implemented:
 
-1. Replace `utils/storage.py` with PostgreSQL repositories and migrations.
+The first owner-scoping foundation is implemented for the existing SQLite
+tables, while the public Demo still uses one stable anonymous actor. See
+[`P2_PERSISTENCE_BOUNDARY.md`](P2_PERSISTENCE_BOUNDARY.md). This does not make
+the service multi-user ready.
+
+1. Replace `utils/storage.py` with PostgreSQL repositories and versioned migrations.
 2. Add direct multipart uploads to private object storage.
 3. Implement the Redis task dispatcher and a separately deployed worker.
 4. Add authenticated ownership checks to jobs, assets, markers, and sessions.

@@ -34,6 +34,12 @@ def test_cloud_mode_disables_local_video_library(
         assert capabilities.status_code == 200
         assert capabilities.json()["local_video_library"] is False
         assert "xrk_server_import" in capabilities.json()
+        assert capabilities.json()["persistence"] == {
+            "metadata_backend": "sqlite",
+            "ownership_mode": "anonymous",
+            "owner_scoped_entities": ["sessions", "video_jobs", "video_markers"],
+            "multi_user_ready": False,
+        }
         assert capabilities.headers["X-Request-ID"] == "test-request-id"
 
         alias = client.get("/api/v1/capabilities")
