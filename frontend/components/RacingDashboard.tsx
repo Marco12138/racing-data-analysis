@@ -66,6 +66,7 @@ import {
   parseStoredSessions,
   toStoredSession,
 } from "../lib/sessionWorkspace";
+import { removeInspectionSessions } from "../lib/driverComparison";
 import { FrontendApiConfigError, frontendConfig } from "../lib/config";
 import { sampleLapCsv, sampleTelemetryCsv } from "../lib/sampleData";
 import {
@@ -407,6 +408,25 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     }
   }
 
+  function expireTemporarySessions(inspectionIds: string[]) {
+    setXrkSessions((current) => {
+      const next = removeInspectionSessions(current, inspectionIds);
+      window.localStorage.setItem(
+        SESSION_STORAGE_KEY,
+        JSON.stringify(next.map(toStoredSession))
+      );
+      return next;
+    });
+    if (xrkInspection && inspectionIds.includes(xrkInspection.inspection_id)) {
+      setXrkInspection(null);
+      setXrkAnalysis(null);
+      setAimImportStatus("idle");
+    }
+    setDataError(
+      "A temporary XRK session expired and was removed. Upload that file again to continue Driver Comparison."
+    );
+  }
+
   const videoMetadata = videoJob?.metadata;
   const metrics = lapAnalysis
       ? [
@@ -639,6 +659,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
           activeInspectionId={xrkInspection?.inspection_id ?? null}
           onSelect={selectTemporarySession}
           onRemove={removeTemporarySession}
+          onExpire={expireTemporarySessions}
         />
       </section>
     </main>
