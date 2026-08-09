@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import { I18nProvider } from "@/frontend/lib/i18n";
+import { localeFromAcceptLanguage } from "@/frontend/lib/i18nCore";
 import "./globals.css";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -18,14 +20,16 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const requestHeaders = await headers();
+  const locale = localeFromAcceptLanguage(requestHeaders.get("accept-language"));
   return (
-    <html lang="zh-CN">
-      <body>{children}</body>
+    <html lang={locale === "zh" ? "zh-CN" : "en"}>
+      <body><I18nProvider initialLocale={locale}>{children}</I18nProvider></body>
     </html>
   );
 }

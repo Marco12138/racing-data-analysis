@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-async function render(env = { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }) {
+async function render(
+  env = { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+  acceptLanguage = "zh-CN,zh;q=0.9",
+) {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
   return worker.fetch(
-    new Request("http://localhost/", { headers: { accept: "text/html", host: "localhost" } }),
+    new Request("http://localhost/", { headers: { accept: "text/html", "accept-language": acceptLanguage, host: "localhost" } }),
     env,
     { waitUntil() {}, passThroughOnException() {} },
   );
@@ -19,11 +22,20 @@ test("server-renders the public racing analysis demo", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /AI Racing Telemetry Analysis Platform/);
-  assert.match(html, /Try Demo/);
-  assert.match(html, /Telemetry Analysis/);
+  assert.match(html, /AI 赛车遥测分析平台/);
+  assert.match(html, /使用样例 XRK 体验 Demo/);
+  assert.match(html, /遥测分析/);
   assert.match(html, /Lap &amp; Sector Analysis/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
+});
+
+test("server and client share the Accept-Language locale on first render", async () => {
+  const response = await render(undefined, "en-US,en;q=0.9");
+  const html = await response.text();
+  assert.match(html, /<html lang="en"/);
+  assert.match(html, /AI Racing Telemetry Analysis Platform/);
+  assert.match(html, /Try Demo with sample XRK session/);
+  assert.doesNotMatch(html, /AI 赛车遥测分析平台/);
 });
 
 test("server-renders verified sample metrics injected by the Sites worker", async () => {
@@ -42,7 +54,7 @@ test("server-renders verified sample metrics injected by the Sites worker", asyn
       ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
       API_URL: "https://backend.example",
       API_PREFIX: "/api/v1",
-    });
+    }, "en-US,en;q=0.9");
     const html = await response.text();
     assert.match(html, /40\.326s/);
     assert.match(html, /Anonymized sample XRK session/);
@@ -120,8 +132,8 @@ test("keeps public imports, browser video preview, and runtime API routing expli
   assert.match(xrkAnalysisApi, /XRK_FRONTEND_API_MISCONFIGURED|FrontendApiConfigError/);
   assert.match(dashboard, /当前为视频独立分析模式/);
   assert.match(publicPage, /loadServerPublicDemo/);
-  assert.match(publicClient, /Try Demo with sample XRK session/);
-  assert.match(publicClient, /Upload Data/);
+  assert.match(publicClient, /hero\.tryDemo/);
+  assert.match(publicClient, /hero\.upload/);
   assert.doesNotMatch(frontendConfig, /http:\/\/127\.0\.0\.1:8000/);
   assert.match(frontendConfig, /\/api\/runtime-config/);
   assert.match(frontendConfig, /XRK_FRONTEND_API_MISCONFIGURED/);
