@@ -23,11 +23,20 @@ import {
 import {
   analyzeSetupExperiment,
   compareDriverLaps,
+  getXrkInspection,
   type DriverComparisonResult,
   type SetupExperimentResult,
   type XrkInspection,
   type XrkTrackPoint,
 } from "../lib/xrkAnalysisApi";
+import {
+  appendManualZone,
+  createTrackProjection,
+  isExpiredInspectionError,
+  updateManualZone,
+  validateManualZones,
+  type ManualComparisonZone,
+} from "../lib/driverComparison";
 import {
   EXPERIMENT_STORAGE_KEY,
   metadataLabel,
@@ -49,11 +58,13 @@ export function MultiSessionWorkspace({
   activeInspectionId,
   onSelect,
   onRemove,
+  onExpire,
 }: {
   sessions: XrkInspection[];
   activeInspectionId: string | null;
   onSelect: (inspectionId: string) => void;
   onRemove: (inspectionId: string) => void;
+  onExpire: (inspectionIds: string[]) => void;
 }) {
   const [tab, setTab] = useState<WorkspaceTab>("compare");
   const [, setClock] = useState(0);
@@ -123,12 +134,22 @@ export function MultiSessionWorkspace({
         </WorkspaceTabButton>
       </nav>
 
-      {tab === "compare" ? <DriverComparison sessions={sessions} /> : <SetupExperiment sessions={sessions} />}
+      {tab === "compare" ? (
+        <DriverComparison sessions={sessions} onExpire={onExpire} />
+      ) : (
+        <SetupExperiment sessions={sessions} />
+      )}
     </section>
   );
 }
 
-function DriverComparison({ sessions }: { sessions: XrkInspection[] }) {
+function DriverComparison({
+  sessions,
+  onExpire,
+}: {
+  sessions: XrkInspection[];
+  onExpire: (inspectionIds: string[]) => void;
+}) {
   const [aId, setAId] = useState(sessions[0]?.inspection_id ?? "");
   const [bId, setBId] = useState(sessions[1]?.inspection_id ?? "");
   const [lapA, setLapA] = useState("");
@@ -137,6 +158,7 @@ function DriverComparison({ sessions }: { sessions: XrkInspection[] }) {
   const [cursorDistance, setCursorDistance] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [manualZones, setManualZones] = useState<ManualComparisonZone[]>([]);
   const selectedAId = sessions.some((session) => session.inspection_id === aId)
     ? aId
     : sessions[0]?.inspection_id ?? "";
@@ -151,6 +173,14 @@ function DriverComparison({ sessions }: { sessions: XrkInspection[] }) {
       setError("Select two different temporary sessions.");
       return;
     }
+    const zoneError = validateManualZones(
+      manualZones,
+      result?.track?.common_distance_m
+    );
+    if (zoneError) {
+      setError(zoneError);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -158,11 +188,28 @@ function DriverComparison({ sessions }: { sessions: XrkInspection[] }) {
         session_a: { inspection_id: selectedAId, lap: lapA ? Number(lapA) : null },
         session_b: { inspection_id: selectedBId, lap: lapB ? Number(lapB) : null },
         distance_step_m: 1,
+        manual_zones: manualZones,
       }));
       setCursorDistance(0);
     } catch (caught) {
       setResult(null);
-      setError((caught as Error).message);
+      if (isExpiredInspectionError(caught)) {
+        const selectedIds = [selectedAId, selectedBId];
+        const checks = await Promise.allSettled(selectedIds.map(getXrkInspection));
+        const expiredIds = checks.flatMap((check, index) =>
+          check.status === "rejected" && isExpiredInspectionError(check.reason)
+            ? [selectedIds[index]]
+            : []
+        );
+        if (expiredIds.length) onExpire(expiredIds);
+        setError(
+          expiredIds.length
+            ? "One or more temporary XRK sessions expired and were removed. Upload the expired file again before comparing."
+            : "The comparison session expired. Refresh the workspace or upload the XRK file again."
+        );
+      } else {
+        setError((caught as Error).message);
+      }
     } finally {
       setLoading(false);
     }
@@ -189,6 +236,41 @@ function DriverComparison({ sessions }: { sessions: XrkInspection[] }) {
         <p className="mt-3 text-xs text-slate-500">
           Blank lap selections use each session&apos;s Fastest Valid Lap. Only real laps passing the Lap Quality Gate are accepted.
         </p>
+        <div className="mt-4 border-t border-slate-800 pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-semibold text-slate-300">Manual comparison zones</h3>
+              <p className="mt-1 text-xs text-slate-500">Optional entry and exit distances in metres.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setManualZones(appendManualZone)}
+              className="min-h-9 rounded-md border border-slate-700 px-3 text-xs text-slate-300 hover:border-slate-500 hover:text-white"
+            >
+              Add zone
+            </button>
+          </div>
+          {manualZones.length > 0 && (
+            <div className="mt-3 space-y-2">
+              {manualZones.map((zone) => (
+                <div key={zone.id} className="grid gap-2 rounded-md border border-slate-800 p-3 sm:grid-cols-[minmax(140px,1fr)_120px_120px_auto]">
+                  <TextField label="Zone name" value={zone.name} onChange={(value) => setManualZones((current) => updateManualZone(current, zone.id, { name: value }))} />
+                  <NumberField label="Entry (m)" value={zone.entry_distance_m} onChange={(value) => setManualZones((current) => updateManualZone(current, zone.id, { entry_distance_m: value }))} />
+                  <NumberField label="Exit (m)" value={zone.exit_distance_m} onChange={(value) => setManualZones((current) => updateManualZone(current, zone.id, { exit_distance_m: value }))} />
+                  <button
+                    type="button"
+                    onClick={() => setManualZones((current) => current.filter((item) => item.id !== zone.id))}
+                    className="mt-5 flex h-10 w-10 items-center justify-center rounded-md text-slate-500 hover:bg-red-500/10 hover:text-red-300"
+                    aria-label={`Remove ${zone.name}`}
+                    title="Remove manual zone"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         {error && <InlineError message={error} />}
       </section>
 
@@ -220,6 +302,18 @@ function DriverComparison({ sessions }: { sessions: XrkInspection[] }) {
                   <ComparisonChart data={result.comparison} cursorDistance={cursorDistance} onCursor={setCursorDistance} lines={[
                     ["a_rpm", "A RPM", "#f6c945"],
                     ["b_rpm", "B RPM", "#ff5964"],
+                  ]} />
+                </Panel>
+                <Panel title="Longitudinal G vs Distance" subtitle="Measured channels only · unavailable traces are omitted" icon={<Activity size={17} />}>
+                  <ComparisonChart data={result.comparison} cursorDistance={cursorDistance} onCursor={setCursorDistance} lines={[
+                    ["a_longitudinal_g", "A longitudinal G", "#f6c945"],
+                    ["b_longitudinal_g", "B longitudinal G", "#35d6d0"],
+                  ]} />
+                </Panel>
+                <Panel title="Lateral G vs Distance" subtitle="Measured channels only · unavailable traces are omitted" icon={<Activity size={17} />}>
+                  <ComparisonChart data={result.comparison} cursorDistance={cursorDistance} onCursor={setCursorDistance} lines={[
+                    ["a_lateral_g", "A lateral G", "#f6c945"],
+                    ["b_lateral_g", "B lateral G", "#ff5964"],
                   ]} />
                 </Panel>
                 <Panel title="Cumulative Time Delta" subtitle="Positive means B is behind A" icon={<GitCompareArrows size={17} />}>
@@ -436,25 +530,29 @@ function ComparisonTrackMap({ a, b, cursorDistance, onCursor }: {
   cursorDistance: number;
   onCursor: (distance: number) => void;
 }) {
-  const points = [...a, ...b].filter((point) => point.local_x_m != null && point.local_y_m != null);
+  const hasLocalCoordinates = (
+    point: XrkTrackPoint
+  ): point is XrkTrackPoint & { local_x_m: number; local_y_m: number } => (
+    typeof point.local_x_m === "number"
+    && Number.isFinite(point.local_x_m)
+    && typeof point.local_y_m === "number"
+    && Number.isFinite(point.local_y_m)
+  );
+  const usableA = a.filter(hasLocalCoordinates);
+  const usableB = b.filter(hasLocalCoordinates);
+  const points = [...usableA, ...usableB];
   if (!points.length) return <Unavailable text="GPS track unavailable" />;
-  const xs = points.map((point) => point.local_x_m as number);
-  const ys = points.map((point) => point.local_y_m as number);
-  const minX = Math.min(...xs); const maxX = Math.max(...xs);
-  const minY = Math.min(...ys); const maxY = Math.max(...ys);
-  const width = Math.max(1, maxX - minX); const height = Math.max(1, maxY - minY);
-  const project = (point: XrkTrackPoint) => ({
-    x: 24 + (((point.local_x_m ?? 0) - minX) / width) * 552,
-    y: 376 - (((point.local_y_m ?? 0) - minY) / height) * 352,
-  });
-  const cursor = nearestPoint(a, cursorDistance);
+  const projection = createTrackProjection(points);
+  if (!projection) return <Unavailable text="GPS track unavailable" />;
+  const { project } = projection;
+  const cursor = nearestPoint(usableA, cursorDistance);
   return (
     <svg viewBox="0 0 600 400" className="aspect-[3/2] w-full bg-[#080c12]" role="img" aria-label="Two driver GPS lap overlay">
-      {[a, b].map((trace, traceIndex) => trace.slice(0, -1).map((point, index) => {
+      {[usableA, usableB].map((trace, traceIndex) => trace.slice(0, -1).map((point, index) => {
         const start = project(point); const end = project(trace[index + 1]);
         return <line key={`${traceIndex}-${index}`} x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke={traceIndex ? "#35d6d0" : "#f6c945"} strokeWidth={2.5} strokeLinecap="round" />;
       }))}
-      {a.filter((_, index) => index % 5 === 0).map((point, index) => {
+      {usableA.filter((_, index) => index % 5 === 0).map((point, index) => {
         const p = project(point);
         return <circle key={`hit-${index}`} cx={p.x} cy={p.y} r={7} fill="transparent" className="cursor-crosshair" onClick={() => onCursor(point.distance_m)} />;
       })}
@@ -497,6 +595,10 @@ function LapSelect({ label, value, session, onChange }: { label: string; value: 
 
 function TextField({ label, value, onChange, placeholder, type = "text" }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; type?: string }) {
   return <label className="block text-xs text-slate-400">{label}<input type={type} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} className="mt-1 min-h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white" /></label>;
+}
+
+function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
+  return <label className="block text-xs text-slate-400">{label}<input type="number" min="0" step="0.1" value={Number.isFinite(value) ? value : ""} onChange={(event) => onChange(event.target.value === "" ? Number.NaN : Number(event.target.value))} className="mt-1 min-h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white" /></label>;
 }
 
 function TextArea({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {

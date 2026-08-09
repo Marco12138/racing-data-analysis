@@ -386,12 +386,19 @@ export type SetupSessionSummary = {
 export class XrkApiError extends Error {
   readonly code: string;
   readonly requestId: string | null;
+  readonly status: number | null;
 
-  constructor(message: string, code = "XRK_REQUEST_FAILED", requestId: string | null = null) {
+  constructor(
+    message: string,
+    code = "XRK_REQUEST_FAILED",
+    requestId: string | null = null,
+    status: number | null = null
+  ) {
     super(message);
     this.name = "XrkApiError";
     this.code = code;
     this.requestId = requestId;
+    this.status = status;
   }
 }
 
@@ -406,13 +413,15 @@ async function responseError(response: Response, fallback: string): Promise<XrkA
     return new XrkApiError(
       body.message ?? body.detail ?? fallback,
       body.error_code ?? "XRK_REQUEST_FAILED",
-      body.request_id ?? response.headers.get("X-Request-ID")
+      body.request_id ?? response.headers.get("X-Request-ID"),
+      response.status
     );
   } catch {
     return new XrkApiError(
       fallback,
       "XRK_REQUEST_FAILED",
-      response.headers.get("X-Request-ID")
+      response.headers.get("X-Request-ID"),
+      response.status
     );
   }
 }
