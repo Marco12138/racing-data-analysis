@@ -15,6 +15,10 @@ import pandas as pd
 from fastapi import APIRouter, File, Request, UploadFile
 from pydantic import BaseModel, Field
 
+from ..analysis.llm_narrative import (
+    build_xrk_narrative_evidence,
+    generate_llm_narrative,
+)
 from ..analysis.xrk_session_analysis import analyze_xrk_session
 from .errors import PublicApiError
 from ..importers.inspection_store import InspectionExpiredError
@@ -269,6 +273,11 @@ async def analyze_xrk(
             },
             max_comparison_points=settings.xrk_max_comparison_points,
         )
+        narrative = await generate_llm_narrative(
+            build_xrk_narrative_evidence(result)
+        )
+        if narrative is not None:
+            result["narrative"] = narrative
         return result
     except ValueError as exc:
         raise PublicApiError(
