@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useRef, useState, type Ref } from "react";
+import { useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import {
   Activity,
   BarChart3,
   ChevronDown,
   Gauge,
+  Languages,
   Play,
   Sparkles,
   Upload,
@@ -13,27 +14,29 @@ import {
 } from "lucide-react";
 
 import type { PublicDemoSummary, PublicDemoTrackPoint } from "../lib/publicDemo";
+import { useI18n, type TranslationKey } from "../lib/i18n";
 import { RacingDashboard } from "./RacingDashboard";
 
 const capabilities = [
   {
     icon: <Activity size={20} />,
-    title: "Telemetry Analysis",
-    description: "Analyze speed, throttle, brake and driving behavior.",
+    title: "capabilities.telemetry.title",
+    description: "capabilities.telemetry.description",
   },
   {
     icon: <BarChart3 size={20} />,
-    title: "Lap Performance",
-    description: "Identify sector-level time loss.",
+    title: "capabilities.lap.title",
+    description: "capabilities.lap.description",
   },
   {
     icon: <Zap size={20} />,
-    title: "Driving Insight",
-    description: "Generate actionable feedback for drivers.",
+    title: "capabilities.insight.title",
+    description: "capabilities.insight.description",
   },
-];
+] satisfies Array<{ icon: ReactNode; title: TranslationKey; description: TranslationKey }>;
 
 export function PublicDemoClient({ initialDemo }: { initialDemo: PublicDemoSummary | null }) {
+  const { locale, setLocale, t } = useI18n();
   const [demoVersion, setDemoVersion] = useState(0);
   const [loadDemo, setLoadDemo] = useState(false);
   const previewRef = useRef<HTMLElement>(null);
@@ -54,25 +57,29 @@ export function PublicDemoClient({ initialDemo }: { initialDemo: PublicDemoSumma
   return (
     <main className="public-demo-page">
       <section className="public-hero" aria-labelledby="platform-title">
-        <nav className="public-nav" aria-label="Primary navigation">
-          <span className="public-brand"><Gauge size={19} /> Racing Data Lab</span>
-          <button type="button" className="nav-command" onClick={() => openDashboard(false)}>
-            Open Dashboard
-          </button>
+        <nav className="public-nav" aria-label={t("nav.primary")}>
+          <span className="public-brand"><Gauge size={19} /> {t("brand.name")}</span>
+          <div className="public-nav-actions">
+            <div className="language-switch" aria-label="Language">
+              <Languages size={15} aria-hidden="true" />
+              <button type="button" className={locale === "zh" ? "is-active" : ""} onClick={() => setLocale("zh")}>中</button>
+              <button type="button" className={locale === "en" ? "is-active" : ""} onClick={() => setLocale("en")}>EN</button>
+            </div>
+            <button type="button" className="nav-command" onClick={() => openDashboard(false)}>
+              {t("nav.openDashboard")}
+            </button>
+          </div>
         </nav>
         <div className="hero-content">
-          <p className="hero-kicker">Motorsport performance engineering</p>
-          <h1 id="platform-title">AI Racing Telemetry Analysis Platform</h1>
-          <p className="hero-description">
-            A data-driven platform for analyzing racing performance using telemetry data,
-            lap comparison and AI-assisted insights.
-          </p>
+          <p className="hero-kicker">{t("hero.kicker")}</p>
+          <h1 id="platform-title">{t("hero.title")}</h1>
+          <p className="hero-description">{t("hero.description")}</p>
           <div className="hero-actions">
             <button type="button" className="hero-primary" onClick={showSamplePreview}>
-              <Play size={18} fill="currentColor" /> Try Demo with sample XRK session
+              <Play size={18} fill="currentColor" /> {t("hero.tryDemo")}
             </button>
             <button type="button" className="hero-secondary" onClick={() => openDashboard(false)}>
-              <Upload size={18} /> Upload Data
+              <Upload size={18} /> {t("hero.upload")}
             </button>
           </div>
         </div>
@@ -80,7 +87,7 @@ export function PublicDemoClient({ initialDemo }: { initialDemo: PublicDemoSumma
           type="button"
           className="hero-scroll"
           onClick={showSamplePreview}
-          aria-label="View the public sample session"
+          aria-label={t("hero.scroll")}
         >
           <ChevronDown size={22} />
         </button>
@@ -92,14 +99,14 @@ export function PublicDemoClient({ initialDemo }: { initialDemo: PublicDemoSumma
         onOpenFullDemo={() => openDashboard(true)}
       />
 
-      <section id="capabilities" className="capability-band" aria-label="Platform capabilities">
+      <section id="capabilities" className="capability-band" aria-label={t("capabilities.label")}>
         <div className="capability-inner">
           {capabilities.map((capability) => (
             <article key={capability.title} className="capability-item">
               <span>{capability.icon}</span>
               <div>
-                <h2>{capability.title}</h2>
-                <p>{capability.description}</p>
+                <h2>{t(capability.title)}</h2>
+                <p>{t(capability.description)}</p>
               </div>
             </article>
           ))}
@@ -122,6 +129,7 @@ function PublicDemoDashboard({
   demo: PublicDemoSummary | null;
   onOpenFullDemo: () => void;
 }) {
+  const { t } = useI18n();
   const sectorNames = useMemo(
     () => demo ? Object.keys(demo.sector_loss.sector_best).sort() : [],
     [demo]
@@ -142,39 +150,36 @@ function PublicDemoDashboard({
     <section ref={ref} id="sample-session" className="public-demo-preview" aria-labelledby="sample-session-title">
       <div className="public-demo-preview__header">
         <div>
-          <p className="hero-kicker">Published analysis · real completed laps</p>
-          <h2 id="sample-session-title">Anonymized sample XRK session</h2>
-          <p>
-            Read-only evidence from a publication-reviewed session. Virtual sectors are derived
-            from GPS distance and are not official timing splits.
-          </p>
+          <p className="hero-kicker">{t("demo.kicker")}</p>
+          <h2 id="sample-session-title">{t("demo.title")}</h2>
+          <p>{t("demo.description")}</p>
         </div>
         <button type="button" className="hero-primary" onClick={onOpenFullDemo} disabled={!demo}>
-          <Gauge size={18} /> Open full analysis
+          <Gauge size={18} /> {t("demo.openFull")}
         </button>
       </div>
 
       {demo ? (
         <div className="public-demo-preview__body">
           <div className="public-demo-metrics" aria-label="Sample session metrics">
-            <Metric label="Fastest lap" value={`${demo.fastest_lap.lap_time.toFixed(3)}s`} detail={`Lap ${demo.fastest_lap.lap}`} />
-            <Metric label="Timed laps" value={String(demo.lap_rows.length)} detail="Real logger laps" />
-            <Metric label="Track length" value={`${demo.track.lap_length_m.toFixed(1)} m`} detail="Calculated from cleaned GPS" />
+            <Metric label={t("demo.fastestLap")} value={`${demo.fastest_lap.lap_time.toFixed(3)}s`} detail={`Lap ${demo.fastest_lap.lap}`} />
+            <Metric label={t("demo.timedLaps")} value={String(demo.lap_rows.length)} detail={t("demo.realLoggerLaps")} />
+            <Metric label={t("demo.trackLength")} value={`${demo.track.lap_length_m.toFixed(1)} m`} detail={t("demo.cleanedGps")} />
           </div>
 
           <div className="public-demo-grid">
             <section className="public-demo-module" aria-labelledby="demo-track-title">
               <div className="module-heading">
-                <h3 id="demo-track-title">GPS track</h3>
-                <span>Fastest valid lap</span>
+                <h3 id="demo-track-title">{t("demo.gpsTrack")}</h3>
+                <span>{t("demo.fastestValidLap")}</span>
               </div>
               <MiniTrackMap points={demo.track.points} />
             </section>
 
             <section className="public-demo-module" aria-labelledby="demo-laps-title">
               <div className="module-heading">
-                <h3 id="demo-laps-title">Lap times</h3>
-                <span>Logger timing</span>
+                <h3 id="demo-laps-title">{t("demo.lapTimes")}</h3>
+                <span>{t("demo.loggerTiming")}</span>
               </div>
               <div className="demo-lap-list thin-scrollbar">
                 {demo.lap_rows.map((lap) => (
@@ -188,15 +193,15 @@ function PublicDemoDashboard({
 
             <section className="public-demo-module" aria-labelledby="demo-sector-title">
               <div className="module-heading">
-                <h3 id="demo-sector-title">Sector loss overview</h3>
-                <span>{demo.sector_loss.official ? "Official sectors" : "Virtual sectors"}</span>
+                <h3 id="demo-sector-title">{t("demo.sectorLoss")}</h3>
+                <span>{demo.sector_loss.official ? t("demo.officialSectors") : t("demo.virtualSectors")}</span>
               </div>
               <div className="sector-loss-bars">
                 {sectorNames.map((sector) => {
                   const value = averageLoss[sector] ?? 0;
                   return (
                     <div key={sector}>
-                      <div><span>{formatSector(sector)}</span><strong>+{value.toFixed(3)}s avg</strong></div>
+                      <div><span>{formatSector(sector)}</span><strong>{t("demo.averageLoss", { value: value.toFixed(3) })}</strong></div>
                       <span className="sector-loss-track"><i style={{ width: `${Math.max(3, value / maxLoss * 100)}%` }} /></span>
                     </div>
                   );
@@ -206,23 +211,23 @@ function PublicDemoDashboard({
 
             <section className="public-demo-module public-demo-summary" aria-labelledby="demo-summary-title">
               <div className="module-heading">
-                <h3 id="demo-summary-title"><Sparkles size={16} /> AI review summary</h3>
-                <span>{demo.summary.source === "llm" ? "AI narrative" : "Structured fallback"}</span>
+                <h3 id="demo-summary-title"><Sparkles size={16} /> {t("demo.aiSummary")}</h3>
+                <span>{demo.summary.source === "llm" ? t("demo.aiNarrative") : t("demo.structuredFallback")}</span>
               </div>
               {demo.summary.source === "llm" && demo.summary.narrative ? (
                 <p>{demo.summary.narrative}</p>
               ) : demo.summary.bullets.length ? (
                 <ul>{demo.summary.bullets.slice(0, 3).map((bullet) => <li key={bullet}>{bullet}</li>)}</ul>
               ) : (
-                <p>Structured coaching evidence is available in the full analysis.</p>
+                <p>{t("demo.structuredAvailable")}</p>
               )}
-              <small>All reference laps are real completed laps. Validate inferred findings with a coach.</small>
+              <small>{t("demo.evidenceBoundary")}</small>
             </section>
           </div>
         </div>
       ) : (
         <div className="public-demo-unavailable" role="status">
-          The reviewed sample session is temporarily unavailable. Upload and CSV workflows remain available below.
+          {t("demo.unavailable")}
         </div>
       )}
     </section>
@@ -234,8 +239,9 @@ function Metric({ label, value, detail }: { label: string; value: string; detail
 }
 
 function MiniTrackMap({ points }: { points: PublicDemoTrackPoint[] }) {
+  const { t } = useI18n();
   const usable = points.filter((point) => Number.isFinite(point.local_x_m) && Number.isFinite(point.local_y_m));
-  if (usable.length < 2) return <p className="public-demo-unavailable">GPS track unavailable</p>;
+  if (usable.length < 2) return <p className="public-demo-unavailable">{t("demo.trackUnavailable")}</p>;
   const xs = usable.map((point) => point.local_x_m);
   const ys = usable.map((point) => point.local_y_m);
   const minX = Math.min(...xs);
@@ -255,7 +261,7 @@ function MiniTrackMap({ points }: { points: PublicDemoTrackPoint[] }) {
     return `${index ? "L" : "M"}${x.toFixed(2)},${y.toFixed(2)}`;
   }).join(" ");
   return (
-    <svg viewBox="0 0 560 320" className="public-demo-track" role="img" aria-label="GPS track outline for the sample session">
+    <svg viewBox="0 0 560 320" className="public-demo-track" role="img" aria-label={t("demo.gpsTrack")}>
       <path d={path} fill="none" stroke="rgba(53,214,208,.18)" strokeWidth="12" strokeLinecap="round" strokeLinejoin="round" />
       <path d={path} fill="none" stroke="#35d6d0" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
       <circle cx={offsetX} cy={320 - offsetY} r="6" fill="#f6c945" />

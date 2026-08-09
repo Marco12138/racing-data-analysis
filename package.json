@@ -13,7 +13,7 @@
     "build:vercel": "DEPLOY_TARGET=vercel next build && node scripts/check-public-bundle.mjs .next/static",
     "start:next": "next start",
     "test": "pnpm run build && pnpm run test:frontend && node --test tests/rendered-html.test.mjs",
-    "test:frontend": "node --experimental-strip-types --test tests/runtime-config.test.mjs tests/session-workspace.test.mjs tests/real-demo-session.test.mjs tests/public-demo-summary.test.mjs tests/frontend-analysis.test.mjs tests/video-telemetry-sync.test.mjs tests/driver-comparison.test.mjs",
+    "test:frontend": "node --experimental-strip-types --test tests/runtime-config.test.mjs tests/session-workspace.test.mjs tests/real-demo-session.test.mjs tests/public-demo-summary.test.mjs tests/i18n.test.mjs tests/frontend-analysis.test.mjs tests/video-telemetry-sync.test.mjs tests/driver-comparison.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },

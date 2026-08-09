@@ -81,6 +81,42 @@ body {
   text-transform: uppercase;
 }
 
+.public-nav-actions,
+.language-switch {
+  display: flex;
+  align-items: center;
+}
+
+.public-nav-actions {
+  gap: 10px;
+}
+
+.language-switch {
+  min-height: 40px;
+  gap: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  background: rgba(4, 7, 10, 0.72);
+  padding: 0 6px 0 10px;
+  color: #aeb8c4;
+}
+
+.language-switch button {
+  width: 34px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: #aeb8c4;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.language-switch button.is-active {
+  background: #f6c945;
+  color: #080a0e;
+}
+
 .nav-command {
   min-height: 40px;
   border: 1px solid rgba(255, 255, 255, 0.42);
@@ -501,6 +537,10 @@ select {
 
   .hero-content {
     padding-top: 72px;
+  }
+
+  .nav-command {
+    display: none;
   }
 
   .hero-content h1 {

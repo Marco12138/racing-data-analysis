@@ -48,18 +48,19 @@ import {
   type SeekRequest,
   type VideoSyncCalibration,
 } from "../lib/videoTelemetrySync";
+import { useI18n, type TranslationKey } from "../lib/i18n";
 
 const tabs = [
-  ["overview", "Overview", Gauge],
-  ["quality", "Lap Quality", ShieldCheck],
-  ["track", "Track Map", Map],
-  ["comparison", "Lap Comparison", BarChart3],
-  ["actions", "Driver Benchmark", Activity],
-  ["sectors", "Sector / Zones", Flag],
-  ["video", "Video Sync", Video],
-  ["coach", "AI Coach Summary", Target],
-  ["report", "Report", FileText],
-] as const;
+  ["overview", "xrk.tab.overview", Gauge],
+  ["quality", "xrk.tab.quality", ShieldCheck],
+  ["track", "xrk.tab.track", Map],
+  ["comparison", "xrk.tab.comparison", BarChart3],
+  ["actions", "xrk.tab.actions", Activity],
+  ["sectors", "xrk.tab.sectors", Flag],
+  ["video", "xrk.tab.video", Video],
+  ["coach", "xrk.tab.coach", Target],
+  ["report", "xrk.tab.report", FileText],
+] as const satisfies ReadonlyArray<readonly [string, TranslationKey, typeof Gauge]>;
 
 type TabId = (typeof tabs)[number][0];
 type MapMode = "reference" | "target" | "overlay";
@@ -76,6 +77,7 @@ export function XrkAnalysisWorkspace({
   onAnalyze: (options: Partial<XrkAnalyzeOptions>) => Promise<void>;
   publishedDemo?: boolean;
 }) {
+  const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [cursorDistance, setCursorDistance] = useState(0);
   const [seekRequest, setSeekRequest] = useState<SeekRequest | null>(null);
@@ -144,8 +146,8 @@ export function XrkAnalysisWorkspace({
 
   return (
     <section className="flex min-w-0 flex-col gap-5">
-      <nav className="panel thin-scrollbar flex overflow-x-auto rounded-lg p-2" aria-label="XRK analysis views">
-        {tabs.map(([id, label, Icon]) => (
+      <nav className="panel thin-scrollbar flex overflow-x-auto rounded-lg p-2" aria-label={t("xrk.navLabel")}>
+        {tabs.map(([id, labelKey, Icon]) => (
           <button
             key={id}
             type="button"
@@ -156,21 +158,20 @@ export function XrkAnalysisWorkspace({
                 : "text-slate-400 hover:bg-slate-800 hover:text-white"
             }`}
           >
-            <Icon size={16} /> {label}
+            <Icon size={16} /> {t(labelKey)}
           </button>
         ))}
       </nav>
 
       {analyzing && (
         <div className="rounded-md border border-[#35d6d0]/30 bg-[#35d6d0]/10 px-4 py-3 text-sm text-cyan-100">
-          Recalculating distance alignment, sectors, zones and behavior evidence...
+          {t("xrk.status.analyzing")}
         </div>
       )}
 
       {publishedDemo && (
         <div className="rounded-md border border-[#35d6d0]/30 bg-[#35d6d0]/10 px-4 py-3 text-sm text-cyan-100">
-          Anonymized real session · read-only published analysis. All displayed telemetry comes
-          from the reviewed artifact; interactive recalculation requires uploading a session.
+          {t("xrk.status.published")}
         </div>
       )}
 
@@ -195,7 +196,7 @@ export function XrkAnalysisWorkspace({
             onSelect={selectDistance}
           />
         ) : (
-          <Unavailable reason="GPS is unavailable or did not pass quality checks." />
+          <Unavailable reason={t("xrk.unavailable.gps")} />
         )
       )}
 
@@ -210,7 +211,7 @@ export function XrkAnalysisWorkspace({
             readOnly={publishedDemo}
           />
         ) : (
-          <Unavailable reason="Two laps could not be aligned by track distance." />
+          <Unavailable reason={t("xrk.unavailable.alignment")} />
         )
       )}
 
@@ -222,7 +223,7 @@ export function XrkAnalysisWorkspace({
             onCursor={selectDistance}
           />
         ) : (
-          <Unavailable reason="RPM channel unavailable. GPS and lap analysis remain usable." />
+          <Unavailable reason={t("xrk.unavailable.rpm")} />
         )
       )}
 
@@ -241,7 +242,7 @@ export function XrkAnalysisWorkspace({
             readOnly={publishedDemo}
           />
         ) : (
-          <Unavailable reason="Distance-based sectors require usable GPS and lap timing." />
+          <Unavailable reason={t("xrk.unavailable.sectors")} />
         )
       )}
 
@@ -268,15 +269,16 @@ function Overview({
   analysis: XrkAnalysis;
   selectedEvent?: XrkEvent;
 }) {
+  const { t } = useI18n();
   const metrics = [
-    ["Fastest valid lap", analysis.lap_quality.top_valid_laps[0] ? `Lap ${analysis.lap_quality.top_valid_laps[0].lap}` : "Unavailable"],
-    ["Target lap", `Lap ${analysis.target_lap}`],
-    ["Reference-eligible", String(analysis.lap_quality.reference_eligible_count)],
-    ["Track length", analysis.track ? `${analysis.track.lap_length_m.toFixed(1)} m` : "Unavailable"],
+    [t("xrk.overview.fastest"), analysis.lap_quality.top_valid_laps[0] ? `Lap ${analysis.lap_quality.top_valid_laps[0].lap}` : t("xrk.video.unavailableTime")],
+    [t("xrk.overview.target"), `Lap ${analysis.target_lap}`],
+    [t("xrk.overview.eligible"), String(analysis.lap_quality.reference_eligible_count)],
+    [t("xrk.overview.trackLength"), analysis.track ? `${analysis.track.lap_length_m.toFixed(1)} m` : t("xrk.video.unavailableTime")],
   ];
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
-      <Panel title="Analysis boundary" subtitle="What this session can support">
+      <Panel title={t("xrk.overview.boundaryTitle")} subtitle={t("xrk.overview.boundarySubtitle")}>
         <div className="grid gap-3 sm:grid-cols-2">
           {metrics.map(([label, value]) => (
             <div key={label} className="rounded-md border border-slate-800 bg-slate-950/60 p-4">
@@ -286,17 +288,15 @@ function Overview({
           ))}
         </div>
         <p className="mt-4 text-sm leading-6 text-slate-400">
-          Virtual sectors and suggested zones are calculated from GPS distance. They are not
-          official timing splits or named circuit corners.
+          {t("xrk.overview.virtualBoundary")}
         </p>
         <p className="mt-3 text-sm leading-6 text-slate-300">
-          Every comparison reference is a real completed lap that passed the quality gate.
-          The system does not construct a stitched target lap or RPM trace.
+          {t("xrk.overview.realLapBoundary")}
         </p>
       </Panel>
-      <Panel title="Evidence at cursor" subtitle="Measured, calculated and inferred">
+      <Panel title={t("xrk.overview.evidenceTitle")} subtitle={t("xrk.overview.evidenceSubtitle")}>
         {selectedEvent ? <EventEvidence event={selectedEvent} /> : (
-          <p className="text-sm text-slate-400">Select a track point or event to inspect its evidence.</p>
+          <p className="text-sm text-slate-400">{t("xrk.overview.selectEvidence")}</p>
         )}
       </Panel>
     </div>
@@ -314,6 +314,7 @@ function LapQualityPanel({
   onAnalyze: (options: Partial<XrkAnalyzeOptions>) => Promise<void>;
   readOnly: boolean;
 }) {
+  const { t } = useI18n();
   const top = new Set(analysis.lap_quality.top_valid_laps.map((lap) => lap.lap));
   const [absoluteGap, setAbsoluteGap] = useState(
     analysis.lap_quality.config.absolute_gap_threshold_s
@@ -323,18 +324,18 @@ function LapQualityPanel({
   );
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
-      <Panel title="Lap Quality Gate" subtitle="Only eligible real laps can enter the reference Top 3">
+      <Panel title={t("xrk.quality.title")} subtitle={t("xrk.quality.subtitle")}>
         <div className="thin-scrollbar overflow-auto">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead className="text-xs uppercase text-slate-500">
               <tr>
-                <th className="py-2">Lap</th>
-                <th>Lap time</th>
-                <th>Gap</th>
-                <th>Status</th>
-                <th>Score</th>
-                <th>AI reference</th>
-                <th>Reason</th>
+                <th className="py-2">{t("xrk.quality.lap")}</th>
+                <th>{t("xrk.quality.lapTime")}</th>
+                <th>{t("xrk.quality.gap")}</th>
+                <th>{t("xrk.quality.status")}</th>
+                <th>{t("xrk.quality.score")}</th>
+                <th>{t("xrk.quality.aiReference")}</th>
+                <th>{t("xrk.quality.reason")}</th>
               </tr>
             </thead>
             <tbody>
@@ -345,21 +346,21 @@ function LapQualityPanel({
                   <td>{lap.gap_to_fastest >= 0 ? "+" : ""}{lap.gap_to_fastest.toFixed(3)}s</td>
                   <td><span className={qualityClass(lap.quality_status)}>{humanEvent(lap.quality_status)}</span></td>
                   <td>{Math.round(lap.quality_score * 100)}%</td>
-                  <td>{top.has(lap.lap) ? "Top reference" : lap.analysis_eligible ? "Eligible" : "No"}</td>
-                  <td className="max-w-[280px] text-xs text-slate-500">{lap.reasons.join(" ") || "Passed timing and telemetry checks."}</td>
+                  <td>{top.has(lap.lap) ? t("xrk.quality.topReference") : lap.analysis_eligible ? t("xrk.quality.eligible") : t("xrk.quality.no")}</td>
+                  <td className="max-w-[280px] text-xs text-slate-500">{lap.reasons.join(" ") || t("xrk.quality.passed")}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </Panel>
-      <Panel title="Reference policy" subtitle="Real completed laps only">
+      <Panel title={t("xrk.quality.policyTitle")} subtitle={t("xrk.quality.policySubtitle")}>
         <dl className="space-y-3 text-sm">
-          <QualityFact label="Absolute gap" value={`${analysis.lap_quality.config.absolute_gap_threshold_s.toFixed(3)}s`} />
-          <QualityFact label="Relative gap" value={`${analysis.lap_quality.config.relative_gap_threshold_pct.toFixed(1)}%`} />
-          <QualityFact label="Available Top laps" value={String(analysis.lap_quality.top_valid_laps.length)} />
+          <QualityFact label={t("xrk.quality.absoluteGap")} value={`${analysis.lap_quality.config.absolute_gap_threshold_s.toFixed(3)}s`} />
+          <QualityFact label={t("xrk.quality.relativeGap")} value={`${analysis.lap_quality.config.relative_gap_threshold_pct.toFixed(1)}%`} />
+          <QualityFact label={t("xrk.quality.availableTop")} value={String(analysis.lap_quality.top_valid_laps.length)} />
           <QualityFact
-            label="Fastest consistent"
+            label={t("xrk.quality.fastestConsistent")}
             value={analysis.lap_quality.fastest_consistent_lap
               ? `Lap ${analysis.lap_quality.fastest_consistent_lap.lap}`
               : "Unavailable"}
@@ -371,9 +372,9 @@ function LapQualityPanel({
           </p>
         )}
         {!readOnly && <div className="mt-5 border-t border-slate-800 pt-4">
-          <p className="text-xs font-semibold uppercase text-slate-500">Coach thresholds</p>
+          <p className="text-xs font-semibold uppercase text-slate-500">{t("xrk.quality.thresholds")}</p>
           <label className="mt-3 block text-xs text-slate-400">
-            Absolute gap (seconds)
+            {t("xrk.quality.absoluteSeconds")}
             <input
               type="number"
               min={0.05}
@@ -385,7 +386,7 @@ function LapQualityPanel({
             />
           </label>
           <label className="mt-3 block text-xs text-slate-400">
-            Relative gap (%)
+            {t("xrk.quality.relativePercent")}
             <input
               type="number"
               min={0.1}
@@ -405,7 +406,7 @@ function LapQualityPanel({
             })}
             className="mt-4 w-full rounded-md bg-[#f6c945] px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-50"
           >
-            Apply quality gate
+            {t("xrk.quality.apply")}
           </button>
         </div>}
       </Panel>
@@ -422,18 +423,19 @@ function TrackMapPanel({
   cursorDistance: number;
   onSelect: (distance: number) => void;
 }) {
+  const { t } = useI18n();
   const [mode, setMode] = useState<MapMode>("overlay");
   const [channel, setChannel] = useState<ColorChannel>("speed");
   return (
     <Panel
-      title="Track Map"
-      subtitle="Local metre projection with shared distance cursor"
+      title={t("xrk.track.title")}
+      subtitle={t("xrk.track.subtitle")}
       action={
         <div className="flex flex-wrap gap-2">
           <Select value={mode} onChange={(value) => setMode(value as MapMode)} options={[
-            ["reference", "Reference"],
-            ["target", "Selected"],
-            ["overlay", "Overlay"],
+            ["reference", t("xrk.map.reference")],
+            ["target", t("xrk.map.selected")],
+            ["overlay", t("xrk.map.overlay")],
           ]} />
           <Select value={channel} onChange={(value) => setChannel(value as ColorChannel)} options={[
             ["speed", "Speed"],
@@ -477,6 +479,7 @@ function ComparisonPanel({
   onAnalyze: (options: Partial<XrkAnalyzeOptions>) => Promise<void>;
   readOnly: boolean;
 }) {
+  const { t } = useI18n();
   const topLaps = analysis.top_laps_comparison.laps;
   const topColors = ["#f6c945", "#35d6d0", "#ff5964"];
   const referenceOptions = analysis.lap_quality.laps
@@ -500,8 +503,8 @@ function ComparisonPanel({
   return (
     <>
       <Panel
-        title="Top valid laps · RPM consensus"
-        subtitle="Fastest, second and third fastest quality-gated real laps aligned by distance"
+        title={t("xrk.comparison.topTitle")}
+        subtitle={t("xrk.comparison.topSubtitle")}
       >
         {analysis.top_laps_comparison.aligned.length && topRpmLines.length ? (
           <TelemetryChart
@@ -512,27 +515,27 @@ function ComparisonPanel({
             height={320}
           />
         ) : (
-          <p className="text-sm text-slate-400">No distance-aligned eligible lap overlay is available.</p>
+          <p className="text-sm text-slate-400">{t("xrk.comparison.empty")}</p>
         )}
         <p className="mt-3 text-xs leading-5 text-slate-500">
           {analysis.lap_quality.minimum_top_laps_met
-            ? "All three traces are real completed laps. No RPM segments are stitched or averaged into a target curve."
+            ? t("xrk.comparison.realOnly")
             : analysis.lap_quality.notice}
         </p>
       </Panel>
       <Panel
-        title="Selected real-lap comparison"
-        subtitle="Reference must pass the quality gate; the selected lap may be used for context"
+        title={t("xrk.comparison.selectedTitle")}
+        subtitle={t("xrk.comparison.selectedSubtitle")}
         action={readOnly ? undefined : (
           <div className="flex flex-wrap gap-2">
             <LapPicker
-              label="Reference"
+              label={t("xrk.comparison.reference")}
               value={analysis.reference_lap}
               options={referenceOptions}
               onChange={(reference_lap) => onAnalyze({ reference_lap })}
             />
             <LapPicker
-              label="Target"
+              label={t("xrk.comparison.target")}
               value={analysis.target_lap}
               options={lapOptions}
               onChange={(target_lap) => onAnalyze({ target_lap })}
@@ -552,7 +555,7 @@ function ComparisonPanel({
         />
       </Panel>
       <div className="grid gap-5 xl:grid-cols-2">
-        <Panel title="Speed vs Distance" subtitle="Reference and selected lap">
+        <Panel title={t("xrk.comparison.speedTitle")} subtitle={t("xrk.comparison.speedSubtitle")}>
           <TelemetryChart
             data={analysis.comparison}
             lines={[
@@ -563,7 +566,7 @@ function ComparisonPanel({
             onCursor={onCursor}
           />
         </Panel>
-        <Panel title="Cumulative Time Delta" subtitle="Positive means the target lap is behind">
+        <Panel title={t("xrk.comparison.deltaTitle")} subtitle={t("xrk.comparison.deltaSubtitle")}>
           <TelemetryChart
             data={analysis.comparison}
             lines={[["cumulative_time_delta_s", "Time delta", "#ff5964"]]}
@@ -585,10 +588,11 @@ function ActionsPanel({
   cursorDistance: number;
   onCursor: (distance: number) => void;
 }) {
+  const { t } = useI18n();
   return (
     <>
       <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
-        <Panel title="Driver Benchmark & Corner Dynamics" subtitle="RPM with longitudinal G as supporting evidence">
+        <Panel title={t("xrk.actions.title")} subtitle={t("xrk.actions.subtitle")}>
           <TelemetryChart
             data={analysis.comparison}
             lines={[
@@ -601,7 +605,7 @@ function ActionsPanel({
             height={340}
           />
         </Panel>
-        <Panel title="Detected events" subtitle="Select an event to link map, charts and video">
+        <Panel title={t("xrk.actions.eventsTitle")} subtitle={t("xrk.actions.eventsSubtitle")}>
           <div className="thin-scrollbar max-h-[390px] space-y-2 overflow-auto">
             {analysis.events.length ? analysis.events.map((event, index) => (
               <button
@@ -618,15 +622,13 @@ function ActionsPanel({
                   Lap {event.lap} · {event.distance_m.toFixed(1)} m · {eventChannels(event).join(", ")}
                 </p>
               </button>
-            )) : <p className="text-sm text-slate-400">No supported action events were found.</p>}
+            )) : <p className="text-sm text-slate-400">{t("xrk.actions.noEvents")}</p>}
           </div>
         </Panel>
       </div>
       {!analysis.capabilities.direct_brake && (
         <div className="rounded-md border border-amber-400/25 bg-amber-400/8 px-4 py-3 text-sm leading-6 text-amber-100">
-          No direct brake channel is present. “Likely braking” is an inference from RPM,
-          speed deceleration, negative longitudinal G and track curvature, and is capped at
-          medium confidence.
+          {t("xrk.actions.noBrake")}
         </div>
       )}
     </>
@@ -656,6 +658,7 @@ function SectorZonePanel({
   analyzing: boolean;
   readOnly: boolean;
 }) {
+  const { t } = useI18n();
   const [mapTool, setMapTool] = useState<"sector" | "zone">("sector");
   function handleMapPoint(distance: number) {
     if (mapTool === "zone") {
@@ -671,17 +674,17 @@ function SectorZonePanel({
   return (
     <>
       <Panel
-        title="Virtual sectors & suggested zones"
-        subtitle="Click the reference trace to place distance-based boundaries"
+        title={t("xrk.sectors.title")}
+        subtitle={t("xrk.sectors.subtitle")}
         action={readOnly ? undefined : (
           <div className="flex flex-wrap gap-2">
             <Select value={String(sectorCount)} onChange={(value) => {
               setSectorCount(Number(value));
               setCustomBoundaries([]);
-            }} options={[2, 3, 4, 5, 6].map((value) => [String(value), `${value} sectors`])} />
+            }} options={[2, 3, 4, 5, 6].map((value) => [String(value), t("xrk.sectors.count", { value })])} />
             <Select value={mapTool} onChange={(value) => setMapTool(value as "sector" | "zone")} options={[
-              ["sector", "Sector boundary"],
-              ["zone", "Zone entry / exit"],
+              ["sector", t("xrk.sectors.boundaryTool")],
+              ["zone", t("xrk.sectors.zoneTool")],
             ]} />
             <button
               type="button"
@@ -689,7 +692,7 @@ function SectorZonePanel({
               onClick={() => void onApply()}
               className="rounded-md border border-[#f6c945] bg-[#f6c945] px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-50"
             >
-              Apply
+              {t("xrk.sectors.apply")}
             </button>
           </div>
         )}
@@ -705,18 +708,18 @@ function SectorZonePanel({
         />
         <p className="mt-3 text-xs text-slate-400">
           {readOnly
-            ? "Published virtual sectors and suggested zones are fixed for this read-only demo."
+            ? t("xrk.sectors.readOnly")
             : mapTool === "sector"
-            ? `${customBoundaries.length}/${sectorCount - 1} custom boundaries selected. Empty selection uses equal distance.`
-            : zoneStart === null ? "Click zone entry, then zone exit." : `Zone entry: ${zoneStart.toFixed(1)} m. Select exit.`}
+            ? t("xrk.sectors.selection", { current: customBoundaries.length, required: sectorCount - 1 })
+            : zoneStart === null ? t("xrk.sectors.zoneEntry") : t("xrk.sectors.zoneExit", { value: zoneStart.toFixed(1) })}
         </p>
       </Panel>
       <div className="grid gap-5 xl:grid-cols-2">
-        <Panel title="Sector result" subtitle="Virtual distance timing">
+        <Panel title={t("xrk.sectors.resultTitle")} subtitle={t("xrk.sectors.resultSubtitle")}>
           <div className="thin-scrollbar overflow-auto">
             <table className="w-full min-w-[460px] text-left text-sm">
               <thead className="text-xs uppercase text-slate-500">
-                <tr><th className="py-2">Lap</th>{Object.keys(analysis.sectors!.sector_best).map((key) => <th key={key}>{key}</th>)}</tr>
+                <tr><th className="py-2">{t("xrk.quality.lap")}</th>{Object.keys(analysis.sectors!.sector_best).map((key) => <th key={key}>{key}</th>)}</tr>
               </thead>
               <tbody>
                 {analysis.sectors!.lap_rows.map((row) => (
@@ -729,7 +732,7 @@ function SectorZonePanel({
             </table>
           </div>
         </Panel>
-        <Panel title="Zone comparison" subtitle="Suggested or manually defined analysis ranges">
+        <Panel title={t("xrk.sectors.zoneTitle")} subtitle={t("xrk.sectors.zoneSubtitle")}>
           <div className="thin-scrollbar max-h-[360px] space-y-3 overflow-auto">
             {analysis.zones.comparisons.map((zone) => (
               <article key={zone.id} className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
@@ -739,10 +742,10 @@ function SectorZonePanel({
                 </div>
                 <p className="mt-2 text-xs leading-5 text-slate-300">
                   {zone.entry_distance_m.toFixed(1)}–{zone.exit_distance_m.toFixed(1)} m ·
-                  loss {numberCell(zone.estimated_zone_loss_s)} s ·
+                  {t("xrk.sectors.loss")} {numberCell(zone.estimated_zone_loss_s)} s ·
                   {zone.findings.find((finding) => finding.metric === "minimum_rpm")
-                    ? ` min RPM Δ ${numberCell(zone.findings.find((finding) => finding.metric === "minimum_rpm")?.difference)} rpm`
-                    : " min RPM unavailable"}
+                    ? ` ${t("xrk.sectors.minRpmDelta")} ${numberCell(zone.findings.find((finding) => finding.metric === "minimum_rpm")?.difference)} rpm`
+                    : ` ${t("xrk.sectors.minRpmUnavailable")}`}
                 </p>
               </article>
             ))}
@@ -764,6 +767,7 @@ function VideoSyncPanel({
   seekRequest: SeekRequest | null;
   onCursor: (distance: number) => void;
 }) {
+  const { t } = useI18n();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoUrl, setVideoUrl] = useState("");
   const [videoName, setVideoName] = useState("");
@@ -798,40 +802,42 @@ function VideoSyncPanel({
     if (!videoRef.current || !seekRequest || !analysis.track) return;
     const point = nearestPointByDistance(analysis.track.target, seekRequest.distance_m);
     if (point?.session_time_s == null) {
-      queueMicrotask(() => setSyncError("The selected target-lap point has no telemetry session time."));
+      queueMicrotask(() => setSyncError(t("xrk.video.noTelemetryTime")));
       return;
     }
     const targetTime = telemetryToVideoTimeS(point.session_time_s, offsetMs);
     const validation = validateVideoSeek(targetTime, videoDurationS);
     if (!validation.ok) {
-      queueMicrotask(() => setSyncError(validation.message));
+      queueMicrotask(() => setSyncError(t("xrk.video.seekInvalid")));
       return;
     }
     videoRef.current.currentTime = validation.time_s;
     queueMicrotask(() => {
       setSyncError("");
-      setSyncMessage(
-        `Seeked Selected Lap ${analysis.target_lap} at ${point.distance_m.toFixed(1)} m to video ${validation.time_s.toFixed(3)} s.`
-      );
+      setSyncMessage(t("xrk.video.seeked", {
+        lap: analysis.target_lap,
+        distance: point.distance_m.toFixed(1),
+        video: validation.time_s.toFixed(3),
+      }));
     });
-  }, [seekRequest, offsetMs, videoDurationS, analysis.track, analysis.target_lap]);
+  }, [seekRequest, offsetMs, videoDurationS, analysis.track, analysis.target_lap, t]);
 
   function loadVideoMetadata() {
     const video = videoRef.current;
     if (!video || !videoFile || !Number.isFinite(video.duration) || video.duration <= 0) {
       setVideoDurationS(0);
-      setSyncError("The browser could not read a valid video duration.");
+      setSyncError(t("xrk.video.invalidDuration"));
       return;
     }
     setVideoDurationS(video.duration);
     if (calibration && calibrationMatchesVideo(calibration, videoFile, video.duration)) {
       setOffsetMs(calibration.offset_ms);
-      setSyncMessage(`Restored saved T = D calibration (${signedMilliseconds(calibration.offset_ms)}).`);
+      setSyncMessage(t("xrk.video.restore", { offset: signedMilliseconds(calibration.offset_ms) }));
       setSyncError("");
     } else if (calibration) {
       setOffsetMs(0);
       setSyncMessage("");
-      setSyncError("The saved calibration belongs to a different local video. Calibrate this video before seeking.");
+      setSyncError(t("xrk.video.wrongVideo"));
     } else {
       setSyncError("");
     }
@@ -840,11 +846,11 @@ function VideoSyncPanel({
   function calibrateCurrentMoment() {
     const video = videoRef.current;
     if (!video || !videoFile) {
-      setSyncError("Choose a local video before calibration.");
+      setSyncError(t("xrk.video.chooseBeforeCalibration"));
       return;
     }
     if (!cursorPoint) {
-      setSyncError("Select a telemetry distance on the target-lap map or chart first.");
+      setSyncError(t("xrk.video.selectDistance"));
       return;
     }
     try {
@@ -860,11 +866,13 @@ function VideoSyncPanel({
       setCalibration(next);
       setOffsetMs(next.offset_ms);
       setSyncError("");
-      setSyncMessage(
-        `Calibrated video T ${next.video_time_s.toFixed(3)} s = Selected Lap ${next.target_lap} at D ${next.telemetry_distance_m.toFixed(1)} m.`
-      );
-    } catch (error) {
-      setSyncError((error as Error).message);
+      setSyncMessage(t("xrk.video.calibrated", {
+        video: next.video_time_s.toFixed(3),
+        lap: next.target_lap,
+        distance: next.telemetry_distance_m.toFixed(1),
+      }));
+    } catch {
+      setSyncError(t("xrk.video.calibrationFailed"));
     }
   }
 
@@ -873,17 +881,17 @@ function VideoSyncPanel({
     setCalibration(null);
     window.localStorage.removeItem(storageKey);
     setSyncError("");
-    setSyncMessage("Manual offset is active for this page. Use Calibrate T = D to save a verified anchor.");
+    setSyncMessage(t("xrk.video.manualActive"));
   }
 
   async function runAutomaticAlignment() {
     const video = videoRef.current;
     if (!video || !videoFile || videoDurationS <= 0) {
-      setSyncError("Choose a readable local video before automatic alignment.");
+      setSyncError(t("xrk.video.chooseBeforeAuto"));
       return;
     }
     if (!analysis.inspection_id || analysis.inspection_id.startsWith("public-demo")) {
-      setSyncError("Automatic alignment requires an active temporary XRK inspection.");
+      setSyncError(t("xrk.video.activeInspectionRequired"));
       return;
     }
     autoSyncAbortRef.current?.abort();
@@ -892,12 +900,12 @@ function VideoSyncPanel({
     setAutoSyncing(true);
     setAutoConfidence(null);
     setSyncError("");
-    setSyncMessage("Reading privacy-safe brightness and motion summaries in this browser...");
+    setSyncMessage(t("xrk.video.reading"));
     try {
       const videoFeatures = await extractVideoSyncFeatures(video, {
         signal: controller.signal,
       });
-      setSyncMessage("Comparing browser summaries with temporary XRK GPS speed...");
+      setSyncMessage(t("xrk.video.comparing"));
       const result = await autoSyncVideoTelemetry({
         inspection_id: analysis.inspection_id,
         video_features: videoFeatures,
@@ -907,19 +915,21 @@ function VideoSyncPanel({
       window.localStorage.removeItem(storageKey);
       setAutoConfidence(result.confidence);
       if (result.reliable) {
-        setSyncMessage(
-          `Coarse offset ${signedMilliseconds(result.offset_ms)} applied with ${formatConfidence(result.confidence)} confidence. Verify it against a visible lap marker, then save a manual T = D anchor.`
-        );
+        setSyncMessage(t("xrk.video.autoReliable", {
+          offset: signedMilliseconds(result.offset_ms),
+          confidence: formatConfidence(result.confidence),
+        }));
       } else {
         setSyncMessage("");
-        setSyncError(
-          `Automatic alignment is unreliable (${formatConfidence(result.confidence)} confidence). The coarse ${signedMilliseconds(result.offset_ms)} offset is shown only as a starting point; calibrate manually.`
-        );
+        setSyncError(t("xrk.video.autoUnreliable", {
+          confidence: formatConfidence(result.confidence),
+          offset: signedMilliseconds(result.offset_ms),
+        }));
       }
     } catch (error) {
       if ((error as Error).name !== "AbortError") {
         setSyncMessage("");
-        setSyncError((error as Error).message || "Automatic video alignment failed.");
+        setSyncError((error as Error).message || t("xrk.video.autoFailed"));
       }
     } finally {
       if (autoSyncAbortRef.current === controller) autoSyncAbortRef.current = null;
@@ -938,7 +948,7 @@ function VideoSyncPanel({
 
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
-      <Panel title="Local video sync" subtitle="Video remains in this browser and is never uploaded">
+      <Panel title={t("xrk.video.title")} subtitle={t("xrk.video.subtitle")}>
         {videoUrl ? (
           <video
             ref={videoRef}
@@ -951,7 +961,7 @@ function VideoSyncPanel({
         ) : (
           <label className="flex aspect-video cursor-pointer flex-col items-center justify-center border border-dashed border-slate-700 bg-slate-950/70 text-slate-400 hover:border-[#35d6d0]">
             <Video size={30} />
-            <span className="mt-3 text-sm">Choose onboard video</span>
+            <span className="mt-3 text-sm">{t("xrk.video.choose")}</span>
             <input className="hidden" type="file" accept="video/*" onChange={(event) => {
               const file = event.target.files?.[0];
               if (!file) return;
@@ -968,9 +978,9 @@ function VideoSyncPanel({
         )}
         {videoName && <p className="mt-2 truncate text-xs text-slate-400">{videoName}</p>}
       </Panel>
-      <Panel title="Synchronization" subtitle="Telemetry session time plus manual video offset">
+      <Panel title={t("xrk.video.syncTitle")} subtitle={t("xrk.video.syncSubtitle")}>
         <label className="block text-xs text-slate-400">
-          Video offset (ms)
+          {t("xrk.video.offset")}
           <input
             type="number"
             step={50}
@@ -980,13 +990,16 @@ function VideoSyncPanel({
           />
         </label>
         <p className="mt-2 text-xs leading-5 text-slate-500">
-          Sign convention: video time = telemetry session time + offset. A positive offset means the matching moment appears later on the video timeline.
+          {t("xrk.video.signConvention")}
         </p>
         <div className="mt-4 rounded-md border border-slate-800 bg-slate-950/60 p-3">
-          <p className="text-xs text-slate-500">Shared track cursor</p>
+          <p className="text-xs text-slate-500">{t("xrk.video.sharedCursor")}</p>
           <p className="mt-1 text-lg font-semibold text-white">{cursorDistance.toFixed(1)} m</p>
           <p className="mt-1 text-xs text-slate-500">
-            Selected Lap {analysis.target_lap} telemetry time {cursorPoint?.session_time_s == null ? "unavailable" : `${cursorPoint.session_time_s.toFixed(3)} s`}
+            {t("xrk.video.selectedTime", {
+              lap: analysis.target_lap,
+              value: cursorPoint?.session_time_s == null ? t("xrk.video.unavailableTime") : `${cursorPoint.session_time_s.toFixed(3)} s`,
+            })}
           </p>
         </div>
         <button
@@ -995,13 +1008,13 @@ function VideoSyncPanel({
           disabled={autoSyncing || !videoUrl || videoDurationS <= 0 || !analysis.inspection_id || analysis.inspection_id.startsWith("public-demo")}
           className="mt-4 flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-cyan-500/60 bg-cyan-500/10 px-4 text-sm font-semibold text-cyan-100 disabled:cursor-not-allowed disabled:opacity-45"
         >
-          <WandSparkles size={16} /> {autoSyncing ? "Analyzing local video summaries..." : "Automatic coarse alignment"}
+          <WandSparkles size={16} /> {autoSyncing ? t("xrk.video.autoRunning") : t("xrk.video.auto")}
         </button>
         <p className="mt-2 text-xs leading-5 text-slate-500">
-          Only time, brightness and motion numbers leave the browser. No video frame, filename or path is sent. This estimate is not frame-accurate.
+          {t("xrk.video.privacy")}
         </p>
         {autoConfidence != null && (
-          <p className="mt-2 text-xs text-slate-400">Automatic confidence: {formatConfidence(autoConfidence)}</p>
+          <p className="mt-2 text-xs text-slate-400">{t("xrk.video.autoConfidence", { value: formatConfidence(autoConfidence) })}</p>
         )}
         <button
           type="button"
@@ -1009,23 +1022,27 @@ function VideoSyncPanel({
           disabled={!videoUrl || videoDurationS <= 0 || cursorPoint?.session_time_s == null}
           className="mt-4 flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[#f6c945] px-4 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-45"
         >
-          <Link2 size={16} /> Calibrate current video T = telemetry D
+          <Link2 size={16} /> {t("xrk.video.calibrate")}
         </button>
         {videoDurationS > 0 && (
-          <p className="mt-2 text-xs text-slate-500">Video duration: {videoDurationS.toFixed(3)} s</p>
+          <p className="mt-2 text-xs text-slate-500">{t("xrk.video.duration", { value: videoDurationS.toFixed(3) })}</p>
         )}
         {calibration && (
           <p className="mt-2 text-xs leading-5 text-emerald-300">
-            Saved anchor: T {calibration.video_time_s.toFixed(3)} s = D {calibration.telemetry_distance_m.toFixed(1)} m · offset {signedMilliseconds(calibration.offset_ms)}
+            {t("xrk.video.savedAnchor", {
+              video: calibration.video_time_s.toFixed(3),
+              distance: calibration.telemetry_distance_m.toFixed(1),
+              offset: signedMilliseconds(calibration.offset_ms),
+            })}
           </p>
         )}
         {syncMessage && <p className="mt-2 text-xs leading-5 text-cyan-200">{syncMessage}</p>}
         {syncError && <p role="alert" className="mt-2 text-xs leading-5 text-red-300">{syncError}</p>}
         <p className="mt-4 text-xs leading-5 text-slate-500">
-          Synchronization always uses Selected/Target Lap {analysis.target_lap}. In Reference or Overlay map mode, a click transfers only distance D onto the target lap before seeking. During playback, the shared telemetry cursor follows that target lap.
+          {t("xrk.video.followBoundary", { lap: analysis.target_lap })}
         </p>
         <p className="mt-2 text-xs leading-5 text-slate-600">
-          Saved calibration contains only the anchor, target lap, duration, file size, modification time and MIME type. The video name, path and content are not stored.
+          {t("xrk.video.savedPrivacy")}
         </p>
       </Panel>
     </div>
@@ -1057,46 +1074,46 @@ function CoachSummaryPanel({
   analysis: XrkAnalysis;
   onCursor: (distance: number) => void;
 }) {
+  const { t } = useI18n();
   const summary = analysis.ai_coach_summary;
   const improvement = analysis.achievable_improvement_range;
   const rangeAvailable = improvement.maximum_improvement_s > 0;
   return (
     <div className="space-y-5">
-      <Panel title="AI Driver Improvement Summary" subtitle="Structured evidence from quality-gated real laps">
+      <Panel title={t("xrk.coach.title")} subtitle={t("xrk.coach.subtitle")}>
         {analysis.narrative ? (
           <div>
             <p className="whitespace-pre-wrap text-sm leading-7 text-slate-200">
               {analysis.narrative}
             </p>
             <p className="mt-4 text-xs font-medium text-amber-200">
-              AI 生成，请与教练核实
+              {t("xrk.coach.disclaimer")}
             </p>
           </div>
         ) : (
           <>
             <div className="grid gap-4 sm:grid-cols-3">
               <QualityFact
-                label="Primary focus"
-                value={summary.training_priorities[0]?.corner ?? "No validated focus"}
+                label={t("xrk.coach.primaryFocus")}
+                value={summary.training_priorities[0]?.corner ?? t("xrk.coach.noFocus")}
               />
               <QualityFact
-                label="Achievable range"
+                label={t("xrk.coach.achievableRange")}
                 value={rangeAvailable
                   ? `${improvement.minimum_improvement_s.toFixed(3)}–${improvement.maximum_improvement_s.toFixed(3)}s`
-                  : "Insufficient evidence"}
+                  : t("xrk.coach.insufficient")}
               />
-              <QualityFact label="Confidence" value={humanEvent(improvement.confidence)} />
+              <QualityFact label={t("xrk.coach.confidence")} value={humanEvent(improvement.confidence)} />
             </div>
             <p className="mt-4 text-sm leading-6 text-slate-300">{summary.reference_statement}</p>
             <p className="mt-2 text-xs leading-5 text-slate-500">
-              This range is empirical and conservative. It is not a target lap time, and the
-              listed changes are not assumed to coexist in one lap.
+              {t("xrk.coach.rangeBoundary")}
             </p>
           </>
         )}
       </Panel>
 
-      <Panel title="Next-session priorities" subtitle="At most three transferable, downstream-safe patterns">
+      <Panel title={t("xrk.coach.nextPriorities")} subtitle={t("xrk.coach.nextSubtitle")}>
         {summary.training_priorities.length ? (
           <div>
             {summary.training_priorities.map((priority, index) => {
@@ -1107,7 +1124,7 @@ function CoachSummaryPanel({
                 <section key={priority.corner} className="border-t border-slate-800 py-5 first:border-t-0 first:pt-0 last:pb-0">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p className="text-[11px] font-semibold uppercase text-[#35d6d0]">Priority {index + 1}</p>
+                      <p className="text-[11px] font-semibold uppercase text-[#35d6d0]">{t("xrk.coach.priority", { index: index + 1 })}</p>
                       <h3 className="mt-1 text-lg font-semibold text-white">{priority.corner}</h3>
                     </div>
                     {corner && (
@@ -1116,22 +1133,22 @@ function CoachSummaryPanel({
                         onClick={() => onCursor((corner.entry_distance_m + corner.exit_distance_m) / 2)}
                         className="rounded-md border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:border-[#35d6d0]"
                       >
-                        Show on track
+                        {t("xrk.coach.jump")}
                       </button>
                     )}
                   </div>
                   <p className="mt-3 text-sm leading-6 text-slate-300">{priority.why}</p>
-                  <CoachField label="What to test" value={priority.what_to_test} />
-                  <CoachField label="Training drill" value={priority.training_drill} />
-                  <CoachField label="Stop condition" value={priority.stop_condition} />
+                  <CoachField label={t("xrk.coach.whatToTest")} value={priority.what_to_test} />
+                  <CoachField label={t("xrk.coach.trainingDrill")} value={priority.training_drill} />
+                  <CoachField label={t("xrk.coach.stopCondition")} value={priority.stop_condition} />
                   <div className="mt-3">
-                    <p className="text-xs font-semibold uppercase text-slate-500">Success criteria</p>
+                    <p className="text-xs font-semibold uppercase text-slate-500">{t("xrk.coach.successCriteria")}</p>
                     <ul className="mt-2 space-y-1 text-sm leading-6 text-slate-300">
                       {priority.success_criteria.map((criterion) => <li key={criterion}>- {criterion}</li>)}
                     </ul>
                   </div>
                   <p className="mt-3 text-xs text-slate-500">
-                    Evidence: {priority.evidence.channels.join(", ")} · Confidence: {priority.confidence}
+                    {t("xrk.coach.evidence")}: {priority.evidence.channels.join(", ")} · {t("xrk.coach.confidence")}: {priority.confidence}
                     {priority.limitation ? ` · ${priority.limitation}` : ""}
                   </p>
                 </section>
@@ -1140,36 +1157,35 @@ function CoachSummaryPanel({
           </div>
         ) : (
           <p className="text-sm leading-6 text-slate-400">
-            No corner pattern currently meets the repeatability, net-gain and downstream-cost
-            requirements. Review the emerging evidence without treating it as a training target.
+            {t("xrk.coach.noPriority")}
           </p>
         )}
       </Panel>
 
       <div className="grid gap-5 xl:grid-cols-2">
-        <Panel title="Stable strengths" subtitle="Repeatable behavior that should not be changed casually">
+        <Panel title={t("xrk.coach.stableTitle")} subtitle={t("xrk.coach.stableSubtitle")}>
           {summary.stable_strengths.length ? summary.stable_strengths.map((strength) => (
             <div key={`${strength.corner}-${strength.finding}`} className="border-t border-slate-800 py-3 first:border-t-0 first:pt-0">
               <strong className="text-sm text-white">{strength.corner}</strong>
               <p className="mt-1 text-sm leading-6 text-slate-400">{strength.finding}</p>
             </div>
-          )) : <p className="text-sm text-slate-400">No stable strength passed the current repeatability threshold.</p>}
+          )) : <p className="text-sm text-slate-400">{t("xrk.coach.noStrength")}</p>}
         </Panel>
-        <Panel title="Rejected apparent improvements" subtitle="Local gains that did not survive downstream validation">
+        <Panel title={t("xrk.coach.rejectedTitle")} subtitle={t("xrk.coach.rejectedSubtitle")}>
           {summary.rejected_apparent_improvements.length ? summary.rejected_apparent_improvements.map((item) => (
             <div key={item.corner} className="border-t border-slate-800 py-3 first:border-t-0 first:pt-0">
               <strong className="text-sm text-white">{item.corner}</strong>
               <p className="mt-1 text-sm leading-6 text-slate-400">
-                Local gain {item.local_gain_s.toFixed(3)}s · downstream cost {item.downstream_cost_s.toFixed(3)}s · net {item.net_gain_s >= 0 ? "+" : ""}{item.net_gain_s.toFixed(3)}s.
+                {t("xrk.coach.localGain")} {item.local_gain_s.toFixed(3)}s · {t("xrk.coach.downstreamCost")} {item.downstream_cost_s.toFixed(3)}s · {t("xrk.coach.net")} {item.net_gain_s >= 0 ? "+" : ""}{item.net_gain_s.toFixed(3)}s.
               </p>
               <p className="mt-1 text-xs text-slate-500">{item.reason}</p>
             </div>
-          )) : <p className="text-sm text-slate-400">No downstream-compromised local gain was found in the current Top laps.</p>}
+          )) : <p className="text-sm text-slate-400">{t("xrk.coach.noRejected")}</p>}
         </Panel>
       </div>
 
       {(summary.fastest_lap_unique_features.length > 0 || summary.emerging_improvements.length > 0) && (
-        <Panel title="Observed but not yet transferable" subtitle="Real-lap differences that need repetition or coach confirmation">
+        <Panel title={t("xrk.coach.emergingTitle")} subtitle={t("xrk.coach.emergingSubtitle")}>
           {[...summary.fastest_lap_unique_features, ...summary.emerging_improvements].map((item) => (
             <div key={`${item.corner}-${item.reason}`} className="border-t border-slate-800 py-3 first:border-t-0 first:pt-0">
               <strong className="text-sm text-white">{item.corner}</strong>
@@ -1190,8 +1206,9 @@ function CoachSummaryPanel({
 }
 
 function ReportPanel({ analysis }: { analysis: XrkAnalysis }) {
+  const { t } = useI18n();
   return (
-    <Panel title="Evidence-aware driver review" subtitle="Measured, calculated and inferred are kept separate">
+    <Panel title={t("xrk.report.title")} subtitle={t("xrk.report.subtitle")}>
       <pre className="thin-scrollbar max-h-[620px] overflow-auto whitespace-pre-wrap rounded-md border border-slate-800 bg-slate-950/70 p-4 text-sm leading-6 text-slate-200">
         {analysis.report}
       </pre>
@@ -1394,10 +1411,11 @@ function Panel({
 }
 
 function Unavailable({ reason }: { reason: string }) {
+  const { t } = useI18n();
   return (
     <section className="panel rounded-lg p-5">
       <div className="flex items-center gap-2 text-sm font-semibold text-white">
-        <AlertTriangle size={18} className="text-amber-300" /> Analysis unavailable
+        <AlertTriangle size={18} className="text-amber-300" /> {t("xrk.unavailable.generic")}
       </div>
       <p className="mt-3 text-sm leading-6 text-slate-400">{reason}</p>
     </section>
