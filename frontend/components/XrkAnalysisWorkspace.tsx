@@ -68,13 +68,14 @@ export function XrkAnalysisWorkspace({
   const [manualZones, setManualZones] = useState<XrkAnalyzeOptions["manual_zones"]>([]);
 
   useEffect(() => {
+    if (publishedDemo) return;
     const stored = readSectorConfig(analysis.track?.track_id);
     if (!stored) return;
     queueMicrotask(() => {
       setSectorCount(stored.sectorCount);
       setCustomBoundaries(stored.boundaries);
     });
-  }, [analysis.track?.track_id]);
+  }, [analysis.track?.track_id, publishedDemo]);
 
   const lapOptions = analysis.lap_rows.map((row) => Number(row.lap));
   const selectedEvent = nearestEvent(analysis.events, cursorDistance);
@@ -161,7 +162,12 @@ export function XrkAnalysisWorkspace({
       )}
 
       {activeTab === "quality" && (
-        <LapQualityPanel analysis={analysis} analyzing={analyzing} onAnalyze={onAnalyze} />
+        <LapQualityPanel
+          analysis={analysis}
+          analyzing={analyzing}
+          onAnalyze={onAnalyze}
+          readOnly={publishedDemo}
+        />
       )}
 
       {activeTab === "track" && (
@@ -184,6 +190,7 @@ export function XrkAnalysisWorkspace({
             cursorDistance={cursorDistance}
             onCursor={selectDistance}
             onAnalyze={onAnalyze}
+            readOnly={publishedDemo}
           />
         ) : (
           <Unavailable reason="Two laps could not be aligned by track distance." />
@@ -214,6 +221,7 @@ export function XrkAnalysisWorkspace({
             onMapPoint={addZonePoint}
             onApply={applySectors}
             analyzing={analyzing}
+            readOnly={publishedDemo}
           />
         ) : (
           <Unavailable reason="Distance-based sectors require usable GPS and lap timing." />
@@ -282,10 +290,12 @@ function LapQualityPanel({
   analysis,
   analyzing,
   onAnalyze,
+  readOnly,
 }: {
   analysis: XrkAnalysis;
   analyzing: boolean;
   onAnalyze: (options: Partial<XrkAnalyzeOptions>) => Promise<void>;
+  readOnly: boolean;
 }) {
   const top = new Set(analysis.lap_quality.top_valid_laps.map((lap) => lap.lap));
   const [absoluteGap, setAbsoluteGap] = useState(
@@ -343,7 +353,7 @@ function LapQualityPanel({
             {analysis.lap_quality.notice}
           </p>
         )}
-        <div className="mt-5 border-t border-slate-800 pt-4">
+        {!readOnly && <div className="mt-5 border-t border-slate-800 pt-4">
           <p className="text-xs font-semibold uppercase text-slate-500">Coach thresholds</p>
           <label className="mt-3 block text-xs text-slate-400">
             Absolute gap (seconds)
@@ -380,7 +390,7 @@ function LapQualityPanel({
           >
             Apply quality gate
           </button>
-        </div>
+        </div>}
       </Panel>
     </div>
   );
@@ -441,12 +451,14 @@ function ComparisonPanel({
   cursorDistance,
   onCursor,
   onAnalyze,
+  readOnly,
 }: {
   analysis: XrkAnalysis;
   lapOptions: number[];
   cursorDistance: number;
   onCursor: (value: number) => void;
   onAnalyze: (options: Partial<XrkAnalyzeOptions>) => Promise<void>;
+  readOnly: boolean;
 }) {
   const topLaps = analysis.top_laps_comparison.laps;
   const topColors = ["#f6c945", "#35d6d0", "#ff5964"];
@@ -494,7 +506,7 @@ function ComparisonPanel({
       <Panel
         title="Selected real-lap comparison"
         subtitle="Reference must pass the quality gate; the selected lap may be used for context"
-        action={
+        action={readOnly ? undefined : (
           <div className="flex flex-wrap gap-2">
             <LapPicker
               label="Reference"
@@ -509,7 +521,7 @@ function ComparisonPanel({
               onChange={(target_lap) => onAnalyze({ target_lap })}
             />
           </div>
-        }
+        )}
       >
         <TelemetryChart
           data={analysis.comparison}
@@ -614,6 +626,7 @@ function SectorZonePanel({
   onMapPoint,
   onApply,
   analyzing,
+  readOnly,
 }: {
   analysis: XrkAnalysis;
   sectorCount: number;
@@ -624,6 +637,7 @@ function SectorZonePanel({
   onMapPoint: (distance: number) => void;
   onApply: () => Promise<void>;
   analyzing: boolean;
+  readOnly: boolean;
 }) {
   const [mapTool, setMapTool] = useState<"sector" | "zone">("sector");
   function handleMapPoint(distance: number) {
@@ -642,7 +656,7 @@ function SectorZonePanel({
       <Panel
         title="Virtual sectors & suggested zones"
         subtitle="Click the reference trace to place distance-based boundaries"
-        action={
+        action={readOnly ? undefined : (
           <div className="flex flex-wrap gap-2">
             <Select value={String(sectorCount)} onChange={(value) => {
               setSectorCount(Number(value));
@@ -661,7 +675,7 @@ function SectorZonePanel({
               Apply
             </button>
           </div>
-        }
+        )}
       >
         <TrackSvg
           reference={analysis.track!.reference}
@@ -669,11 +683,13 @@ function SectorZonePanel({
           mode="reference"
           channel="speed"
           cursorDistance={zoneStart ?? 0}
-          onSelect={handleMapPoint}
+          onSelect={readOnly ? () => {} : handleMapPoint}
           boundaries={customBoundaries.length ? customBoundaries : analysis.sectors!.boundaries_m.slice(1, -1)}
         />
         <p className="mt-3 text-xs text-slate-400">
-          {mapTool === "sector"
+          {readOnly
+            ? "Published virtual sectors and suggested zones are fixed for this read-only demo."
+            : mapTool === "sector"
             ? `${customBoundaries.length}/${sectorCount - 1} custom boundaries selected. Empty selection uses equal distance.`
             : zoneStart === null ? "Click zone entry, then zone exit." : `Zone entry: ${zoneStart.toFixed(1)} m. Select exit.`}
         </p>

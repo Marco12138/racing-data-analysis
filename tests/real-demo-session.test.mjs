@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -108,3 +109,28 @@ test("rejects missing publication review and synthetic reference curves", () => 
   synthetic.analysis.top_laps_comparison.synthetic_curve_generated = true;
   assert.equal(isPublishedRealDemo(synthetic), false);
 });
+
+test("bundled artifact is a reviewed real session without private coordinate fields", () => {
+  const artifact = JSON.parse(
+    readFileSync(new URL("../public/demo/reviewed-real-session.json", import.meta.url), "utf8"),
+  );
+
+  assert.equal(isPublishedRealDemo(artifact), true);
+  assert.equal(artifact.analysis.lap_rows.length, 13);
+  assert.equal(artifact.analysis.fastest_lap.lap, 13);
+  assert.equal(artifact.analysis.fastest_lap.lap_time, 40.326);
+  assert.deepEqual(artifact.analysis.metadata, { data_source: "Anonymized real session" });
+  assert.equal(artifact.analysis.inspection_id, "published-demo");
+  assert.equal(artifact.analysis.file_fingerprint, "redacted");
+  assert.equal(artifact.analysis.track.track_id, "anonymous-circuit");
+  assert.equal(hasPrivateCoordinateKey(artifact), false);
+  assert.doesNotMatch(JSON.stringify(artifact), /\.xrk|\/Users\//i);
+});
+
+function hasPrivateCoordinateKey(value) {
+  if (Array.isArray(value)) return value.some(hasPrivateCoordinateKey);
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(([key, item]) => (
+    /gps_(lat|lon)|latitude|longitude/i.test(key) || hasPrivateCoordinateKey(item)
+  ));
+}

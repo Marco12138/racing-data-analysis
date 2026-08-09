@@ -1,7 +1,8 @@
 import type { XrkAnalysis } from "./xrkAnalysisApi";
 
 export const REAL_DEMO_ASSET_URL =
-  process.env.NEXT_PUBLIC_REAL_DEMO_ASSET_URL?.trim() ?? "";
+  process.env.NEXT_PUBLIC_REAL_DEMO_ASSET_URL?.trim()
+  || "/demo/reviewed-real-session.json";
 
 export type PublishedRealDemoSession = {
   schema_version: 1;
