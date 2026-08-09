@@ -25,15 +25,12 @@ export type HandlingFlag = {
 };
 
 export function parseCsv(text: string): CsvRow[] {
-  const lines = text
-    .trim()
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map((header) => header.trim());
-  return lines.slice(1).map((line) => {
-    const values = line.split(",");
+  const records = parseCsvRecords(text).filter((record) => record.some((value) => value.trim() !== ""));
+  if (records.length < 2) return [];
+  const headers = records[0].map((header, index) =>
+    (index === 0 ? header.replace(/^\uFEFF/, "") : header).trim()
+  );
+  return records.slice(1).map((values) => {
     return headers.reduce<CsvRow>((row, header, index) => {
       const raw = values[index]?.trim() ?? "";
       const numeric = Number(raw);
@@ -41,6 +38,42 @@ export function parseCsv(text: string): CsvRow[] {
       return row;
     }, {});
   });
+}
+
+function parseCsvRecords(text: string): string[][] {
+  const records: string[][] = [];
+  let record: string[] = [];
+  let field = "";
+  let quoted = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === '"') {
+      if (quoted && text[index + 1] === '"') {
+        field += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === "," && !quoted) {
+      record.push(field);
+      field = "";
+    } else if ((character === "\n" || character === "\r") && !quoted) {
+      if (character === "\r" && text[index + 1] === "\n") index += 1;
+      record.push(field);
+      records.push(record);
+      record = [];
+      field = "";
+    } else {
+      field += character;
+    }
+  }
+
+  if (field.length || record.length) {
+    record.push(field);
+    records.push(record);
+  }
+  return records;
 }
 
 export function normalizeLapRows(rows: CsvRow[]): LapRow[] {
@@ -70,6 +103,7 @@ export function normalizeTelemetryRows(rows: CsvRow[]): TelemetryRow[] {
 }
 
 function toOptionalNumber(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") return undefined;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : undefined;
 }
@@ -159,6 +193,18 @@ export function summarizeTelemetry(rows: TelemetryRow[]) {
     minimumCornerSpeed: speeds.length ? Math.min(...speeds) : null,
     maxLateralG: lateralG.length ? Math.max(...lateralG.map(Math.abs)) : null,
   };
+}
+
+export function buildTelemetryMetricRows(
+  summary: ReturnType<typeof summarizeTelemetry>
+): [string, string][] {
+  return [
+    ["Maximum speed", formatMetric(summary.maxSpeed, 1, "km/h")],
+    ["Average speed", formatMetric(summary.averageSpeed, 1, "km/h")],
+    ["Average throttle", formatMetric(summary.averageThrottle, 1, "%")],
+    ["Maximum brake", formatMetric(summary.maxBrake, 1, "%")],
+    ["Maximum lateral G", formatMetric(summary.maxLateralG, 2, "g")],
+  ];
 }
 
 export function compareSpeedByDistance(rows: TelemetryRow[], referenceLap: number, targetLap: number) {
@@ -286,4 +332,8 @@ function standardDeviation(values: number[]) {
 
 function isNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function formatMetric(value: number | null, precision: number, unit: string) {
+  return isNumber(value) ? `${value.toFixed(precision)} ${unit}` : "Unavailable";
 }
