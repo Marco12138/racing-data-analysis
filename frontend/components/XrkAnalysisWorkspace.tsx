@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Target,
+  WandSparkles,
   Video,
 } from "lucide-react";
 import {
@@ -32,6 +33,8 @@ import type {
   XrkEvent,
   XrkTrackPoint,
 } from "../lib/xrkAnalysisApi";
+import { autoSyncVideoTelemetry } from "../lib/xrkAnalysisApi";
+import { extractVideoSyncFeatures } from "../lib/videoFeatureExtraction";
 import {
   createVideoSyncCalibration,
   nearestPointByDistance,
@@ -768,6 +771,9 @@ function VideoSyncPanel({
   const [videoDurationS, setVideoDurationS] = useState(0);
   const [syncMessage, setSyncMessage] = useState("");
   const [syncError, setSyncError] = useState("");
+  const [autoSyncing, setAutoSyncing] = useState(false);
+  const [autoConfidence, setAutoConfidence] = useState<number | null>(null);
+  const autoSyncAbortRef = useRef<AbortController | null>(null);
   const storageKey = `racing-video-sync:${analysis.track?.track_id ?? "unknown"}:${analysis.file_fingerprint}`;
   const [calibration, setCalibration] = useState<VideoSyncCalibration | null>(() => {
     if (typeof window === "undefined") return null;
@@ -778,6 +784,7 @@ function VideoSyncPanel({
   const cursorPoint = nearestPointByDistance(targetPoints, cursorDistance);
 
   useEffect(() => () => {
+    autoSyncAbortRef.current?.abort();
     if (videoUrl) URL.revokeObjectURL(videoUrl);
   }, [videoUrl]);
 
@@ -869,6 +876,57 @@ function VideoSyncPanel({
     setSyncMessage("Manual offset is active for this page. Use Calibrate T = D to save a verified anchor.");
   }
 
+  async function runAutomaticAlignment() {
+    const video = videoRef.current;
+    if (!video || !videoFile || videoDurationS <= 0) {
+      setSyncError("Choose a readable local video before automatic alignment.");
+      return;
+    }
+    if (!analysis.inspection_id || analysis.inspection_id.startsWith("public-demo")) {
+      setSyncError("Automatic alignment requires an active temporary XRK inspection.");
+      return;
+    }
+    autoSyncAbortRef.current?.abort();
+    const controller = new AbortController();
+    autoSyncAbortRef.current = controller;
+    setAutoSyncing(true);
+    setAutoConfidence(null);
+    setSyncError("");
+    setSyncMessage("Reading privacy-safe brightness and motion summaries in this browser...");
+    try {
+      const videoFeatures = await extractVideoSyncFeatures(video, {
+        signal: controller.signal,
+      });
+      setSyncMessage("Comparing browser summaries with temporary XRK GPS speed...");
+      const result = await autoSyncVideoTelemetry({
+        inspection_id: analysis.inspection_id,
+        video_features: videoFeatures,
+      }, controller.signal);
+      setOffsetMs(result.offset_ms);
+      setCalibration(null);
+      window.localStorage.removeItem(storageKey);
+      setAutoConfidence(result.confidence);
+      if (result.reliable) {
+        setSyncMessage(
+          `Coarse offset ${signedMilliseconds(result.offset_ms)} applied with ${formatConfidence(result.confidence)} confidence. Verify it against a visible lap marker, then save a manual T = D anchor.`
+        );
+      } else {
+        setSyncMessage("");
+        setSyncError(
+          `Automatic alignment is unreliable (${formatConfidence(result.confidence)} confidence). The coarse ${signedMilliseconds(result.offset_ms)} offset is shown only as a starting point; calibrate manually.`
+        );
+      }
+    } catch (error) {
+      if ((error as Error).name !== "AbortError") {
+        setSyncMessage("");
+        setSyncError((error as Error).message || "Automatic video alignment failed.");
+      }
+    } finally {
+      if (autoSyncAbortRef.current === controller) autoSyncAbortRef.current = null;
+      setAutoSyncing(false);
+    }
+  }
+
   function followVideo() {
     if (!analysis.track || !videoRef.current) return;
     const sessionTime = videoToTelemetryTimeS(videoRef.current.currentTime, offsetMs);
@@ -904,6 +962,7 @@ function VideoSyncPanel({
               setVideoDurationS(0);
               setSyncMessage("");
               setSyncError("");
+              setAutoConfidence(null);
             }} />
           </label>
         )}
@@ -930,6 +989,20 @@ function VideoSyncPanel({
             Selected Lap {analysis.target_lap} telemetry time {cursorPoint?.session_time_s == null ? "unavailable" : `${cursorPoint.session_time_s.toFixed(3)} s`}
           </p>
         </div>
+        <button
+          type="button"
+          onClick={runAutomaticAlignment}
+          disabled={autoSyncing || !videoUrl || videoDurationS <= 0 || !analysis.inspection_id || analysis.inspection_id.startsWith("public-demo")}
+          className="mt-4 flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-cyan-500/60 bg-cyan-500/10 px-4 text-sm font-semibold text-cyan-100 disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          <WandSparkles size={16} /> {autoSyncing ? "Analyzing local video summaries..." : "Automatic coarse alignment"}
+        </button>
+        <p className="mt-2 text-xs leading-5 text-slate-500">
+          Only time, brightness and motion numbers leave the browser. No video frame, filename or path is sent. This estimate is not frame-accurate.
+        </p>
+        {autoConfidence != null && (
+          <p className="mt-2 text-xs text-slate-400">Automatic confidence: {formatConfidence(autoConfidence)}</p>
+        )}
         <button
           type="button"
           onClick={calibrateCurrentMoment}
@@ -971,6 +1044,10 @@ function calibrationMatchesVideo(
 
 function signedMilliseconds(value: number): string {
   return `${value >= 0 ? "+" : ""}${value} ms`;
+}
+
+function formatConfidence(value: number): string {
+  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
 }
 
 function CoachSummaryPanel({
