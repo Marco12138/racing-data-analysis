@@ -281,6 +281,7 @@ export type XrkAnalysis = {
   };
   warnings: string[];
   report: string;
+  narrative?: string | null;
 };
 
 export type XrkAnalyzeOptions = {

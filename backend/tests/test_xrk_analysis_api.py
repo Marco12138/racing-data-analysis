@@ -76,6 +76,13 @@ def test_inspect_analyze_delete_contract(
     """The token should inspect, recalculate, delete, then return 410."""
     monkeypatch.setattr(storage, "DB_PATH", tmp_path / "sessions.sqlite3")
 
+    async def fake_narrative(evidence: dict) -> str:
+        assert "comparison" not in evidence
+        assert "track" not in evidence
+        return "训练重点一：保持真实圈参考。"
+
+    monkeypatch.setattr(xrk_routes, "generate_llm_narrative", fake_narrative)
+
     async def fake_inspection(_: Path, output_dir: Path, __: int) -> None:
         write_inspection(output_dir)
 
@@ -128,6 +135,7 @@ def test_inspect_analyze_delete_contract(
         assert result["consensus_benchmark"]["synthetic_curve_generated"] is False
         assert "theoretical" not in result["report"].lower()
         assert set(result["evidence_catalog"]) == {"measured", "calculated", "inferred"}
+        assert result["narrative"] == "训练重点一：保持真实圈参考。"
 
         assert client.delete(f"/api/v1/xrk/inspections/{token}").json() == {
             "deleted": True

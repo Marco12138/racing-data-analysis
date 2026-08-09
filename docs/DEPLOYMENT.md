@@ -125,6 +125,21 @@ Keep `WEB_CONCURRENCY=1` while inspection artifacts are on the container's
 local `/tmp` filesystem. Before horizontal scaling, move these artifacts to
 shared object storage and retain the same opaque-token contract.
 
+The XRK report can optionally add an evidence-bounded Chinese coaching
+narrative through an OpenAI-compatible chat completions endpoint:
+
+```text
+LLM_BASE_URL=https://provider.example.com/v1
+LLM_API_KEY=<secret>
+LLM_MODEL=<compatible-model-name>
+```
+
+All three values are required. If any value is missing, the request fails, or
+the generated text contains a number absent from the compact structured
+evidence, the API omits `narrative` and keeps the existing template report.
+Cloud mode accepts only an HTTPS LLM endpoint. Never expose `LLM_API_KEY` to
+the frontend or give it a `NEXT_PUBLIC_` prefix.
+
 Railway sends deployment health checks with `healthcheck.railway.app` as the
 Host header. Keep that hostname in `ALLOWED_HOSTS` so Trusted Host validation
 accepts the platform health check.

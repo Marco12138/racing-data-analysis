@@ -821,24 +821,37 @@ function CoachSummaryPanel({
   return (
     <div className="space-y-5">
       <Panel title="AI Driver Improvement Summary" subtitle="Structured evidence from quality-gated real laps">
-        <div className="grid gap-4 sm:grid-cols-3">
-          <QualityFact
-            label="Primary focus"
-            value={summary.training_priorities[0]?.corner ?? "No validated focus"}
-          />
-          <QualityFact
-            label="Achievable range"
-            value={rangeAvailable
-              ? `${improvement.minimum_improvement_s.toFixed(3)}–${improvement.maximum_improvement_s.toFixed(3)}s`
-              : "Insufficient evidence"}
-          />
-          <QualityFact label="Confidence" value={humanEvent(improvement.confidence)} />
-        </div>
-        <p className="mt-4 text-sm leading-6 text-slate-300">{summary.reference_statement}</p>
-        <p className="mt-2 text-xs leading-5 text-slate-500">
-          This range is empirical and conservative. It is not a target lap time, and the
-          listed changes are not assumed to coexist in one lap.
-        </p>
+        {analysis.narrative ? (
+          <div>
+            <p className="whitespace-pre-wrap text-sm leading-7 text-slate-200">
+              {analysis.narrative}
+            </p>
+            <p className="mt-4 text-xs font-medium text-amber-200">
+              AI 生成，请与教练核实
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <QualityFact
+                label="Primary focus"
+                value={summary.training_priorities[0]?.corner ?? "No validated focus"}
+              />
+              <QualityFact
+                label="Achievable range"
+                value={rangeAvailable
+                  ? `${improvement.minimum_improvement_s.toFixed(3)}–${improvement.maximum_improvement_s.toFixed(3)}s`
+                  : "Insufficient evidence"}
+              />
+              <QualityFact label="Confidence" value={humanEvent(improvement.confidence)} />
+            </div>
+            <p className="mt-4 text-sm leading-6 text-slate-300">{summary.reference_statement}</p>
+            <p className="mt-2 text-xs leading-5 text-slate-500">
+              This range is empirical and conservative. It is not a target lap time, and the
+              listed changes are not assumed to coexist in one lap.
+            </p>
+          </>
+        )}
       </Panel>
 
       <Panel title="Next-session priorities" subtitle="At most three transferable, downstream-safe patterns">
