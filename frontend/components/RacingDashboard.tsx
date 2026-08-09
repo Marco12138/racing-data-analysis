@@ -35,6 +35,7 @@ import {
 } from "recharts";
 import {
   analyzeLaps,
+  buildTelemetryMetricRows,
   compareSpeedByDistance,
   formatSeconds,
   formatSector,
@@ -1365,7 +1366,7 @@ function DataPanel({ title, rows }: { title: string; rows: [string, string][] })
 }
 
 function TelemetryPanel({ summary }: { summary: ReturnType<typeof summarizeTelemetry> }) {
-  return <DataPanel title="Telemetry Analysis" rows={[["Maximum speed", summary.maxSpeed ? `${summary.maxSpeed.toFixed(1)} km/h` : "Unavailable"], ["Average speed", summary.averageSpeed ? `${summary.averageSpeed.toFixed(1)} km/h` : "Unavailable"], ["Average throttle", summary.averageThrottle ? `${summary.averageThrottle.toFixed(1)}%` : "Unavailable"], ["Maximum brake", summary.maxBrake ? `${summary.maxBrake.toFixed(1)}%` : "Unavailable"], ["Maximum lateral G", summary.maxLateralG ? `${summary.maxLateralG.toFixed(2)} g` : "Unavailable"]]} />;
+  return <DataPanel title="Telemetry Analysis" rows={buildTelemetryMetricRows(summary)} />;
 }
 
 function ReportPanel({ title, report }: { title: string; report: string }) {
