@@ -8,6 +8,7 @@ import {
   FileText,
   Flag,
   Gauge,
+  Link2,
   Map,
   ShieldCheck,
   SlidersHorizontal,
@@ -31,6 +32,19 @@ import type {
   XrkEvent,
   XrkTrackPoint,
 } from "../lib/xrkAnalysisApi";
+import {
+  createVideoSyncCalibration,
+  nearestPointByDistance,
+  nearestPointBySessionTime,
+  nextSeekRequest,
+  parseVideoSyncCalibration,
+  telemetrySessionTimeBounds,
+  telemetryToVideoTimeS,
+  validateVideoSeek,
+  videoToTelemetryTimeS,
+  type SeekRequest,
+  type VideoSyncCalibration,
+} from "../lib/videoTelemetrySync";
 
 const tabs = [
   ["overview", "Overview", Gauge],
@@ -61,7 +75,7 @@ export function XrkAnalysisWorkspace({
 }) {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [cursorDistance, setCursorDistance] = useState(0);
-  const [seekDistance, setSeekDistance] = useState<number | null>(null);
+  const [seekRequest, setSeekRequest] = useState<SeekRequest | null>(null);
   const [sectorCount, setSectorCount] = useState(analysis.sectors?.count ?? 3);
   const [customBoundaries, setCustomBoundaries] = useState<number[]>([]);
   const [zoneStart, setZoneStart] = useState<number | null>(null);
@@ -82,7 +96,7 @@ export function XrkAnalysisWorkspace({
 
   function selectDistance(distance: number) {
     setCursorDistance(distance);
-    setSeekDistance(distance);
+    setSeekRequest((previous) => nextSeekRequest(previous, distance));
   }
 
   async function applySectors() {
@@ -232,7 +246,7 @@ export function XrkAnalysisWorkspace({
         <VideoSyncPanel
           analysis={analysis}
           cursorDistance={cursorDistance}
-          seekDistance={seekDistance}
+          seekRequest={seekRequest}
           onCursor={setCursorDistance}
         />
       )}
@@ -739,47 +753,128 @@ function SectorZonePanel({
 function VideoSyncPanel({
   analysis,
   cursorDistance,
-  seekDistance,
+  seekRequest,
   onCursor,
 }: {
   analysis: XrkAnalysis;
   cursorDistance: number;
-  seekDistance: number | null;
+  seekRequest: SeekRequest | null;
   onCursor: (distance: number) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoUrl, setVideoUrl] = useState("");
   const [videoName, setVideoName] = useState("");
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [videoDurationS, setVideoDurationS] = useState(0);
+  const [syncMessage, setSyncMessage] = useState("");
+  const [syncError, setSyncError] = useState("");
   const storageKey = `racing-video-sync:${analysis.track?.track_id ?? "unknown"}:${analysis.file_fingerprint}`;
-  const [offsetMs, setOffsetMs] = useState(() => {
-    if (typeof window === "undefined") return 0;
-    return Number(window.localStorage.getItem(storageKey) ?? "0") || 0;
+  const [calibration, setCalibration] = useState<VideoSyncCalibration | null>(() => {
+    if (typeof window === "undefined") return null;
+    return parseVideoSyncCalibration(window.localStorage.getItem(storageKey));
   });
+  const [offsetMs, setOffsetMs] = useState(calibration?.offset_ms ?? 0);
+  const targetPoints = analysis.track?.target ?? [];
+  const cursorPoint = nearestPointByDistance(targetPoints, cursorDistance);
 
   useEffect(() => () => {
     if (videoUrl) URL.revokeObjectURL(videoUrl);
   }, [videoUrl]);
 
   useEffect(() => {
-    window.localStorage.setItem(storageKey, String(offsetMs));
-  }, [offsetMs, storageKey]);
+    if (calibration) {
+      window.localStorage.setItem(storageKey, JSON.stringify(calibration));
+    }
+  }, [calibration, storageKey]);
 
   useEffect(() => {
-    if (!videoRef.current || seekDistance === null || !analysis.track) return;
-    const point = nearestPoint(analysis.track.target, seekDistance);
-    if (point?.session_time_s != null) {
-      videoRef.current.currentTime = Math.max(0, point.session_time_s + offsetMs / 1000);
+    if (!videoRef.current || !seekRequest || !analysis.track) return;
+    const point = nearestPointByDistance(analysis.track.target, seekRequest.distance_m);
+    if (point?.session_time_s == null) {
+      queueMicrotask(() => setSyncError("The selected target-lap point has no telemetry session time."));
+      return;
     }
-  }, [seekDistance, offsetMs, analysis.track]);
+    const targetTime = telemetryToVideoTimeS(point.session_time_s, offsetMs);
+    const validation = validateVideoSeek(targetTime, videoDurationS);
+    if (!validation.ok) {
+      queueMicrotask(() => setSyncError(validation.message));
+      return;
+    }
+    videoRef.current.currentTime = validation.time_s;
+    queueMicrotask(() => {
+      setSyncError("");
+      setSyncMessage(
+        `Seeked Selected Lap ${analysis.target_lap} at ${point.distance_m.toFixed(1)} m to video ${validation.time_s.toFixed(3)} s.`
+      );
+    });
+  }, [seekRequest, offsetMs, videoDurationS, analysis.track, analysis.target_lap]);
+
+  function loadVideoMetadata() {
+    const video = videoRef.current;
+    if (!video || !videoFile || !Number.isFinite(video.duration) || video.duration <= 0) {
+      setVideoDurationS(0);
+      setSyncError("The browser could not read a valid video duration.");
+      return;
+    }
+    setVideoDurationS(video.duration);
+    if (calibration && calibrationMatchesVideo(calibration, videoFile, video.duration)) {
+      setOffsetMs(calibration.offset_ms);
+      setSyncMessage(`Restored saved T = D calibration (${signedMilliseconds(calibration.offset_ms)}).`);
+      setSyncError("");
+    } else if (calibration) {
+      setOffsetMs(0);
+      setSyncMessage("");
+      setSyncError("The saved calibration belongs to a different local video. Calibrate this video before seeking.");
+    } else {
+      setSyncError("");
+    }
+  }
+
+  function calibrateCurrentMoment() {
+    const video = videoRef.current;
+    if (!video || !videoFile) {
+      setSyncError("Choose a local video before calibration.");
+      return;
+    }
+    if (!cursorPoint) {
+      setSyncError("Select a telemetry distance on the target-lap map or chart first.");
+      return;
+    }
+    try {
+      const next = createVideoSyncCalibration({
+        videoTimeS: video.currentTime,
+        telemetryPoint: cursorPoint,
+        targetLap: analysis.target_lap,
+        videoDurationS,
+        fileSizeBytes: videoFile.size,
+        fileLastModifiedMs: videoFile.lastModified,
+        fileMimeType: videoFile.type,
+      });
+      setCalibration(next);
+      setOffsetMs(next.offset_ms);
+      setSyncError("");
+      setSyncMessage(
+        `Calibrated video T ${next.video_time_s.toFixed(3)} s = Selected Lap ${next.target_lap} at D ${next.telemetry_distance_m.toFixed(1)} m.`
+      );
+    } catch (error) {
+      setSyncError((error as Error).message);
+    }
+  }
+
+  function updateManualOffset(value: number) {
+    setOffsetMs(value);
+    setCalibration(null);
+    window.localStorage.removeItem(storageKey);
+    setSyncError("");
+    setSyncMessage("Manual offset is active for this page. Use Calibrate T = D to save a verified anchor.");
+  }
 
   function followVideo() {
     if (!analysis.track || !videoRef.current) return;
-    const sessionTime = videoRef.current.currentTime - offsetMs / 1000;
-    const point = analysis.track.target.reduce((best, candidate) => {
-      if (candidate.session_time_s == null) return best;
-      if (!best || Math.abs(candidate.session_time_s - sessionTime) < Math.abs((best.session_time_s ?? 0) - sessionTime)) return candidate;
-      return best;
-    }, null as XrkTrackPoint | null);
+    const sessionTime = videoToTelemetryTimeS(videoRef.current.currentTime, offsetMs);
+    const bounds = telemetrySessionTimeBounds(analysis.track.target);
+    if (!bounds || sessionTime < bounds.start_s || sessionTime > bounds.end_s) return;
+    const point = nearestPointBySessionTime(analysis.track.target, sessionTime);
     if (point) onCursor(point.distance_m);
   }
 
@@ -793,6 +888,7 @@ function VideoSyncPanel({
             controls
             className="aspect-video w-full bg-black"
             onTimeUpdate={followVideo}
+            onLoadedMetadata={loadVideoMetadata}
           />
         ) : (
           <label className="flex aspect-video cursor-pointer flex-col items-center justify-center border border-dashed border-slate-700 bg-slate-950/70 text-slate-400 hover:border-[#35d6d0]">
@@ -804,6 +900,10 @@ function VideoSyncPanel({
               if (videoUrl) URL.revokeObjectURL(videoUrl);
               setVideoUrl(URL.createObjectURL(file));
               setVideoName(file.name);
+              setVideoFile(file);
+              setVideoDurationS(0);
+              setSyncMessage("");
+              setSyncError("");
             }} />
           </label>
         )}
@@ -816,21 +916,61 @@ function VideoSyncPanel({
             type="number"
             step={50}
             value={offsetMs}
-            onChange={(event) => setOffsetMs(Number(event.target.value) || 0)}
+            onChange={(event) => updateManualOffset(Number(event.target.value) || 0)}
             className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white"
           />
         </label>
+        <p className="mt-2 text-xs leading-5 text-slate-500">
+          Sign convention: video time = telemetry session time + offset. A positive offset means the matching moment appears later on the video timeline.
+        </p>
         <div className="mt-4 rounded-md border border-slate-800 bg-slate-950/60 p-3">
           <p className="text-xs text-slate-500">Shared track cursor</p>
           <p className="mt-1 text-lg font-semibold text-white">{cursorDistance.toFixed(1)} m</p>
+          <p className="mt-1 text-xs text-slate-500">
+            Selected Lap {analysis.target_lap} telemetry time {cursorPoint?.session_time_s == null ? "unavailable" : `${cursorPoint.session_time_s.toFixed(3)} s`}
+          </p>
         </div>
+        <button
+          type="button"
+          onClick={calibrateCurrentMoment}
+          disabled={!videoUrl || videoDurationS <= 0 || cursorPoint?.session_time_s == null}
+          className="mt-4 flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[#f6c945] px-4 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          <Link2 size={16} /> Calibrate current video T = telemetry D
+        </button>
+        {videoDurationS > 0 && (
+          <p className="mt-2 text-xs text-slate-500">Video duration: {videoDurationS.toFixed(3)} s</p>
+        )}
+        {calibration && (
+          <p className="mt-2 text-xs leading-5 text-emerald-300">
+            Saved anchor: T {calibration.video_time_s.toFixed(3)} s = D {calibration.telemetry_distance_m.toFixed(1)} m · offset {signedMilliseconds(calibration.offset_ms)}
+          </p>
+        )}
+        {syncMessage && <p className="mt-2 text-xs leading-5 text-cyan-200">{syncMessage}</p>}
+        {syncError && <p role="alert" className="mt-2 text-xs leading-5 text-red-300">{syncError}</p>}
         <p className="mt-4 text-xs leading-5 text-slate-500">
-          Clicking the map or an event seeks the video. During playback, the telemetry cursor
-          follows the selected lap using session time.
+          Synchronization always uses Selected/Target Lap {analysis.target_lap}. In Reference or Overlay map mode, a click transfers only distance D onto the target lap before seeking. During playback, the shared telemetry cursor follows that target lap.
+        </p>
+        <p className="mt-2 text-xs leading-5 text-slate-600">
+          Saved calibration contains only the anchor, target lap, duration, file size, modification time and MIME type. The video name, path and content are not stored.
         </p>
       </Panel>
     </div>
   );
+}
+
+function calibrationMatchesVideo(
+  calibration: VideoSyncCalibration,
+  file: File,
+  durationS: number
+): boolean {
+  return calibration.video.size_bytes === file.size
+    && calibration.video.last_modified_ms === file.lastModified
+    && Math.abs(calibration.video.duration_s - durationS) <= 0.1;
+}
+
+function signedMilliseconds(value: number): string {
+  return `${value >= 0 ? "+" : ""}${value} ms`;
 }
 
 function CoachSummaryPanel({
