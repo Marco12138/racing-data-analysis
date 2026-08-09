@@ -67,6 +67,10 @@ import {
 } from "../lib/sessionWorkspace";
 import { FrontendApiConfigError, frontendConfig } from "../lib/config";
 import { sampleLapCsv, sampleTelemetryCsv } from "../lib/sampleData";
+import {
+  loadPublishedRealDemo,
+  type PublishedRealDemoSession,
+} from "../lib/realDemoSession";
 import { XrkAnalysisWorkspace } from "./XrkAnalysisWorkspace";
 import { XrkInspectionWorkspace } from "./XrkInspectionWorkspace";
 import { MultiSessionWorkspace } from "./MultiSessionWorkspace";
@@ -105,6 +109,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
   const [aimImport, setAimImport] = useState<AimImportResponse | null>(null);
   const [xrkInspection, setXrkInspection] = useState<XrkInspection | null>(null);
   const [xrkAnalysis, setXrkAnalysis] = useState<XrkAnalysis | null>(null);
+  const [publishedDemo, setPublishedDemo] = useState<PublishedRealDemoSession | null>(null);
   const [xrkSessions, setXrkSessions] = useState<XrkInspection[]>([]);
   const [deploymentCapabilities, setDeploymentCapabilities] =
     useState<DeploymentCapabilities | null>(null);
@@ -134,6 +139,10 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (initialDemo) void loadDemoData();
+  }, [initialDemo]);
 
   useEffect(() => {
     let active = true;
@@ -210,6 +219,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       setAimImport(null);
       setXrkInspection(null);
       setXrkAnalysis(null);
+      setPublishedDemo(null);
       setAimImportStatus("idle");
       setDataError("");
     } catch (error) {
@@ -250,6 +260,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       setAimImport(null);
       setXrkInspection(inspected);
       setXrkAnalysis(null);
+      setPublishedDemo(null);
       setXrkSessions((current) => {
         const next = [
           ...current.filter((session) => session.inspection_id !== inspected.inspection_id),
@@ -312,6 +323,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       setReferenceLap(result.reference_lap);
       setTargetLap(result.target_lap);
       setXrkAnalysis(result);
+      setPublishedDemo(null);
       setAimImport(null);
       setAimImportStatus("loaded");
     } catch (error) {
@@ -324,8 +336,28 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     }
   }
 
-  function loadDemoData() {
+  async function loadDemoData() {
     xrkAbortRef.current?.abort();
+    const realDemo = await loadPublishedRealDemo();
+    if (realDemo) {
+      const analysis = realDemo.analysis;
+      const normalizedLaps = normalizeLapRows(analysis.sectors?.lap_rows ?? analysis.lap_rows);
+      setLapRows(normalizedLaps);
+      setTelemetryRows([]);
+      setReferenceLap(analysis.reference_lap);
+      setTargetLap(analysis.target_lap);
+      setDriverName(realDemo.display.driver);
+      setVehicleName(realDemo.display.vehicle);
+      setTrackName(realDemo.display.track);
+      setSessionDate(realDemo.display.date);
+      setAimImport(null);
+      setXrkInspection(null);
+      setXrkAnalysis(analysis);
+      setPublishedDemo(realDemo);
+      setAimImportStatus("loaded");
+      setDataError("");
+      return;
+    }
     setLapRows([...demoLapRows]);
     setTelemetryRows([...demoTelemetryRows]);
     setReferenceLap(6);
@@ -337,6 +369,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     setAimImport(null);
     setXrkInspection(null);
     setXrkAnalysis(null);
+    setPublishedDemo(null);
     setAimImportStatus("idle");
     setDataError("");
   }
@@ -346,6 +379,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     if (!session) return;
     setXrkInspection(session);
     setXrkAnalysis(null);
+    setPublishedDemo(null);
     setAimImport(null);
     setAimImportStatus("inspected");
     setDriverName(metadataText(session.metadata, "Driver", "Driver"));
@@ -431,6 +465,8 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
               telemetryLoaded={telemetryRows.length > 0}
               aimImport={aimImport}
               xrkInspection={xrkInspection}
+              xrkAnalysis={xrkAnalysis}
+              publishedDemo={Boolean(publishedDemo)}
             />
             {!xrkAnalysis && <BehaviorPanel telemetryLoaded={telemetryRows.length > 0} behaviorInputsAvailable={behaviorInputsAvailable} flags={handlingFlags} />}
           </aside>
@@ -464,6 +500,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
                 analysis={xrkAnalysis}
                 analyzing={aimImportStatus === "analyzing"}
                 onAnalyze={runXrkAnalysis}
+                publishedDemo={Boolean(publishedDemo)}
               />
             ) : lapAnalysis ? (
               <>
@@ -1220,11 +1257,15 @@ function DataReadinessPanel({
   telemetryLoaded,
   aimImport,
   xrkInspection,
+  xrkAnalysis,
+  publishedDemo,
 }: {
   lapLoaded: boolean;
   telemetryLoaded: boolean;
   aimImport: AimImportResponse | null;
   xrkInspection: XrkInspection | null;
+  xrkAnalysis: XrkAnalysis | null;
+  publishedDemo: boolean;
 }) {
   const usedChannels = aimImport?.channels
     .filter((channel) => channel.status === "used")
@@ -1233,7 +1274,15 @@ function DataReadinessPanel({
     <section className="panel rounded-lg p-4">
       <SectionTitle icon={<AlertTriangle size={18} />} title="Data Readiness" subtitle="量化结论的数据边界" />
       <StatusLine label="Lap / sector" value={lapLoaded ? "Loaded" : "Not provided"} />
-      <StatusLine label="Telemetry" value={telemetryLoaded ? "Loaded" : "Not provided"} />
+      <StatusLine label="Telemetry" value={telemetryLoaded || Boolean(xrkAnalysis?.comparison.length) ? "Loaded" : "Not provided"} />
+      {publishedDemo && (
+        <>
+          <StatusLine label="Source" value="Anonymized real session · read-only" />
+          <p className="mt-3 text-xs leading-5 text-slate-500">
+            Published only after provenance, permission and privacy review checks pass.
+          </p>
+        </>
+      )}
       {aimImport && (
         <>
           <StatusLine label="Source" value="AiM XRK/XRZ" />
