@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { I18nProvider } from "@/frontend/lib/i18n";
-import { localeFromAcceptLanguage } from "@/frontend/lib/i18nCore";
+import { LANGUAGE_COOKIE_NAME, localeFromRequestPreference } from "@/frontend/lib/i18nCore";
 import "./globals.css";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -25,8 +25,11 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const requestHeaders = await headers();
-  const locale = localeFromAcceptLanguage(requestHeaders.get("accept-language"));
+  const [requestHeaders, cookieStore] = await Promise.all([headers(), cookies()]);
+  const locale = localeFromRequestPreference(
+    cookieStore.get(LANGUAGE_COOKIE_NAME)?.value,
+    requestHeaders.get("accept-language")
+  );
   return (
     <html lang={locale === "zh" ? "zh-CN" : "en"}>
       <body><I18nProvider initialLocale={locale}>{children}</I18nProvider></body>

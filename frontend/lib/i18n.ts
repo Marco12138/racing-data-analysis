@@ -425,6 +425,7 @@ type I18nValue = {
 
 const I18nContext = createContext<I18nValue | null>(null);
 const STORAGE_KEY = "racing-ui-language";
+const LANGUAGE_COOKIE_NAME = "racing-ui-language";
 export const translationKeys = Object.keys(zh) as TranslationKey[];
 
 export function I18nProvider({ initialLocale, children }: { initialLocale: Locale; children: ReactNode }) {
@@ -433,6 +434,7 @@ export function I18nProvider({ initialLocale, children }: { initialLocale: Local
   useEffect(() => {
     const saved = window.localStorage.getItem(STORAGE_KEY);
     const preferred = saved === "zh" || saved === "en" ? saved : browserLocale();
+    if (saved === "zh" || saved === "en") persistLanguageCookie(saved);
     if (preferred !== initialLocale) queueMicrotask(() => updateLocale(preferred));
   }, [initialLocale]); // Hydrate with the server locale first, then apply an explicit saved preference.
 
@@ -444,12 +446,18 @@ export function I18nProvider({ initialLocale, children }: { initialLocale: Local
     locale,
     setLocale(next) {
       window.localStorage.setItem(STORAGE_KEY, next);
+      persistLanguageCookie(next);
       updateLocale(next);
     },
     t: (key, params) => translate(locale, key, params),
   }), [locale]);
 
   return createElement(I18nContext.Provider, { value }, children);
+}
+
+function persistLanguageCookie(locale: Locale) {
+  const secure = window.location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${LANGUAGE_COOKIE_NAME}=${locale}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
 }
 
 export function useI18n(): I18nValue {
