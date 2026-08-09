@@ -62,3 +62,21 @@ fingerprint, absolute GPS coordinates and private free text. It retains 13
 timed real laps, three quality-gated reference laps, local metre coordinates,
 recorded RPM/speed/G channels and backend-calculated sectors, zones, events and
 lap deltas. No telemetry value was hand-authored for presentation.
+
+## Optional reviewed LLM narrative
+
+The first-view Demo panel renders an AI narrative when the reviewed artifact
+contains one, and falls back to the structured coaching bullets otherwise. To
+publish such a narrative without adding runtime LLM calls to the public API:
+
+```bash
+python scripts/generate_demo_session_resource.py --generate-narrative \
+  --source public/demo/reviewed-real-session.json
+```
+
+The script asks the configured OpenAI-compatible endpoint
+(`LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`) to summarize the reviewed analysis
+evidence, then writes the narrative back into the source artifact. Human-review
+the resulting diff before rebuilding the compact resource and publishing. With
+no model configuration, or if generation fails, the compact resource keeps the
+structured summary and the frontend continues to render the structured fallback.

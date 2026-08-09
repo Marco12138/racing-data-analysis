@@ -424,6 +424,29 @@ body {
   line-height: 1.6;
 }
 
+.public-demo-unavailable p + .hero-primary {
+  margin-top: 16px;
+}
+
+.public-demo-unavailable .hero-primary:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.public-demo-retry-icon {
+  margin-right: 8px;
+}
+
+.public-demo-retry-icon.is-spinning {
+  animation: public-demo-spin 1s linear infinite;
+}
+
+@keyframes public-demo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .capability-band {
   min-height: 18svh;
   border-top: 1px solid rgba(148, 163, 184, 0.2);
