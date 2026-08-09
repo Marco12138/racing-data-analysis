@@ -77,7 +77,17 @@ const worker = {
       }
     }
 
-    return handler.fetch(request, env, ctx);
+    const response = await handler.fetch(request, env, ctx);
+    if (url.pathname !== "/" || request.method !== "GET") return response;
+
+    const responseHeaders = new Headers(response.headers);
+    responseHeaders.set("Cache-Control", "private, no-store");
+    responseHeaders.set("Vary", "Accept-Language, Cookie");
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders,
+    });
   },
 };
 

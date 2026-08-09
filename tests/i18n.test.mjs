@@ -5,12 +5,21 @@ import {
   translate,
   translationKeys,
 } from "../frontend/lib/i18n.ts";
-import { localeFromAcceptLanguage } from "../frontend/lib/i18nCore.ts";
+import {
+  localeFromAcceptLanguage,
+  localeFromRequestPreference,
+} from "../frontend/lib/i18nCore.ts";
 
 test("locale selection follows the first browser language and defaults to Chinese", () => {
   assert.equal(localeFromAcceptLanguage("en-US,en;q=0.9,zh;q=0.8"), "en");
   assert.equal(localeFromAcceptLanguage("zh-CN,zh;q=0.9,en;q=0.8"), "zh");
   assert.equal(localeFromAcceptLanguage(null), "zh");
+});
+
+test("an explicit language cookie takes precedence over browser language", () => {
+  assert.equal(localeFromRequestPreference("en", "zh-CN,zh;q=0.9"), "en");
+  assert.equal(localeFromRequestPreference("zh", "en-US,en;q=0.9"), "zh");
+  assert.equal(localeFromRequestPreference("invalid", "en-US,en;q=0.9"), "en");
 });
 
 test("every declared key renders in both languages without undefined", () => {

@@ -5,12 +5,13 @@ import test from "node:test";
 async function render(
   env = { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
   acceptLanguage = "zh-CN,zh;q=0.9",
+  cookie = "",
 ) {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
   return worker.fetch(
-    new Request("http://localhost/", { headers: { accept: "text/html", "accept-language": acceptLanguage, host: "localhost" } }),
+    new Request("http://localhost/", { headers: { accept: "text/html", "accept-language": acceptLanguage, cookie, host: "localhost" } }),
     env,
     { waitUntil() {}, passThroughOnException() {} },
   );
@@ -20,6 +21,8 @@ test("server-renders the public racing analysis demo", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.equal(response.headers.get("vary"), "Accept-Language, Cookie");
 
   const html = await response.text();
   assert.match(html, /AI 赛车遥测分析平台/);
@@ -34,6 +37,14 @@ test("server and client share the Accept-Language locale on first render", async
   const html = await response.text();
   assert.match(html, /<html lang="en"/);
   assert.match(html, /AI Racing Telemetry Analysis Platform/);
+  assert.match(html, /Try Demo with sample XRK session/);
+  assert.doesNotMatch(html, /AI 赛车遥测分析平台/);
+});
+
+test("server render honors the explicit language cookie before Accept-Language", async () => {
+  const response = await render(undefined, "zh-CN,zh;q=0.9", "racing-ui-language=en");
+  const html = await response.text();
+  assert.match(html, /<html lang="en"/);
   assert.match(html, /Try Demo with sample XRK session/);
   assert.doesNotMatch(html, /AI 赛车遥测分析平台/);
 });
