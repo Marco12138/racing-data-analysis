@@ -1,5 +1,6 @@
 import type { CsvRow } from "./analysis";
 import { FrontendApiConfigError, resolveApiUrl } from "./config";
+import type { VideoSyncFeature } from "./videoFeatureExtraction";
 
 export type XrkChannel = {
   name: string;
@@ -301,6 +302,28 @@ export type XrkAnalyzeOptions = {
   }>;
 };
 
+export type VideoSyncAutoResult = {
+  offset_ms: number;
+  confidence: number;
+  reliable: boolean;
+  source: "temporary_xrk_inspection" | "request_summary";
+  evidence: {
+    method: string;
+    offset_convention: string;
+    video_feature_points: number;
+    telemetry_speed_points: number;
+    video_change_events: number;
+    telemetry_deceleration_events: number;
+    matched_overlap_s: number;
+    overlap_ratio: number;
+    best_correlation: number;
+    peak_margin: number;
+    reliable_confidence_threshold: number;
+  };
+  warnings: string[];
+  request_id: string;
+};
+
 export type DriverComparisonResult = {
   format: "cross_session_real_lap_comparison";
   sessions: {
@@ -475,6 +498,25 @@ export async function analyzeXrkInspection(
     throw await responseError(response, `XRK analysis failed (${response.status}).`);
   }
   return response.json() as Promise<XrkAnalysis>;
+}
+
+export async function autoSyncVideoTelemetry(options: {
+  inspection_id: string;
+  video_features: VideoSyncFeature[];
+  max_offset_s?: number;
+  search_step_s?: number;
+  min_overlap_s?: number;
+}, signal?: AbortSignal): Promise<VideoSyncAutoResult> {
+  const response = await fetch(await resolveApiUrl("/xrk/video-sync/auto"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options),
+    signal,
+  });
+  if (!response.ok) {
+    throw await responseError(response, `Automatic video alignment failed (${response.status}).`);
+  }
+  return response.json() as Promise<VideoSyncAutoResult>;
 }
 
 export async function deleteXrkInspection(inspectionId: string): Promise<void> {

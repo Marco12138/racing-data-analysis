@@ -13,6 +13,10 @@ import {
   validateVideoSeek,
   videoToTelemetryTimeS,
 } from "../frontend/lib/videoTelemetrySync.ts";
+import {
+  summarizeVideoFrame,
+  videoFeatureSampleTimes,
+} from "../frontend/lib/videoFeatureExtraction.ts";
 
 const points = [
   { distance_m: 0, session_time_s: 100 },
@@ -69,4 +73,27 @@ test("calibration persists only non-sensitive anchor metadata", () => {
 test("invalid saved calibration is ignored", () => {
   assert.equal(parseVideoSyncCalibration("not-json"), null);
   assert.equal(parseVideoSyncCalibration(JSON.stringify({ version: 1, offset_ms: 10 })), null);
+});
+
+test("browser feature summaries use luminance and frame differences only", () => {
+  const first = summarizeVideoFrame(
+    new Uint8ClampedArray([100, 100, 100, 255, 200, 200, 200, 255]),
+    null
+  );
+  const second = summarizeVideoFrame(
+    new Uint8ClampedArray([120, 120, 120, 255, 180, 180, 180, 255]),
+    first.luma
+  );
+  assert.equal(first.brightness, 150);
+  assert.equal(first.motion, 0);
+  assert.equal(second.brightness, 150);
+  assert.equal(second.motion, 20);
+});
+
+test("video feature sampling is bounded and spans the readable duration", () => {
+  const samples = videoFeatureSampleTimes(572.16, 360);
+  assert.equal(samples.length, 360);
+  assert.equal(samples[0], 0);
+  assert.ok(samples.at(-1) <= 572.16);
+  assert.deepEqual(videoFeatureSampleTimes(0), []);
 });
