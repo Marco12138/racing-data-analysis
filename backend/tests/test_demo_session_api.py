@@ -122,6 +122,27 @@ def test_demo_session_contains_no_private_or_synthetic_reference_data() -> None:
         assert private_fragment not in serialized
 
 
+def test_build_demo_session_payload_preserves_reviewed_llm_narrative() -> None:
+    """A reviewed LLM narrative is exposed as 'llm'; otherwise structured."""
+    reviewed = json.loads(REVIEWED_ARTIFACT.read_text(encoding="utf-8"))
+    narrative = (
+        "训练重点一：在 282.0 米处更早恢复油门。\n"
+        "对应证据：最快圈 40.326s，Lap 13。\n"
+        "练习建议：下节练习在 282.0 米处提前恢复油门并对比圈速。"
+    )
+
+    reviewed["analysis"]["narrative"] = narrative
+    payload = build_demo_session_payload(reviewed)
+    assert payload["summary"]["source"] == "llm"
+    assert payload["summary"]["narrative"] == narrative
+    assert payload["summary"]["bullets"]
+
+    reviewed["analysis"]["narrative"] = None
+    payload = build_demo_session_payload(reviewed)
+    assert payload["summary"]["source"] == "structured"
+    assert payload["summary"]["narrative"] == reviewed["analysis"]["report"]
+
+
 def _walk_keys(value: Any) -> list[str]:
     """Collect nested mapping keys for privacy and contract assertions."""
     if isinstance(value, dict):
