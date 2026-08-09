@@ -19,6 +19,8 @@ def build_client(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     drivers: list[str],
+    *,
+    max_comparison_points: int = 5_000,
 ) -> TestClient:
     """Create an app whose mocked parser emits the requested driver names."""
     monkeypatch.setattr(storage, "DB_PATH", tmp_path / "sessions.sqlite3")
@@ -40,6 +42,7 @@ def build_client(
         cors_origins="https://frontend.example",
         xrk_inspection_cache_dir=str(tmp_path / "cache"),
         max_xrk_upload_bytes=1024,
+        xrk_max_comparison_points=max_comparison_points,
     )
     return TestClient(create_app(settings))
 
@@ -155,3 +158,85 @@ def test_setup_experiment_rejects_different_drivers(
         assert response.status_code == 422
         assert response.json()["error_code"] == "SETUP_EXPERIMENT_DATA_INCOMPATIBLE"
         assert "same identified driver" in response.json()["message"]
+
+
+def test_comparison_returns_expired_token_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A deleted or expired inspection must retain the stable public 410 contract."""
+    with build_client(monkeypatch, tmp_path, ["A", "B"]) as client:
+        first = upload(client, "a.xrk")
+        second = upload(client, "b.xrk")
+        client.delete(f"/api/v1/xrk/inspections/{first['inspection_id']}")
+
+        response = client.post(
+            "/api/v1/comparisons/laps",
+            json={
+                "session_a": {"inspection_id": first["inspection_id"]},
+                "session_b": {"inspection_id": second["inspection_id"]},
+            },
+        )
+
+        assert response.status_code == 410
+        assert response.json()["error_code"] == "XRK_INSPECTION_EXPIRED"
+        assert "expired" in response.json()["message"].lower()
+
+
+def test_comparison_rejects_requested_lap_outside_quality_gate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A requested lap must be a real lap accepted by the quality gate."""
+    with build_client(monkeypatch, tmp_path, ["A", "B"]) as client:
+        first = upload(client, "a.xrk")
+        second = upload(client, "b.xrk")
+
+        response = client.post(
+            "/api/v1/comparisons/laps",
+            json={
+                "session_a": {"inspection_id": first["inspection_id"], "lap": 999},
+                "session_b": {"inspection_id": second["inspection_id"]},
+            },
+        )
+
+        assert response.status_code == 422
+        assert response.json()["error_code"] == "CROSS_SESSION_DATA_INCOMPATIBLE"
+        assert "did not pass the Lap Quality Gate" in response.json()["message"]
+
+
+def test_comparison_api_accepts_manual_zones_and_caps_response(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The public endpoint should pass manual zones and enforce configured row caps."""
+    with build_client(
+        monkeypatch,
+        tmp_path,
+        ["A", "B"],
+        max_comparison_points=100,
+    ) as client:
+        first = upload(client, "a.xrk")
+        second = upload(client, "b.xrk")
+
+        response = client.post(
+            "/api/v1/comparisons/laps",
+            json={
+                "session_a": {"inspection_id": first["inspection_id"]},
+                "session_b": {"inspection_id": second["inspection_id"]},
+                "distance_step_m": 0.25,
+                "manual_zones": [{
+                    "id": "manual-t1",
+                    "name": "Manual T1",
+                    "entry_distance_m": 25.0,
+                    "exit_distance_m": 75.0,
+                }],
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert len(result["comparison"]) == 100
+        assert len(result["track"]["a"]) == 100
+        assert result["zones"][0]["id"] == "manual-t1"
+        assert result["zones"][0]["source"] == "manual"

@@ -426,6 +426,28 @@ def track_compatibility_warnings(
             )
     if not track_a or not track_b:
         warnings.append("Track metadata is incomplete; same-track compatibility is inferred from GPS length.")
+    warnings.extend(vehicle_metadata_warnings(a.manifest, b.manifest))
+    return warnings
+
+
+def vehicle_metadata_warnings(
+    manifest_a: dict[str, Any], manifest_b: dict[str, Any]
+) -> list[str]:
+    """Describe known vehicle differences without blocking a same-track comparison."""
+    fields = [
+        ("Vehicle", ("Vehicle", "Vehicle Model", "Kart", "Kart Model")),
+        ("Chassis", ("Chassis", "Chassis Model")),
+        ("Engine", ("Engine", "Engine Model")),
+    ]
+    warnings = []
+    for label, aliases in fields:
+        value_a = first_metadata_value(manifest_a, aliases)
+        value_b = first_metadata_value(manifest_b, aliases)
+        if value_a and value_b and normalize_text(value_a) != normalize_text(value_b):
+            warnings.append(
+                f"{label} metadata differs between sessions (A: {value_a}; B: {value_b}); "
+                "the comparison remains available with reduced compatibility confidence."
+            )
     return warnings
 
 
@@ -542,6 +564,15 @@ def merge_evidence(a: PreparedSession, b: PreparedSession) -> dict[str, list[str
 def metadata_value(session: dict[str, Any], key: str) -> str:
     value = session.get("metadata", {}).get(key)
     return str(value).strip() if value not in (None, "") else ""
+
+
+def first_metadata_value(session: dict[str, Any], keys: tuple[str, ...]) -> str:
+    """Return the first populated metadata alias from a parser manifest."""
+    for key in keys:
+        value = metadata_value(session, key)
+        if value:
+            return value
+    return ""
 
 
 def normalize_text(value: str) -> str:
