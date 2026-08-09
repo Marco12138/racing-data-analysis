@@ -1,0 +1,710 @@
+{
+  "schema_version": 1,
+  "provenance": {
+    "dataset_kind": "anonymized_real_session",
+    "derived_from_real_session": true,
+    "publication_permission": "confirmed",
+    "telemetry_values": "measured_or_backend_calculated_only",
+    "privacy_review_status": "passed",
+    "private_identifiers_removed": true
+  },
+  "display": {
+    "driver": "Anonymous Driver",
+    "vehicle": "Anonymous Kart",
+    "track": "Anonymous Circuit",
+    "date": "Private"
+  },
+  "fastest_lap": {
+    "lap": 13,
+    "lap_time": 40.326
+  },
+  "lap_rows": [
+    {
+      "lap": 1,
+      "lap_time": 45.175,
+      "notes": "logger_lap_timing"
+    },
+    {
+      "lap": 2,
+      "lap_time": 46.024,
+      "notes": "logger_lap_timing"
+    },
+    {
+      "lap": 3,
+      "lap_time": 41.431,
+      "notes": "logger_lap_timing"
+    },
+    {
+      "lap": 4,
+      "lap_time": 41.049,
+      "notes": "logger_lap_timing"
+    },
+    {
+      "lap": 5,
+      "lap_time": 40.842,
+      "notes": "logger_lap_timing"
+    },
+    {
+      "lap": 6,
+      "lap_time": 40.881,
+      "notes": "logger_lap_timing"
+    },
+    {
+      "lap": 7,
+      "lap_time": 49.036,
+      "notes": "logger_lap_timing"
+    },
+    {
+      "lap": 8,
+      "lap_time": 40.534,
+      "notes": "logger_lap_timing"
+    },
+    {
+      "lap": 9,
+      "lap_time": 41.575,
+      "notes": "logger_lap_timing"
+    },
+    {
+      "lap": 10,
+      "lap_time": 41.67,
+      "notes": "logger_lap_timing"
+    },
+    {
+      "lap": 11,
+      "lap_time": 40.67,
+      "notes": "logger_lap_timing"
+    },
+    {
+      "lap": 12,
+      "lap_time": 40.587,
+      "notes": "logger_lap_timing"
+    },
+    {
+      "lap": 13,
+      "lap_time": 40.326,
+      "notes": "logger_lap_timing"
+    }
+  ],
+  "track": {
+    "lap_length_m": 818.636,
+    "points": [
+      {
+        "distance_m": 0.0,
+        "local_x_m": 5.925308252244735,
+        "local_y_m": -10.663147687575592
+      },
+      {
+        "distance_m": 8.0,
+        "local_x_m": 5.766674288235144,
+        "local_y_m": -2.665027911000356
+      },
+      {
+        "distance_m": 18.0,
+        "local_x_m": 5.593014823601012,
+        "local_y_m": 7.333101965281086
+      },
+      {
+        "distance_m": 26.0,
+        "local_x_m": 5.512625981243219,
+        "local_y_m": 15.332488263644823
+      },
+      {
+        "distance_m": 34.0,
+        "local_x_m": 5.3692541372945835,
+        "local_y_m": 23.330558888255332
+      },
+      {
+        "distance_m": 42.0,
+        "local_x_m": 4.450548102158074,
+        "local_y_m": 31.270099983656095
+      },
+      {
+        "distance_m": 52.0,
+        "local_x_m": 1.8139841928253997,
+        "local_y_m": 40.89440472313935
+      },
+      {
+        "distance_m": 60.0,
+        "local_x_m": -1.9161803359064813,
+        "local_y_m": 47.95090544639072
+      },
+      {
+        "distance_m": 68.0,
+        "local_x_m": -7.2177051166793635,
+        "local_y_m": 53.91466460384723
+      },
+      {
+        "distance_m": 78.0,
+        "local_x_m": -15.488717070948303,
+        "local_y_m": 59.45428723822336
+      },
+      {
+        "distance_m": 86.0,
+        "local_x_m": -23.01449678797768,
+        "local_y_m": 62.14296523113333
+      },
+      {
+        "distance_m": 94.0,
+        "local_x_m": -30.869325604409866,
+        "local_y_m": 63.62580408157547
+      },
+      {
+        "distance_m": 104.0,
+        "local_x_m": -40.8215995384279,
+        "local_y_m": 64.55466828559663
+      },
+      {
+        "distance_m": 112.0,
+        "local_x_m": -48.76603457653599,
+        "local_y_m": 65.36075202529635
+      },
+      {
+        "distance_m": 120.0,
+        "local_x_m": -56.19605513813041,
+        "local_y_m": 68.22245487200694
+      },
+      {
+        "distance_m": 128.0,
+        "local_x_m": -62.269404168018596,
+        "local_y_m": 73.30087738283108
+      },
+      {
+        "distance_m": 138.0,
+        "local_x_m": -64.60795909138655,
+        "local_y_m": 82.66986032013486
+      },
+      {
+        "distance_m": 146.0,
+        "local_x_m": -61.040742522217215,
+        "local_y_m": 89.67329868592778
+      },
+      {
+        "distance_m": 154.0,
+        "local_x_m": -54.712291570770475,
+        "local_y_m": 94.4391569875959
+      },
+      {
+        "distance_m": 164.0,
+        "local_x_m": -44.87796562372747,
+        "local_y_m": 96.0422995115052
+      },
+      {
+        "distance_m": 172.0,
+        "local_x_m": -36.99082594864865,
+        "local_y_m": 94.83508961031954
+      },
+      {
+        "distance_m": 180.0,
+        "local_x_m": -29.256974136268436,
+        "local_y_m": 92.79730545806402
+      },
+      {
+        "distance_m": 188.0,
+        "local_x_m": -21.487951008530704,
+        "local_y_m": 90.89213669334856
+      },
+      {
+        "distance_m": 198.0,
+        "local_x_m": -11.818111995095425,
+        "local_y_m": 88.34728590767787
+      },
+      {
+        "distance_m": 206.0,
+        "local_x_m": -4.360807517816165,
+        "local_y_m": 85.46267823614549
+      },
+      {
+        "distance_m": 214.0,
+        "local_x_m": 2.607950809819599,
+        "local_y_m": 81.5636410951648
+      },
+      {
+        "distance_m": 224.0,
+        "local_x_m": 9.20332335423251,
+        "local_y_m": 74.11539889773802
+      },
+      {
+        "distance_m": 232.0,
+        "local_x_m": 13.208552386254294,
+        "local_y_m": 67.21140648173723
+      },
+      {
+        "distance_m": 240.0,
+        "local_x_m": 15.140461545481077,
+        "local_y_m": 59.46584379974498
+      },
+      {
+        "distance_m": 250.0,
+        "local_x_m": 16.489270585313978,
+        "local_y_m": 49.57316908621983
+      },
+      {
+        "distance_m": 258.0,
+        "local_x_m": 19.56494137739383,
+        "local_y_m": 42.23815691201108
+      },
+      {
+        "distance_m": 266.0,
+        "local_x_m": 26.03108599350564,
+        "local_y_m": 37.71729069613873
+      },
+      {
+        "distance_m": 274.0,
+        "local_x_m": 33.276629727687926,
+        "local_y_m": 39.430393009383536
+      },
+      {
+        "distance_m": 284.0,
+        "local_x_m": 36.45227724933144,
+        "local_y_m": 48.61941588039703
+      },
+      {
+        "distance_m": 292.0,
+        "local_x_m": 37.368191006056975,
+        "local_y_m": 56.51913144638028
+      },
+      {
+        "distance_m": 300.0,
+        "local_x_m": 41.94823102074412,
+        "local_y_m": 62.98027735702049
+      },
+      {
+        "distance_m": 310.0,
+        "local_x_m": 51.20065717022049,
+        "local_y_m": 65.6118417045863
+      },
+      {
+        "distance_m": 318.0,
+        "local_x_m": 57.70283636866859,
+        "local_y_m": 61.241451279436326
+      },
+      {
+        "distance_m": 326.0,
+        "local_x_m": 60.62647811329682,
+        "local_y_m": 53.87014818128857
+      },
+      {
+        "distance_m": 334.0,
+        "local_x_m": 59.94295541684375,
+        "local_y_m": 45.988396633097985
+      },
+      {
+        "distance_m": 344.0,
+        "local_x_m": 54.927017791703655,
+        "local_y_m": 37.39902344668745
+      },
+      {
+        "distance_m": 352.0,
+        "local_x_m": 49.52583425985669,
+        "local_y_m": 31.50606339315054
+      },
+      {
+        "distance_m": 360.0,
+        "local_x_m": 43.70570535033786,
+        "local_y_m": 26.018286615915297
+      },
+      {
+        "distance_m": 370.0,
+        "local_x_m": 36.775230601521415,
+        "local_y_m": 18.81767354691015
+      },
+      {
+        "distance_m": 378.0,
+        "local_x_m": 32.170399660535985,
+        "local_y_m": 12.284797830115114
+      },
+      {
+        "distance_m": 386.0,
+        "local_x_m": 28.83525225012383,
+        "local_y_m": 5.025915613304482
+      },
+      {
+        "distance_m": 396.0,
+        "local_x_m": 26.59485671975058,
+        "local_y_m": -4.705143737222334
+      },
+      {
+        "distance_m": 404.0,
+        "local_x_m": 26.18051499071472,
+        "local_y_m": -12.686920820927266
+      },
+      {
+        "distance_m": 412.0,
+        "local_x_m": 26.39786526589302,
+        "local_y_m": -20.682543209494913
+      },
+      {
+        "distance_m": 420.0,
+        "local_x_m": 26.507046901852497,
+        "local_y_m": -28.679969130537373
+      },
+      {
+        "distance_m": 430.0,
+        "local_x_m": 25.785110729223796,
+        "local_y_m": -38.64928514237458
+      },
+      {
+        "distance_m": 438.0,
+        "local_x_m": 25.092297403051887,
+        "local_y_m": -46.618356678910175
+      },
+      {
+        "distance_m": 446.0,
+        "local_x_m": 24.741372552269333,
+        "local_y_m": -54.61048103429301
+      },
+      {
+        "distance_m": 456.0,
+        "local_x_m": 24.56057556265454,
+        "local_y_m": -64.60852712719547
+      },
+      {
+        "distance_m": 464.0,
+        "local_x_m": 24.43079025599718,
+        "local_y_m": -72.60694740689571
+      },
+      {
+        "distance_m": 472.0,
+        "local_x_m": 24.030762314585914,
+        "local_y_m": -80.59627943286013
+      },
+      {
+        "distance_m": 482.0,
+        "local_x_m": 23.044377199043105,
+        "local_y_m": -90.54634852012789
+      },
+      {
+        "distance_m": 490.0,
+        "local_x_m": 21.5251907499778,
+        "local_y_m": -98.39479395637039
+      },
+      {
+        "distance_m": 498.0,
+        "local_x_m": 18.6221406071516,
+        "local_y_m": -105.82939996655591
+      },
+      {
+        "distance_m": 506.0,
+        "local_x_m": 14.060632410054728,
+        "local_y_m": -112.36925245503812
+      },
+      {
+        "distance_m": 516.0,
+        "local_x_m": 5.702052819742277,
+        "local_y_m": -117.59929494828133
+      },
+      {
+        "distance_m": 524.0,
+        "local_x_m": -2.2514347424210217,
+        "local_y_m": -117.88066013969207
+      },
+      {
+        "distance_m": 532.0,
+        "local_x_m": -9.569196497275247,
+        "local_y_m": -114.74404222155646
+      },
+      {
+        "distance_m": 542.0,
+        "local_x_m": -19.277018876647656,
+        "local_y_m": -112.77555240379019
+      },
+      {
+        "distance_m": 550.0,
+        "local_x_m": -26.41848011356241,
+        "local_y_m": -115.68161094794563
+      },
+      {
+        "distance_m": 558.0,
+        "local_x_m": -28.074935929888465,
+        "local_y_m": -123.32678538430984
+      },
+      {
+        "distance_m": 566.0,
+        "local_x_m": -24.299359044574484,
+        "local_y_m": -130.16708132934164
+      },
+      {
+        "distance_m": 576.0,
+        "local_x_m": -15.549654777419937,
+        "local_y_m": -134.8722815894053
+      },
+      {
+        "distance_m": 584.0,
+        "local_x_m": -8.119799041479789,
+        "local_y_m": -137.79398611932214
+      },
+      {
+        "distance_m": 592.0,
+        "local_x_m": -2.101031637618408,
+        "local_y_m": -142.9568539693802
+      },
+      {
+        "distance_m": 602.0,
+        "local_x_m": -1.3964867448853562,
+        "local_y_m": -152.6123957809639
+      },
+      {
+        "distance_m": 610.0,
+        "local_x_m": -5.914471775526241,
+        "local_y_m": -159.16855935622868
+      },
+      {
+        "distance_m": 618.0,
+        "local_x_m": -13.139693832558368,
+        "local_y_m": -162.19790389732555
+      },
+      {
+        "distance_m": 628.0,
+        "local_x_m": -23.01745422837925,
+        "local_y_m": -161.6448409718781
+      },
+      {
+        "distance_m": 636.0,
+        "local_x_m": -30.327880924332966,
+        "local_y_m": -158.4268280738589
+      },
+      {
+        "distance_m": 644.0,
+        "local_x_m": -36.98939001525896,
+        "local_y_m": -154.02692825006827
+      },
+      {
+        "distance_m": 652.0,
+        "local_x_m": -42.533329290237845,
+        "local_y_m": -148.2783433731336
+      },
+      {
+        "distance_m": 662.0,
+        "local_x_m": -47.367365472119616,
+        "local_y_m": -139.56263801533106
+      },
+      {
+        "distance_m": 670.0,
+        "local_x_m": -49.24240008348514,
+        "local_y_m": -131.80604137489243
+      },
+      {
+        "distance_m": 678.0,
+        "local_x_m": -49.24166295796146,
+        "local_y_m": -123.82816563293973
+      },
+      {
+        "distance_m": 688.0,
+        "local_x_m": -47.02944926518095,
+        "local_y_m": -114.11468136606975
+      },
+      {
+        "distance_m": 696.0,
+        "local_x_m": -43.16432475645035,
+        "local_y_m": -107.14171681690385
+      },
+      {
+        "distance_m": 704.0,
+        "local_x_m": -37.56829548886717,
+        "local_y_m": -101.44467635193982
+      },
+      {
+        "distance_m": 712.0,
+        "local_x_m": -30.84445842157711,
+        "local_y_m": -97.14564387384121
+      },
+      {
+        "distance_m": 722.0,
+        "local_x_m": -21.47295240683641,
+        "local_y_m": -93.69735490721574
+      },
+      {
+        "distance_m": 730.0,
+        "local_x_m": -14.135513945134688,
+        "local_y_m": -90.53021006418408
+      },
+      {
+        "distance_m": 738.0,
+        "local_x_m": -7.552217328462929,
+        "local_y_m": -86.00829387358596
+      },
+      {
+        "distance_m": 748.0,
+        "local_x_m": -0.7238320657337001,
+        "local_y_m": -78.718398389231
+      },
+      {
+        "distance_m": 756.0,
+        "local_x_m": 3.2070912189171747,
+        "local_y_m": -71.79675146456599
+      },
+      {
+        "distance_m": 764.0,
+        "local_x_m": 5.380078192730892,
+        "local_y_m": -64.11927728779084
+      },
+      {
+        "distance_m": 774.0,
+        "local_x_m": 6.57339988744126,
+        "local_y_m": -54.19811461465598
+      },
+      {
+        "distance_m": 782.0,
+        "local_x_m": 6.545082259092981,
+        "local_y_m": -46.20380100399088
+      },
+      {
+        "distance_m": 790.0,
+        "local_x_m": 6.059455962007215,
+        "local_y_m": -38.21902919530646
+      },
+      {
+        "distance_m": 798.0,
+        "local_x_m": 5.778742565636561,
+        "local_y_m": -30.22448476902266
+      },
+      {
+        "distance_m": 808.0,
+        "local_x_m": 5.525712081286366,
+        "local_y_m": -20.22843538259935
+      },
+      {
+        "distance_m": 816.0,
+        "local_x_m": 5.401605153484653,
+        "local_y_m": -12.229685852808755
+      }
+    ]
+  },
+  "sector_loss": {
+    "source": "virtual_distance",
+    "official": false,
+    "sector_best": {
+      "sector_1": 12.813,
+      "sector_2": 13.817,
+      "sector_3": 13.272
+    },
+    "laps": [
+      {
+        "lap": 1,
+        "total_loss_s": 5.273,
+        "sector_losses": {
+          "sector_1": 2.737,
+          "sector_2": 1.270999999999999,
+          "sector_3": 1.2650000000000006
+        }
+      },
+      {
+        "lap": 2,
+        "total_loss_s": 6.122,
+        "sector_losses": {
+          "sector_1": 4.868,
+          "sector_2": 0.5860000000000003,
+          "sector_3": 0.6679999999999993
+        }
+      },
+      {
+        "lap": 3,
+        "total_loss_s": 1.529,
+        "sector_losses": {
+          "sector_1": 0.6120000000000001,
+          "sector_2": 0.27699999999999925,
+          "sector_3": 0.6400000000000006
+        }
+      },
+      {
+        "lap": 4,
+        "total_loss_s": 1.1470000000000002,
+        "sector_losses": {
+          "sector_1": 0.0,
+          "sector_2": 0.14100000000000001,
+          "sector_3": 1.0060000000000002
+        }
+      },
+      {
+        "lap": 5,
+        "total_loss_s": 0.9399999999999995,
+        "sector_losses": {
+          "sector_1": 0.1869999999999994,
+          "sector_2": 0.14300000000000068,
+          "sector_3": 0.6099999999999994
+        }
+      },
+      {
+        "lap": 6,
+        "total_loss_s": 0.9789999999999974,
+        "sector_losses": {
+          "sector_1": 0.254999999999999,
+          "sector_2": 0.10099999999999909,
+          "sector_3": 0.6229999999999993
+        }
+      },
+      {
+        "lap": 7,
+        "total_loss_s": 9.133999999999999,
+        "sector_losses": {
+          "sector_1": 6.007,
+          "sector_2": 2.2109999999999985,
+          "sector_3": 0.9160000000000004
+        }
+      },
+      {
+        "lap": 8,
+        "total_loss_s": 0.6319999999999979,
+        "sector_losses": {
+          "sector_1": 0.5279999999999987,
+          "sector_2": 0.0,
+          "sector_3": 0.1039999999999992
+        }
+      },
+      {
+        "lap": 9,
+        "total_loss_s": 1.673,
+        "sector_losses": {
+          "sector_1": 0.6440000000000001,
+          "sector_2": 0.5259999999999998,
+          "sector_3": 0.5030000000000001
+        }
+      },
+      {
+        "lap": 10,
+        "total_loss_s": 1.767999999999999,
+        "sector_losses": {
+          "sector_1": 0.8469999999999995,
+          "sector_2": 0.33999999999999986,
+          "sector_3": 0.5809999999999995
+        }
+      },
+      {
+        "lap": 11,
+        "total_loss_s": 0.7679999999999989,
+        "sector_losses": {
+          "sector_1": 0.47499999999999964,
+          "sector_2": 0.10299999999999976,
+          "sector_3": 0.1899999999999995
+        }
+      },
+      {
+        "lap": 12,
+        "total_loss_s": 0.6849999999999987,
+        "sector_losses": {
+          "sector_1": 0.44599999999999973,
+          "sector_2": 0.238999999999999,
+          "sector_3": 0.0
+        }
+      },
+      {
+        "lap": 13,
+        "total_loss_s": 0.4239999999999995,
+        "sector_losses": {
+          "sector_1": 0.23399999999999999,
+          "sector_2": 0.02099999999999902,
+          "sector_3": 0.16900000000000048
+        }
+      }
+    ]
+  },
+  "summary": {
+    "source": "structured",
+    "narrative": "Measured\n- 13 timed laps were read from the logger.\n- The fastest logger lap is Lap 13 at 40.326s.\n- Every benchmark in this report is a real completed lap that passed the Lap Quality Gate.\n- RPM is available as a directly recorded channel.\n- GPS position and GPS speed are available as recorded channels.\n\nCalculated\n- Reference Lap: 13; Selected Lap: 8.\n- Top valid laps: Lap 13 (40.326s), Lap 8 (40.534s), Lap 12 (40.587s).\n- Empirical achievable improvement range: 0.029–0.074s (medium confidence).\n- Suggested Zone 1 has the largest selected-lap zone delta at +0.080s.\n- Re-acceleration point: reference 143.214 vs selected 139.111 (-4.103 m).\n- Minimum RPM: reference 7941.339 vs selected 7837.881 (-103.458 rpm).\n- Exit speed: reference 70.442 vs selected 71.708 (+1.266 km/h).\n- Zone time: reference 3.600 vs selected 3.680 (+0.080 s).\n\nInferred\n- Conservative driver-action candidates: BRAKING_LIKELY 5, COASTING 6, LIFTING 2, MINIMUM_RPM 8, REACCELERATION 8, SUSTAINED_ACCELERATION 3, THROTTLE_HESITATION 6.\n- Confirmed braking is unavailable because no direct brake channel is present; BRAKING_LIKELY is an inference from RPM, speed, longitudinal G, and curvature.\n- Virtual sectors and Suggested Zones are calculated analysis aids, not official timing points.\n\nAI Coach Summary\n- Priority 1, Suggested Zone 2: Test a sustained RPM recovery near 282.0 m while keeping the preceding preparation unchanged.\n- Priority 2, Suggested Zone 1: Test a sustained RPM recovery near 140.0 m while keeping the preceding preparation unchanged.\n- Rejected Suggested Zone 3: local gain 0.123s, downstream cost 0.036s, net +0.087s.\n\nReference policy\n- No stitched target lap or synthetic RPM trace is generated.\n- The improvement range is empirical and conservative.\n- Valid improvements are not guaranteed to coexist in the same lap.",
+    "bullets": [
+      "Test a sustained RPM recovery near 282.0 m while keeping the preceding preparation unchanged.",
+      "Test a sustained RPM recovery near 140.0 m while keeping the preceding preparation unchanged."
+    ]
+  },
+  "synthetic_curve_generated": false
+}

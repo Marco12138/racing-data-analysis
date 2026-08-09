@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from fastapi import APIRouter, File, Request, UploadFile
+from fastapi import APIRouter, File, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from ..analysis.llm_narrative import (
@@ -20,6 +20,8 @@ from ..analysis.llm_narrative import (
     generate_llm_narrative,
 )
 from ..analysis.xrk_session_analysis import analyze_xrk_session
+from ..models.demo_session import DemoSessionResponse
+from ..resources.demo_session import load_demo_session_resource
 from .errors import PublicApiError
 from ..importers.inspection_store import InspectionExpiredError
 from ..importers.service import (
@@ -36,6 +38,8 @@ if not logger.handlers:
     log_handler = logging.StreamHandler(sys.stdout)
     log_handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(log_handler)
+
+PUBLIC_DEMO_SESSION = load_demo_session_resource()
 
 
 class ManualZoneRequest(BaseModel):
@@ -59,6 +63,15 @@ class XrkAnalyzeRequest(BaseModel):
     manual_zones: list[ManualZoneRequest] = Field(default_factory=list, max_length=30)
     lap_quality_absolute_gap_s: float = Field(default=0.5, ge=0.05, le=5.0)
     lap_quality_relative_gap_pct: float = Field(default=1.0, ge=0.1, le=10.0)
+
+
+@router.get("/demo-session", response_model=DemoSessionResponse)
+def get_demo_session(response: Response) -> DemoSessionResponse:
+    """Return the reviewed real-session summary bundled with the service."""
+    response.headers["Cache-Control"] = (
+        "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400"
+    )
+    return PUBLIC_DEMO_SESSION
 
 
 @router.post("/inspect")
