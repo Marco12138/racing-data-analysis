@@ -52,10 +52,12 @@ export function XrkAnalysisWorkspace({
   analysis,
   analyzing,
   onAnalyze,
+  publishedDemo = false,
 }: {
   analysis: XrkAnalysis;
   analyzing: boolean;
   onAnalyze: (options: Partial<XrkAnalyzeOptions>) => Promise<void>;
+  publishedDemo?: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [cursorDistance, setCursorDistance] = useState(0);
@@ -144,6 +146,13 @@ export function XrkAnalysisWorkspace({
       {analyzing && (
         <div className="rounded-md border border-[#35d6d0]/30 bg-[#35d6d0]/10 px-4 py-3 text-sm text-cyan-100">
           Recalculating distance alignment, sectors, zones and behavior evidence...
+        </div>
+      )}
+
+      {publishedDemo && (
+        <div className="rounded-md border border-[#35d6d0]/30 bg-[#35d6d0]/10 px-4 py-3 text-sm text-cyan-100">
+          Anonymized real session · read-only published analysis. All displayed telemetry comes
+          from the reviewed artifact; interactive recalculation requires uploading a session.
         </div>
       )}
 
