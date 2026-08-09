@@ -47,11 +47,7 @@ const worker = {
     }
 
     if (url.pathname === "/api/runtime-config") {
-      const apiOrigin = (
-        env.API_URL ??
-        env.NEXT_PUBLIC_API_URL ??
-        ""
-      ).replace(/\/+$/, "");
+      const apiOrigin = runtimeApiOrigin(env);
       const apiPrefix =
         env.API_PREFIX ??
         env.NEXT_PUBLIC_API_PREFIX ??
@@ -72,8 +68,46 @@ const worker = {
       );
     }
 
+    if (url.pathname === "/" && request.method === "GET") {
+      const summary = await fetchPublicDemoSummary(env);
+      if (summary) {
+        const forwardedHeaders = new Headers(request.headers);
+        forwardedHeaders.set("x-racing-demo-summary", encodeURIComponent(summary));
+        request = new Request(request, { headers: forwardedHeaders });
+      }
+    }
+
     return handler.fetch(request, env, ctx);
   },
 };
+
+function runtimeApiOrigin(env: Env): string {
+  const configured = (env.API_URL ?? env.NEXT_PUBLIC_API_URL ?? "").trim();
+  if (!configured) return "";
+  try {
+    const parsed = new URL(configured);
+    const loopback = ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
+    if (parsed.protocol !== "https:" || loopback) return "";
+    return parsed.origin;
+  } catch {
+    return "";
+  }
+}
+
+async function fetchPublicDemoSummary(env: Env): Promise<string | null> {
+  const origin = runtimeApiOrigin(env);
+  if (!origin) return null;
+  const prefix = (env.API_PREFIX ?? env.NEXT_PUBLIC_API_PREFIX ?? "/api/v1").replace(/\/+$/, "");
+  try {
+    const response = await fetch(`${origin}${prefix}/xrk/demo-session`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return null;
+    const text = await response.text();
+    return text.length <= 48_000 ? text : null;
+  } catch {
+    return null;
+  }
+}
 
 export default worker;
