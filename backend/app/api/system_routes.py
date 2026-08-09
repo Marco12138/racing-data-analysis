@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from ..models.system import (
     DeploymentCapabilities,
     HealthStatus,
+    PersistenceCapability,
     XrkServerImportCapability,
 )
 from ..utils.storage import check_database
@@ -34,6 +35,12 @@ def capabilities(request: Request) -> DeploymentCapabilities:
         durable_task_queue=False,
         authentication=False,
         aim_imports=parser_probe.available,
+        persistence=PersistenceCapability(
+            metadata_backend="sqlite",
+            ownership_mode="anonymous",
+            owner_scoped_entities=["sessions", "video_jobs", "video_markers"],
+            multi_user_ready=False,
+        ),
         xrk_server_import=XrkServerImportCapability(
             enabled=settings.xrk_server_import_enabled,
             available=parser_probe.available,

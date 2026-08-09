@@ -28,8 +28,12 @@ XRK parser probe through `GET /api/v1/capabilities`;
 - `backend/app/analysis/`: pure analysis logic. It should remain independent
   from authentication, storage vendors, and queue implementations.
 - `backend/app/core/`: settings and infrastructure extension points.
+- `backend/app/core/ownership.py`: the server-derived actor scope used by
+  persistence operations. The current Demo supplies the stable anonymous
+  actor; a future auth dependency must supply a verified user actor.
 - `backend/app/utils/storage.py`: current SQLite adapter. This is the one module
-  to replace with repositories when PostgreSQL is introduced.
+  to replace with repositories when PostgreSQL is introduced. Its current
+  tables and queries are owner-scoped as the first incremental P2 boundary.
 - `backend/app/core/task_dispatcher.py`: current inline adapter and the seam for
   Celery, Dramatiq, RQ, or ARQ.
 
@@ -43,9 +47,13 @@ Before user registration is enabled, introduce these durable entities:
 - `analysis_jobs`: owner ID, asset ID, status, progress, error, worker version.
 - `markers`: owner ID or session ID plus the existing marker fields.
 
-Every repository method must receive an authenticated actor or tenant ID.
+Every repository method must receive a server-derived actor or tenant ID. The
+current anonymous actor is a compatibility scope, not proof of authentication.
 Object keys should be server-generated and namespaced by owner. API clients
 must never supply arbitrary filesystem paths or object-store keys.
+
+The implemented ownership boundary and the remaining migration gates are
+documented in [`P2_PERSISTENCE_BOUNDARY.md`](P2_PERSISTENCE_BOUNDARY.md).
 
 ## Upload and worker flow
 
