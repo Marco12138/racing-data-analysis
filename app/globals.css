@@ -971,3 +971,131 @@ select {
   font-size: 0.82rem;
   line-height: 1.6;
 }
+
+.new-session-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid rgba(53, 214, 208, 0.28);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(53, 214, 208, 0.06), rgba(13, 20, 32, 0.4));
+  padding: 16px;
+}
+
+.new-session-card__header {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.new-session-card__header svg {
+  flex: none;
+  margin-top: 3px;
+  color: #35d6d0;
+}
+
+.new-session-card__header h3 {
+  margin: 0 0 3px;
+  color: #fff;
+  font-size: 0.98rem;
+}
+
+.new-session-card__header p {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.new-session-card__file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px dashed rgba(148, 163, 184, 0.4);
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: #cbd5e1;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.new-session-card__file:hover {
+  border-color: rgba(53, 214, 208, 0.6);
+}
+
+.new-session-card__file svg {
+  flex: none;
+  color: #64748b;
+}
+
+.new-session-card__file span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-session-card__file input {
+  display: none;
+}
+
+.new-session-card__error {
+  margin: 0;
+  color: #fca5a5;
+  font-size: 0.76rem;
+}
+
+.new-session-card__privacy {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.new-session-card__start {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: none;
+  border-radius: 8px;
+  background: #f6c945;
+  color: #0b0f14;
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+.new-session-card__start:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.new-session-card__steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.new-session-card__steps li {
+  border: 1px solid #1e293b;
+  border-radius: 999px;
+  color: #64748b;
+  font-size: 0.7rem;
+  padding: 3px 8px;
+}
+
+.new-session-card__steps li.is-active {
+  border-color: rgba(53, 214, 208, 0.7);
+  color: #35d6d0;
+}
+
+.new-session-card__steps li.is-done {
+  border-color: rgba(102, 227, 143, 0.4);
+  color: #66e38f;
+}

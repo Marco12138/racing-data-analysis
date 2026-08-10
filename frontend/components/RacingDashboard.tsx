@@ -76,6 +76,8 @@ import {
 import { XrkAnalysisWorkspace } from "./XrkAnalysisWorkspace";
 import { XrkInspectionWorkspace } from "./XrkInspectionWorkspace";
 import { MultiSessionWorkspace } from "./MultiSessionWorkspace";
+import { NewSessionCard } from "./NewSessionCard";
+import { commitPendingVideo, isXrkFileName } from "../lib/sessionUpload";
 import {
   clearVideoJob,
   createVideoJob,
@@ -113,6 +115,8 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
   const [xrkAnalysis, setXrkAnalysis] = useState<XrkAnalysis | null>(null);
   const [publishedDemo, setPublishedDemo] = useState<PublishedRealDemoSession | null>(null);
   const [xrkSessions, setXrkSessions] = useState<XrkInspection[]>([]);
+  const [pendingVideoFile, setPendingVideoFile] = useState<File | null>(null);
+  const [activeVideoFile, setActiveVideoFile] = useState<File | null>(null);
   const [deploymentCapabilities, setDeploymentCapabilities] =
     useState<DeploymentCapabilities | null>(null);
   const [capabilityError, setCapabilityError] = useState("");
@@ -229,17 +233,17 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     }
   }
 
-  async function handleAimUpload(file: File) {
-    if (!/\.(xrk|xrz)$/i.test(file.name)) {
+  async function handleAimUpload(file: File): Promise<XrkInspection | null> {
+    if (!isXrkFileName(file.name)) {
       setDataError("Please select an AiM .xrk or .xrz file.");
-      return;
+      return null;
     }
     const activeTemporarySessions = xrkSessions.filter(
       (session) => Date.parse(session.expires_at) > Date.now()
     );
     if (activeTemporarySessions.length >= MAX_TEMPORARY_SESSIONS) {
       setDataError("Temporary Session Workspace is full. Remove one session before importing another XRK.");
-      return;
+      return null;
     }
     const serverImport = deploymentCapabilities?.xrk_server_import;
     if (!serverImport?.available) {
@@ -248,7 +252,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
           capabilityError ??
           "XRK server import is not available in this deployment."
       );
-      return;
+      return null;
     }
     xrkAbortRef.current?.abort();
     const controller = new AbortController();
@@ -279,6 +283,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       setTrackName(metadataText(inspected.metadata, "Venue", "Unknown track"));
       setSessionDate(normalizeAimDate(inspected.metadata["Log Date"]));
       setAimImportStatus("inspected");
+      return inspected;
     } catch (error) {
       if ((error as Error).name === "AbortError") {
         setDataError("XRK upload was cancelled.");
@@ -286,13 +291,30 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
         setDataError(formatXrkClientError(error as Error));
       }
       setAimImportStatus("idle");
+      return null;
     } finally {
       if (xrkAbortRef.current === controller) xrkAbortRef.current = null;
     }
   }
 
-  async function runXrkAnalysis(options: Partial<XrkAnalyzeOptions> = {}) {
-    if (!xrkInspection) return;
+  async function handleNewSession(xrkFile: File, videoFile: File | null) {
+    setPendingVideoFile(videoFile);
+    const inspected = await handleAimUpload(xrkFile);
+    if (!inspected) {
+      setPendingVideoFile(null);
+      return;
+    }
+    await runXrkAnalysis({}, inspected, videoFile);
+  }
+
+  async function runXrkAnalysis(
+    options: Partial<XrkAnalyzeOptions> = {},
+    inspectionOverride?: XrkInspection,
+    pendingVideoOverride?: File | null,
+  ) {
+    const inspection = inspectionOverride ?? xrkInspection;
+    if (!inspection) return;
+    const pendingVideo = pendingVideoOverride ?? pendingVideoFile;
     const controller = new AbortController();
     xrkAbortRef.current?.abort();
     xrkAbortRef.current = controller;
@@ -301,7 +323,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     try {
       const result = await analyzeXrkInspection(
         {
-          inspection_id: xrkInspection.inspection_id,
+          inspection_id: inspection.inspection_id,
           reference_lap: options.reference_lap ?? xrkAnalysis?.reference_lap ?? null,
           target_lap: options.target_lap ?? xrkAnalysis?.target_lap ?? null,
           distance_step_m: options.distance_step_m ?? 1,
@@ -328,6 +350,8 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       setPublishedDemo(null);
       setAimImport(null);
       setAimImportStatus("loaded");
+      setActiveVideoFile((current) => commitPendingVideo(pendingVideo, current));
+      setPendingVideoFile(null);
     } catch (error) {
       if ((error as Error).name !== "AbortError") {
         setDataError(formatXrkClientError(error as Error));
@@ -358,6 +382,8 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       setPublishedDemo(realDemo);
       setAimImportStatus("loaded");
       setDataError("");
+      setActiveVideoFile(null);
+      setPendingVideoFile(null);
       return;
     }
     setLapRows([...demoLapRows]);
@@ -374,6 +400,8 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     setPublishedDemo(null);
     setAimImportStatus("idle");
     setDataError("");
+    setActiveVideoFile(null);
+    setPendingVideoFile(null);
   }
 
   function selectTemporarySession(inspectionId: string) {
@@ -384,6 +412,8 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     setPublishedDemo(null);
     setAimImport(null);
     setAimImportStatus("inspected");
+    setActiveVideoFile(null);
+    setPendingVideoFile(null);
     setDriverName(metadataText(session.metadata, "Driver", "Driver"));
     setVehicleName(metadataText(session.metadata, "Vehicle", "Vehicle"));
     setTrackName(metadataText(session.metadata, "Venue", "Unknown track"));
@@ -405,6 +435,8 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       setXrkInspection(null);
       setXrkAnalysis(null);
       setAimImportStatus("idle");
+      setActiveVideoFile(null);
+      setPendingVideoFile(null);
     }
   }
 
@@ -421,6 +453,8 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       setXrkInspection(null);
       setXrkAnalysis(null);
       setAimImportStatus("idle");
+      setActiveVideoFile(null);
+      setPendingVideoFile(null);
     }
     setDataError(
       "A temporary XRK session expired and was removed. Upload that file again to continue Driver Comparison."
@@ -465,6 +499,11 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
 
         <section className="grid gap-5 xl:grid-cols-[340px_1fr]">
           <aside className="flex flex-col gap-5">
+            <NewSessionCard
+              status={aimImportStatus}
+              hasPendingVideo={Boolean(pendingVideoFile)}
+              onStart={handleNewSession}
+            />
             <DataUploadPanel
               lapLoaded={lapRows.length > 0}
               telemetryLoaded={telemetryRows.length > 0}
@@ -522,6 +561,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
                 analyzing={aimImportStatus === "analyzing"}
                 onAnalyze={runXrkAnalysis}
                 publishedDemo={Boolean(publishedDemo)}
+                initialVideoFile={activeVideoFile}
               />
             ) : lapAnalysis ? (
               <>
