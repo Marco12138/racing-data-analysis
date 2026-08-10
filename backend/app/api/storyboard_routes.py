@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ..analysis.session_storyboard import (
     DEFAULT_TTL_SECONDS,
@@ -115,13 +115,22 @@ async def create_storyboard(
         "created_at": now.isoformat(),
         "expires_at": (now + timedelta(seconds=DEFAULT_TTL_SECONDS)).isoformat(),
     }
+    try:
+        validated = StoryboardResponse.model_validate(payload_dict)
+    except ValidationError as exc:
+        raise PublicApiError(
+            status_code=422,
+            error_code="STORYBOARD_VALIDATION_FAILED",
+            message="The generated storyboard payload is invalid.",
+            error_type="storyboard_validation",
+        ) from exc
     save_storyboard(
         token,
         payload_dict,
         actor=ANONYMOUS_ACTOR,
         ttl_seconds=DEFAULT_TTL_SECONDS,
     )
-    return StoryboardResponse.model_validate(payload_dict)
+    return validated
 
 
 @router.get("/storyboards/{token}", response_model=StoryboardResponse)

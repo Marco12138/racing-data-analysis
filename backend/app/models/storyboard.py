@@ -56,6 +56,7 @@ class StoryboardNode(DemoModel):
     insight: str
     drill: str
     evidence_laps: list[int]
+    net_gain_s: float | None = None
     corner: StoryboardCorner | None = None
     source: Literal["structured", "llm"] = "structured"
 

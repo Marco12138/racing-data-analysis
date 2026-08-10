@@ -52,6 +52,7 @@ def test_storyboard_uses_only_real_quality_gated_laps() -> None:
         assert node["source"] == "structured"
         assert node["title"] and node["insight"] and node["drill"]
         assert node["evidence_laps"]
+        assert node["net_gain_s"] is not None
         assert set(node["evidence_laps"]) <= eligible
         assert node["telemetry_overlay"]["speed_kmh"]
         assert len(node["telemetry_overlay"]["distance_m"]) == len(
