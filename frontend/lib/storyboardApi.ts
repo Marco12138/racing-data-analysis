@@ -141,8 +141,8 @@ function parseOverlay(value: unknown): StoryboardOverlay | null {
   if (!sameLength(value.rpm, length)) return null;
   if (!sameLength(value.longitudinal_g, length)) return null;
   if (!sameLength(value.lateral_g, length)) return null;
-  if (!sameLength(value.throttle, length)) return null;
-  if (!sameLength(value.brake, length)) return null;
+  if (!(value.throttle.length === 0 || sameLength(value.throttle, length))) return null;
+  if (!(value.brake.length === 0 || sameLength(value.brake, length))) return null;
   if (!allFinite(value.distance_m) || !allFinite(value.session_time_s)) return null;
   return {
     distance_m: value.distance_m,

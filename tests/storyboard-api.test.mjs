@@ -89,6 +89,15 @@ test("rejects untrusted or malformed storyboard payloads", () => {
   );
 });
 
+test("accepts unavailable pedal channels as empty arrays", () => {
+  const payload = validPayload();
+  payload.nodes[0].telemetry_overlay.throttle = [];
+  payload.nodes[0].telemetry_overlay.brake = [];
+  const parsed = parseStoryboardResponse(payload);
+  assert.equal(parsed?.nodes[0].telemetry_overlay.throttle.length, 0);
+  assert.equal(parsed?.nodes[0].telemetry_overlay.available.brake, false);
+});
+
 test("fetchStoryboardPayload returns null instead of trusting bad responses", async () => {
   const ok = async () => new Response(JSON.stringify(validPayload()), { status: 200 });
   const notFound = async () => new Response("{}", { status: 404 });

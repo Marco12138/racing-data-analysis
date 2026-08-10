@@ -2,7 +2,11 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
 import { StorySharePage } from "@/frontend/components/StorySharePage";
-import { fetchStoryboardPayload } from "@/frontend/lib/storyboardApi";
+import {
+  fetchStoryboardPayload,
+  parseStoryboardResponse,
+  type StoryboardResponse,
+} from "@/frontend/lib/storyboardApi";
 
 export const dynamic = "force-dynamic";
 
@@ -19,12 +23,26 @@ export default async function StoryPage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
-  const apiOrigin = productionApiOrigin();
-  if (!apiOrigin) notFound();
-  const storyboard = await fetchStoryboardPayload(apiOrigin, "/api/v1", token);
-  if (!storyboard) notFound();
-
   const requestHeaders = await headers();
+  const injected = requestHeaders.get("x-racing-storyboard");
+  let storyboard: StoryboardResponse | null = null;
+  if (injected) {
+    try {
+      storyboard = parseStoryboardResponse(JSON.parse(decodeURIComponent(injected)));
+    } catch {
+      storyboard = null;
+    }
+  }
+  if (!storyboard) {
+    const apiOrigin = productionApiOrigin();
+    if (apiOrigin) {
+      storyboard = await fetchStoryboardPayload(apiOrigin, "/api/v1", token);
+    }
+  }
+  if (!storyboard) {
+    notFound();
+  }
+
   const proto = requestHeaders.get("x-forwarded-proto") ?? "https";
   const host =
     requestHeaders.get("x-forwarded-host")
