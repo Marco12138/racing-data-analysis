@@ -50,6 +50,49 @@ export type StoryboardAlignmentInput = {
   video_mime_type: string | null;
 };
 
+export type StoryboardCalibrationAnchor = {
+  offset_ms: number;
+  telemetry_session_time_s: number | null;
+  video_time_s: number | null;
+  target_lap: number | null;
+};
+
+/** A storyboard can be generated from a T=D calibration OR a manual/auto offset. */
+export function canCreateStoryboard(input: {
+  hasTrack: boolean;
+  videoFile: unknown;
+  videoDurationS: number;
+  calibration: StoryboardCalibrationAnchor | null;
+  offsetMs: number;
+}): boolean {
+  return Boolean(
+    input.hasTrack
+    && input.videoFile != null
+    && input.videoDurationS > 0
+    && (input.calibration != null || Number.isFinite(input.offsetMs))
+  );
+}
+
+/** Anchor fields are optional on the backend; only offset + duration are required. */
+export function buildStoryboardAlignmentInput(input: {
+  calibration: StoryboardCalibrationAnchor | null;
+  offsetMs: number;
+  videoDurationS: number;
+  targetLap: number | null;
+  videoFile: { size: number; lastModified: number; type: string } | null;
+}): StoryboardAlignmentInput {
+  return {
+    offset_ms: input.calibration?.offset_ms ?? input.offsetMs,
+    video_duration_s: input.videoDurationS,
+    target_lap: input.calibration?.target_lap ?? input.targetLap,
+    telemetry_session_time_s: input.calibration?.telemetry_session_time_s ?? null,
+    video_time_s: input.calibration?.video_time_s ?? null,
+    video_size_bytes: input.videoFile?.size ?? null,
+    video_last_modified_ms: input.videoFile?.lastModified ?? null,
+    video_mime_type: input.videoFile?.type ?? null,
+  };
+}
+
 export type StoryboardFetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
 /** Validate a backend storyboard payload. Returns null instead of trusting bad data. */

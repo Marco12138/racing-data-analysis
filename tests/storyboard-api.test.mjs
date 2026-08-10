@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildStoryboardAlignmentInput,
+  canCreateStoryboard,
   fetchStoryboardPayload,
   parseStoryboardResponse,
 } from "../frontend/lib/storyboardApi.ts";
@@ -96,6 +98,65 @@ test("accepts unavailable pedal channels as empty arrays", () => {
   const parsed = parseStoryboardResponse(payload);
   assert.equal(parsed?.nodes[0].telemetry_overlay.throttle.length, 0);
   assert.equal(parsed?.nodes[0].telemetry_overlay.available.brake, false);
+});
+
+test("storyboard is creatable with a manual/auto offset and no calibration anchor", () => {
+  const base = {
+    hasTrack: true,
+    videoFile: { name: "onboard.mp4" },
+    videoDurationS: 620,
+    calibration: null,
+    offsetMs: 0,
+  };
+  assert.equal(canCreateStoryboard({ ...base, offsetMs: 150 }), true);
+  assert.equal(canCreateStoryboard({ ...base, calibration: { offset_ms: 150 } }), true);
+  assert.equal(canCreateStoryboard({ ...base, offsetMs: Number.NaN }), false);
+  assert.equal(canCreateStoryboard({ ...base, offsetMs: 150, videoFile: null }), false);
+  assert.equal(canCreateStoryboard({ ...base, offsetMs: 150, videoDurationS: 0 }), false);
+  assert.equal(canCreateStoryboard({ ...base, offsetMs: 150, hasTrack: false }), false);
+});
+
+test("storyboard alignment prefers the calibration anchor and falls back to offset", () => {
+  const videoFile = { size: 1024, lastModified: 42, type: "video/mp4" };
+  const withCalibration = buildStoryboardAlignmentInput({
+    calibration: {
+      offset_ms: 200,
+      telemetry_session_time_s: 100.5,
+      video_time_s: 101.2,
+      target_lap: 13,
+    },
+    offsetMs: 150,
+    videoDurationS: 620,
+    targetLap: 8,
+    videoFile,
+  });
+  assert.equal(withCalibration.offset_ms, 200);
+  assert.equal(withCalibration.telemetry_session_time_s, 100.5);
+  assert.equal(withCalibration.video_time_s, 101.2);
+  assert.equal(withCalibration.target_lap, 13);
+
+  const offsetOnly = buildStoryboardAlignmentInput({
+    calibration: null,
+    offsetMs: 150,
+    videoDurationS: 620,
+    targetLap: 8,
+    videoFile,
+  });
+  assert.equal(offsetOnly.offset_ms, 150);
+  assert.equal(offsetOnly.telemetry_session_time_s, null);
+  assert.equal(offsetOnly.video_time_s, null);
+  assert.equal(offsetOnly.target_lap, 8);
+  assert.equal(offsetOnly.video_size_bytes, 1024);
+
+  const noVideo = buildStoryboardAlignmentInput({
+    calibration: null,
+    offsetMs: 0,
+    videoDurationS: 620,
+    targetLap: null,
+    videoFile: null,
+  });
+  assert.equal(noVideo.video_size_bytes, null);
+  assert.equal(noVideo.video_mime_type, null);
 });
 
 test("fetchStoryboardPayload returns null instead of trusting bad responses", async () => {

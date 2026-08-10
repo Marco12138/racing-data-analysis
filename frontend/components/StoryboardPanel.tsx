@@ -6,8 +6,9 @@ import { Clapperboard, Sparkles } from "lucide-react";
 import { resolveApiConfig } from "../lib/config";
 import { useI18n } from "../lib/i18n";
 import {
+  buildStoryboardAlignmentInput,
+  canCreateStoryboard,
   createStoryboardPayload,
-  type StoryboardAlignmentInput,
   type StoryboardResponse,
 } from "../lib/storyboardApi";
 import type { VideoSyncCalibration } from "../lib/videoTelemetrySync";
@@ -20,6 +21,7 @@ export function StoryboardPanel({
   videoUrl,
   videoDurationS,
   calibration,
+  offsetMs,
   publishedDemo = false,
 }: {
   analysis: XrkAnalysis;
@@ -27,6 +29,7 @@ export function StoryboardPanel({
   videoUrl: string | null;
   videoDurationS: number;
   calibration: VideoSyncCalibration | null;
+  offsetMs: number;
   publishedDemo?: boolean;
 }) {
   const { t } = useI18n();
@@ -36,27 +39,27 @@ export function StoryboardPanel({
 
   const canCreate =
     !publishedDemo
-    && Boolean(analysis.track)
-    && Boolean(videoFile)
-    && Boolean(calibration)
-    && videoDurationS > 0;
+    && canCreateStoryboard({
+      hasTrack: Boolean(analysis.track),
+      videoFile,
+      videoDurationS,
+      calibration,
+      offsetMs,
+    });
 
   async function createStoryboard() {
-    if (!canCreate || !calibration) return;
+    if (!canCreate) return;
     setCreating(true);
     setError("");
     try {
       const config = await resolveApiConfig();
-      const alignment: StoryboardAlignmentInput = {
-        offset_ms: calibration.offset_ms,
-        video_duration_s: videoDurationS,
-        target_lap: analysis.target_lap,
-        telemetry_session_time_s: calibration.telemetry_session_time_s,
-        video_time_s: calibration.video_time_s,
-        video_size_bytes: videoFile?.size ?? null,
-        video_last_modified_ms: videoFile?.lastModified ?? null,
-        video_mime_type: videoFile?.type ?? null,
-      };
+      const alignment = buildStoryboardAlignmentInput({
+        calibration,
+        offsetMs,
+        videoDurationS,
+        targetLap: analysis.target_lap,
+        videoFile,
+      });
       const result = await createStoryboardPayload(config.apiOrigin, config.apiPrefix, {
         analysis: {
           inspection_id: analysis.inspection_id,
@@ -108,15 +111,22 @@ export function StoryboardPanel({
             <p className="storyboard-panel__hint">
               {!analysis.track
                 ? t("xrk.storyboard.missingTrack")
-                : !calibration || !videoFile
+                : !videoFile
                   ? t("xrk.storyboard.missingVideo")
-                  : t("xrk.storyboard.missingDuration")}
+                  : videoDurationS <= 0
+                    ? t("xrk.storyboard.missingDuration")
+                    : t("xrk.storyboard.missingVideo")}
             </p>
           ) : (
-            <button type="button" className="hero-primary" onClick={createStoryboard} disabled={creating}>
-              <Clapperboard size={17} />
-              {creating ? t("xrk.storyboard.generating") : t("xrk.storyboard.generate")}
-            </button>
+            <>
+              <button type="button" className="hero-primary" onClick={createStoryboard} disabled={creating}>
+                <Clapperboard size={17} />
+                {creating ? t("xrk.storyboard.generating") : t("xrk.storyboard.generate")}
+              </button>
+              {!calibration && Number.isFinite(offsetMs) ? (
+                <p className="storyboard-panel__hint">{t("xrk.storyboard.offsetOnlyHint")}</p>
+              ) : null}
+            </>
           )}
           {error ? <p className="storyboard-panel__error" role="alert">{error}</p> : null}
         </>

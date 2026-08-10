@@ -297,6 +297,7 @@ export function XrkAnalysisWorkspace({
           videoUrl={videoUrl}
           videoDurationS={videoDurationS}
           calibration={calibration}
+          offsetMs={offsetMs}
           publishedDemo={publishedDemo}
         />
       )}
