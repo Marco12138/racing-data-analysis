@@ -29,6 +29,8 @@ test("server-renders the public racing analysis demo", async () => {
   assert.match(html, /使用样例 XRK 体验 Demo/);
   assert.match(html, /遥测分析/);
   assert.match(html, /Lap &amp; Sector Analysis/);
+  assert.match(html, /新建 Session/);
+  assert.match(html, /开始分析/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 

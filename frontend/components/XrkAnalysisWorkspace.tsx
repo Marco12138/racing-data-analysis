@@ -36,6 +36,7 @@ import type {
 } from "../lib/xrkAnalysisApi";
 import { autoSyncVideoTelemetry } from "../lib/xrkAnalysisApi";
 import { extractVideoSyncFeatures } from "../lib/videoFeatureExtraction";
+import { initialVideoState } from "../lib/videoSession";
 import {
   createVideoSyncCalibration,
   nearestPointByDistance,
@@ -51,6 +52,13 @@ import {
 } from "../lib/videoTelemetrySync";
 import { useI18n, type TranslationKey } from "../lib/i18n";
 import { StoryboardPanel } from "./StoryboardPanel";
+
+function createObjectUrl(file: File): string {
+  if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
+    return "";
+  }
+  return URL.createObjectURL(file);
+}
 
 const tabs = [
   ["overview", "xrk.tab.overview", Gauge],
@@ -74,11 +82,13 @@ export function XrkAnalysisWorkspace({
   analyzing,
   onAnalyze,
   publishedDemo = false,
+  initialVideoFile,
 }: {
   analysis: XrkAnalysis;
   analyzing: boolean;
   onAnalyze: (options: Partial<XrkAnalyzeOptions>) => Promise<void>;
   publishedDemo?: boolean;
+  initialVideoFile?: File | null;
 }) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<TabId>("overview");
@@ -89,9 +99,10 @@ export function XrkAnalysisWorkspace({
   const [zoneStart, setZoneStart] = useState<number | null>(null);
   const [manualZones, setManualZones] = useState<XrkAnalyzeOptions["manual_zones"]>([]);
   const videoStorageKey = `racing-video-sync:${analysis.track?.track_id ?? "unknown"}:${analysis.file_fingerprint}`;
-  const [videoUrl, setVideoUrl] = useState("");
-  const [videoName, setVideoName] = useState("");
-  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [initialVideo] = useState(() => initialVideoState(initialVideoFile, createObjectUrl));
+  const [videoUrl, setVideoUrl] = useState(initialVideo.videoUrl);
+  const [videoName, setVideoName] = useState(initialVideo.videoName);
+  const [videoFile, setVideoFile] = useState<File | null>(initialVideo.videoFile);
   const [videoDurationS, setVideoDurationS] = useState(0);
   const [calibration, setCalibration] = useState<VideoSyncCalibration | null>(() => {
     if (typeof window === "undefined") return null;
@@ -100,8 +111,29 @@ export function XrkAnalysisWorkspace({
   const [offsetMs, setOffsetMs] = useState(calibration?.offset_ms ?? 0);
 
   useEffect(() => () => {
-    if (videoUrl) URL.revokeObjectURL(videoUrl);
+    if (videoUrl && typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
+      URL.revokeObjectURL(videoUrl);
+    }
   }, [videoUrl]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (!videoFile || !videoUrl || videoDurationS > 0) return;
+    const probe = document.createElement("video");
+    probe.preload = "metadata";
+    const handleLoaded = () => {
+      if (Number.isFinite(probe.duration) && probe.duration > 0) {
+        setVideoDurationS(probe.duration);
+      }
+    };
+    probe.addEventListener("loadedmetadata", handleLoaded);
+    probe.src = videoUrl;
+    return () => {
+      probe.removeEventListener("loadedmetadata", handleLoaded);
+      probe.removeAttribute("src");
+      probe.load();
+    };
+  }, [videoFile, videoUrl, videoDurationS]);
 
   useEffect(() => {
     if (calibration) {
@@ -803,7 +835,7 @@ function SectorZonePanel({
   );
 }
 
-function VideoSyncPanel({
+export function VideoSyncPanel({
   analysis,
   cursorDistance,
   seekRequest,
@@ -1001,18 +1033,42 @@ function VideoSyncPanel({
     if (point) onCursor(point.distance_m);
   }
 
+  function replaceVideo() {
+    if (videoUrl && typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
+      URL.revokeObjectURL(videoUrl);
+    }
+    setVideoUrl("");
+    setVideoFile(null);
+    setVideoName("");
+    setVideoDurationS(0);
+    setCalibration(null);
+    setOffsetMs(0);
+    setSyncMessage("");
+    setSyncError("");
+    setAutoConfidence(null);
+  }
+
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
       <Panel title={t("xrk.video.title")} subtitle={t("xrk.video.subtitle")}>
         {videoUrl ? (
-          <video
-            ref={videoRef}
-            src={videoUrl}
-            controls
-            className="aspect-video w-full bg-black"
-            onTimeUpdate={followVideo}
-            onLoadedMetadata={loadVideoMetadata}
-          />
+          <>
+            <video
+              ref={videoRef}
+              src={videoUrl}
+              controls
+              className="aspect-video w-full bg-black"
+              onTimeUpdate={followVideo}
+              onLoadedMetadata={loadVideoMetadata}
+            />
+            <button
+              type="button"
+              onClick={replaceVideo}
+              className="mt-2 text-xs text-slate-400 underline-offset-2 hover:text-slate-200 hover:underline"
+            >
+              {t("xrk.video.replace")}
+            </button>
+          </>
         ) : (
           <label className="flex aspect-video cursor-pointer flex-col items-center justify-center border border-dashed border-slate-700 bg-slate-950/70 text-slate-400 hover:border-[#35d6d0]">
             <Video size={30} />
