@@ -36,7 +36,27 @@ export type StoryboardResponse = {
     fastest_lap: { lap: number; lap_time: number } | null;
   };
   video: { duration_s: number; required: boolean; uploaded: boolean };
+  alignment: StoryboardAlignmentInfo | null;
+  manual_zones: StoryboardManualZone[];
   nodes: StoryboardNode[];
+};
+
+export type StoryboardAlignmentInfo = {
+  offset_ms: number;
+  video_duration_s: number;
+  target_lap: number | null;
+  telemetry_session_time_s: number | null;
+  video_time_s: number | null;
+  video_size_bytes: number | null;
+  video_last_modified_ms: number | null;
+  video_mime_type: string | null;
+};
+
+export type StoryboardManualZone = {
+  id: string | null;
+  name: string | null;
+  entry_distance_m: number;
+  exit_distance_m: number;
 };
 
 export type StoryboardAlignmentInput = {
@@ -129,8 +149,41 @@ export function parseStoryboardResponse(value: unknown): StoryboardResponse | nu
       required: value.video.required === true,
       uploaded: value.video.uploaded === true,
     },
+    alignment: parseAlignment(value.alignment),
+    manual_zones: parseManualZones(value.manual_zones),
     nodes,
   };
+}
+
+function parseAlignment(value: unknown): StoryboardAlignmentInfo | null {
+  if (!isRecord(value)) return null;
+  if (!isFiniteNumber(value.offset_ms) || !isFiniteNumber(value.video_duration_s)) return null;
+  return {
+    offset_ms: value.offset_ms,
+    video_duration_s: value.video_duration_s,
+    target_lap: finiteOrNull(value.target_lap),
+    telemetry_session_time_s: finiteOrNull(value.telemetry_session_time_s),
+    video_time_s: finiteOrNull(value.video_time_s),
+    video_size_bytes: finiteOrNull(value.video_size_bytes),
+    video_last_modified_ms: finiteOrNull(value.video_last_modified_ms),
+    video_mime_type: typeof value.video_mime_type === "string" ? value.video_mime_type : null,
+  };
+}
+
+function parseManualZones(value: unknown): StoryboardManualZone[] {
+  if (!Array.isArray(value)) return [];
+  const zones: StoryboardManualZone[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw)) return [];
+    if (!isFiniteNumber(raw.entry_distance_m) || !isFiniteNumber(raw.exit_distance_m)) return [];
+    zones.push({
+      id: typeof raw.id === "string" ? raw.id : null,
+      name: typeof raw.name === "string" ? raw.name : null,
+      entry_distance_m: raw.entry_distance_m,
+      exit_distance_m: raw.exit_distance_m,
+    });
+  }
+  return zones;
 }
 
 function parseNode(value: unknown): StoryboardNode | null {
@@ -235,6 +288,23 @@ export async function createStoryboardPayload(
     return parseStoryboardResponse(await response.json());
   } catch {
     return null;
+  }
+}
+
+export async function deleteStoryboardPayload(
+  apiOrigin: string,
+  apiPrefix: string,
+  token: string,
+  fetcher: StoryboardFetcher = fetch,
+): Promise<boolean> {
+  try {
+    const response = await fetcher(`${baseApiUrl(apiOrigin, apiPrefix)}/storyboards/${encodeURIComponent(token)}`, {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    });
+    return response.ok;
+  } catch {
+    return false;
   }
 }
 

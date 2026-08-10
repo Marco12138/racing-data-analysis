@@ -5,6 +5,7 @@ import { toPng } from "html-to-image";
 import {
   ChevronLeft,
   ChevronRight,
+  Download,
   Film,
   Image as ImageIcon,
   Link2,
@@ -39,8 +40,11 @@ export function SessionStoryboard({
   const [exporting, setExporting] = useState(false);
   const [copiedImage, setCopiedImage] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [exportAllOpen, setExportAllOpen] = useState(false);
+  const [exportAllBusy, setExportAllBusy] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
+  const exportAllRef = useRef<HTMLDivElement>(null);
   const node = storyboard.nodes[Math.min(page, storyboard.nodes.length - 1)];
   const [renderedToken, setRenderedToken] = useState(storyboard.token);
   if (renderedToken !== storyboard.token) {
@@ -113,6 +117,39 @@ export function SessionStoryboard({
     }
   }, [storyboard.token]);
 
+  const exportAllImage = useCallback(async () => {
+    if (!exportAllRef.current) return;
+    setExportAllBusy(true);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    try {
+      const dataUrl = await toPng(exportAllRef.current, {
+        pixelRatio: 2,
+        backgroundColor: "#0b0f14",
+      });
+      const anchor = document.createElement("a");
+      anchor.href = dataUrl;
+      anchor.download = `ai-review-${storyboard.token}-all.png`;
+      anchor.click();
+    } finally {
+      setExportAllBusy(false);
+    }
+  }, [storyboard.token]);
+
+  const exportJson = useCallback(() => {
+    const payload = {
+      schema_version: 1,
+      exported_at: new Date().toISOString(),
+      storyboard,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `ai-review-${storyboard.token}.json`;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, [storyboard]);
+
   if (storyboard.nodes.length === 0) return null;
 
   return (
@@ -126,6 +163,12 @@ export function SessionStoryboard({
         <div className="storyboard__actions">
           <button type="button" className="story-button" onClick={exportImage} disabled={exporting}>
             <ImageIcon size={16} /> {exporting ? t("story.exporting") : copiedImage ? t("story.copied") : t("story.copyImage")}
+          </button>
+          <button type="button" className="story-button" onClick={() => setExportAllOpen(true)}>
+            <ImageIcon size={16} /> {t("story.exportAll")}
+          </button>
+          <button type="button" className="story-button" onClick={exportJson}>
+            <Download size={16} /> {t("story.exportJson")}
           </button>
           <button type="button" className="story-button" onClick={copyShareLink}>
             <Link2 size={16} /> {copiedLink ? t("story.copied") : t("story.copyLink")}
@@ -167,6 +210,36 @@ export function SessionStoryboard({
         />
         {exporting ? <span className="storyboard__big-watermark">{storyboard.watermark}</span> : null}
       </div>
+
+      {exportAllOpen ? (
+        <div className="storyboard-export-all" role="dialog" aria-modal="true" aria-label={t("story.exportAllTitle")}>
+          <header className="storyboard-export-all__header">
+            <h4>{t("story.exportAllTitle")}</h4>
+            <div className="storyboard__actions">
+              <button type="button" className="story-button" onClick={exportAllImage} disabled={exportAllBusy}>
+                <ImageIcon size={16} /> {exportAllBusy ? t("story.exporting") : t("story.exportAll")}
+              </button>
+              <button type="button" className="story-button" onClick={() => setExportAllOpen(false)}>
+                {t("story.exportAllClose")}
+              </button>
+            </div>
+          </header>
+          <div className="storyboard-export-all__body" ref={exportAllRef}>
+            {storyboard.nodes.map((item) => (
+              <StoryCard
+                key={item.id}
+                node={item}
+                videoUrl={null}
+                exporting
+                watermark={storyboard.watermark}
+                videoRef={null}
+                onTogglePlayback={() => {}}
+                onTimeUpdate={() => {}}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -184,7 +257,7 @@ function StoryCard({
   videoUrl: string | null;
   exporting: boolean;
   watermark: string;
-  videoRef: RefObject<HTMLVideoElement | null>;
+  videoRef: RefObject<HTMLVideoElement | null> | null;
   onTogglePlayback: () => void;
   onTimeUpdate: () => void;
 }) {
@@ -202,7 +275,7 @@ function StoryCard({
         ) : (
           <>
             <video
-              ref={videoRef}
+              ref={videoRef ?? undefined}
               src={videoUrl}
               preload="metadata"
               playsInline

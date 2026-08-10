@@ -23,7 +23,7 @@ from ..models.storyboard import (
     StoryboardAlignmentRequest,
     StoryboardResponse,
 )
-from ..utils.storage import load_storyboard, save_storyboard
+from ..utils.storage import delete_storyboard, load_storyboard, save_storyboard
 from .errors import PublicApiError
 from .xrk_routes import XrkAnalyzeRequest
 
@@ -114,6 +114,11 @@ async def create_storyboard(
         "token": token,
         "created_at": now.isoformat(),
         "expires_at": (now + timedelta(seconds=DEFAULT_TTL_SECONDS)).isoformat(),
+        "alignment": payload.alignment.model_dump(),
+        "manual_zones": [
+            zone.model_dump()
+            for zone in payload.analysis.manual_zones
+        ],
     }
     try:
         validated = StoryboardResponse.model_validate(payload_dict)
@@ -152,3 +157,24 @@ def get_storyboard(request: Request, token: str) -> StoryboardResponse:
             error_type="storyboard_lookup",
         )
     return StoryboardResponse.model_validate(payload)
+
+
+@router.delete("/storyboards/{token}")
+def delete_shared_storyboard(request: Request, token: str) -> dict[str, bool]:
+    """Actively delete one storyboard and its share token."""
+    if not TOKEN_PATTERN.fullmatch(token):
+        raise PublicApiError(
+            status_code=404,
+            error_code="STORYBOARD_NOT_FOUND",
+            message="The storyboard does not exist or has expired.",
+            error_type="storyboard_lookup",
+        )
+    deleted = delete_storyboard(token, actor=ANONYMOUS_ACTOR)
+    if not deleted:
+        raise PublicApiError(
+            status_code=404,
+            error_code="STORYBOARD_NOT_FOUND",
+            message="The storyboard does not exist or has expired.",
+            error_type="storyboard_lookup",
+        )
+    return {"deleted": True}

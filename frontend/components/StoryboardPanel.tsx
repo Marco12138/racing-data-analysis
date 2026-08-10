@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Clapperboard, Sparkles } from "lucide-react";
+import { Clapperboard, Sparkles, Trash2 } from "lucide-react";
 
 import { resolveApiConfig } from "../lib/config";
 import { useI18n } from "../lib/i18n";
@@ -9,6 +9,7 @@ import {
   buildStoryboardAlignmentInput,
   canCreateStoryboard,
   createStoryboardPayload,
+  deleteStoryboardPayload,
   type StoryboardResponse,
 } from "../lib/storyboardApi";
 import type { VideoSyncCalibration } from "../lib/videoTelemetrySync";
@@ -34,6 +35,7 @@ export function StoryboardPanel({
 }) {
   const { t } = useI18n();
   const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [storyboard, setStoryboard] = useState<StoryboardResponse | null>(null);
   const [error, setError] = useState("");
 
@@ -88,6 +90,29 @@ export function StoryboardPanel({
     }
   }
 
+  async function deleteShare() {
+    if (!storyboard) return;
+    setDeleting(true);
+    setError("");
+    try {
+      const config = await resolveApiConfig();
+      const ok = await deleteStoryboardPayload(
+        config.apiOrigin,
+        config.apiPrefix,
+        storyboard.token,
+      );
+      if (ok) {
+        setStoryboard(null);
+      } else {
+        setError(t("story.deleteFailed"));
+      }
+    } catch {
+      setError(t("story.deleteFailed"));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   if (publishedDemo) {
     return (
       <div className="storyboard-panel">
@@ -131,11 +156,22 @@ export function StoryboardPanel({
           {error ? <p className="storyboard-panel__error" role="alert">{error}</p> : null}
         </>
       ) : (
-        <SessionStoryboard
-          storyboard={storyboard}
-          videoUrl={videoUrl}
-          shareUrl={`${typeof window !== "undefined" ? window.location.origin : ""}/story/${storyboard.token}`}
-        />
+        <>
+          <SessionStoryboard
+            storyboard={storyboard}
+            videoUrl={videoUrl}
+            shareUrl={`${typeof window !== "undefined" ? window.location.origin : ""}/story/${storyboard.token}`}
+          />
+          <div className="storyboard-panel__share-row">
+            <span className="storyboard-panel__share-url" title={`/story/${storyboard.token}`}>
+              {`${typeof window !== "undefined" ? window.location.origin : ""}/story/${storyboard.token}`}
+            </span>
+            <button type="button" className="storyboard-panel__delete" onClick={deleteShare} disabled={deleting}>
+              <Trash2 size={15} />
+              {deleting ? t("story.deleting") : t("story.deleteShare")}
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
