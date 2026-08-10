@@ -132,6 +132,8 @@ pnpm run dev
 - `GET /api/v1/xrk/inspections/{inspection_id}`：恢复仍在有效期内的临时 Session 描述。
 - `POST /api/v1/comparisons/laps`：比较两个临时 Session 中通过质量门的真实单圈。
 - `POST /api/v1/setup-experiments/analyze`：使用同车手、同赛道两个 Session 的真实 Top 3 评估调校实验。
+- `POST /api/v1/storyboard`：把真实圈关键洞察组织成 3-5 个带视频时间轴证据的教学节点，返回只读分享 token。
+- `GET /api/v1/storyboards/{token}`：读取一张只读 AI 驾驶复盘短片（分享页 /story/{token} 使用）。
 - `DELETE /api/v1/xrk/inspections/{inspection_id}`：主动删除标准化临时数据。
 - `GET /api/video/library`：列出允许访问的本机素材。
 - `POST /api/video/jobs`：创建分析任务。

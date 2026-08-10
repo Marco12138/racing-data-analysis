@@ -22,6 +22,7 @@ from .api.system_routes import (
     public_health,
     router as system_router,
 )
+from .api.storyboard_routes import router as storyboard_router
 from .api.video_routes import router as video_router
 from .api.xrk_routes import router as xrk_router
 from .core.config import Settings, get_settings
@@ -112,6 +113,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(import_router, prefix=active_settings.api_v1_prefix)
     application.include_router(xrk_router, prefix=active_settings.api_v1_prefix)
     application.include_router(cross_session_router, prefix=active_settings.api_v1_prefix)
+    application.include_router(storyboard_router, prefix=active_settings.api_v1_prefix)
     application.include_router(video_router, prefix=active_settings.api_v1_prefix)
     application.add_api_route(
         f"{active_settings.api_v1_prefix}/health",

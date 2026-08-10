@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from ..core.config import get_settings
@@ -65,6 +65,17 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS storyboards (
+                token TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL DEFAULT 'anonymous-public-demo',
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            )
+            """
+        )
         _ensure_owner_column(conn, "sessions")
         _ensure_owner_column(conn, "video_jobs")
         _ensure_owner_column(conn, "video_markers")
@@ -76,6 +87,9 @@ def init_db() -> None:
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_video_markers_owner_job ON video_markers(owner_id, job_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_storyboards_owner_created ON storyboards(owner_id, created_at)"
         )
 
 
@@ -284,6 +298,52 @@ def delete_video_job(
         return cursor.rowcount > 0
 
 
+def save_storyboard(
+    token: str,
+    payload: dict,
+    *,
+    actor: ActorContext = ANONYMOUS_ACTOR,
+    ttl_seconds: int = 7 * 24 * 3600,
+) -> None:
+    """Persist one read-only storyboard payload for a fixed lifetime."""
+    now = _now()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO storyboards (token, owner_id, payload_json, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+            (
+                token,
+                actor.owner_id,
+                json.dumps(payload, ensure_ascii=False),
+                now,
+                _now_plus(ttl_seconds),
+            ),
+        )
+
+
+def load_storyboard(
+    token: str,
+    *,
+    actor: ActorContext = ANONYMOUS_ACTOR,
+) -> dict | None:
+    """Return one non-expired storyboard payload or None."""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT payload_json, expires_at FROM storyboards WHERE token = ? AND owner_id = ?",
+            (token, actor.owner_id),
+        ).fetchone()
+        if row is None:
+            return None
+        expires_at = row["expires_at"]
+        if _now_iso() > expires_at:
+            conn.execute(
+                "DELETE FROM storyboards WHERE token = ? AND owner_id = ?",
+                (token, actor.owner_id),
+            )
+            return None
+        return _decode_json(row["payload_json"], None)
+
+
 def _decode_json(value: str | None, default: object) -> object:
     """Decode optional stored JSON with a safe default."""
     if not value:
@@ -309,3 +369,11 @@ def _ensure_owner_column(conn: sqlite3.Connection, table: str) -> None:
 def _now() -> str:
     """Return a UTC ISO timestamp for local records."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _now_iso() -> str:
+    return _now()
+
+
+def _now_plus(seconds: int) -> str:
+    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()

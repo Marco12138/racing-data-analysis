@@ -5,6 +5,7 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
+  Clapperboard,
   FileText,
   Flag,
   Gauge,
@@ -49,6 +50,7 @@ import {
   type VideoSyncCalibration,
 } from "../lib/videoTelemetrySync";
 import { useI18n, type TranslationKey } from "../lib/i18n";
+import { StoryboardPanel } from "./StoryboardPanel";
 
 const tabs = [
   ["overview", "xrk.tab.overview", Gauge],
@@ -58,6 +60,7 @@ const tabs = [
   ["actions", "xrk.tab.actions", Activity],
   ["sectors", "xrk.tab.sectors", Flag],
   ["video", "xrk.tab.video", Video],
+  ["storyboard", "xrk.tab.storyboard", Clapperboard],
   ["coach", "xrk.tab.coach", Target],
   ["report", "xrk.tab.report", FileText],
 ] as const satisfies ReadonlyArray<readonly [string, TranslationKey, typeof Gauge]>;
@@ -85,6 +88,26 @@ export function XrkAnalysisWorkspace({
   const [customBoundaries, setCustomBoundaries] = useState<number[]>([]);
   const [zoneStart, setZoneStart] = useState<number | null>(null);
   const [manualZones, setManualZones] = useState<XrkAnalyzeOptions["manual_zones"]>([]);
+  const videoStorageKey = `racing-video-sync:${analysis.track?.track_id ?? "unknown"}:${analysis.file_fingerprint}`;
+  const [videoUrl, setVideoUrl] = useState("");
+  const [videoName, setVideoName] = useState("");
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [videoDurationS, setVideoDurationS] = useState(0);
+  const [calibration, setCalibration] = useState<VideoSyncCalibration | null>(() => {
+    if (typeof window === "undefined") return null;
+    return parseVideoSyncCalibration(window.localStorage.getItem(videoStorageKey));
+  });
+  const [offsetMs, setOffsetMs] = useState(calibration?.offset_ms ?? 0);
+
+  useEffect(() => () => {
+    if (videoUrl) URL.revokeObjectURL(videoUrl);
+  }, [videoUrl]);
+
+  useEffect(() => {
+    if (calibration) {
+      window.localStorage.setItem(videoStorageKey, JSON.stringify(calibration));
+    }
+  }, [calibration, videoStorageKey]);
 
   useEffect(() => {
     if (publishedDemo) return;
@@ -252,6 +275,29 @@ export function XrkAnalysisWorkspace({
           cursorDistance={cursorDistance}
           seekRequest={seekRequest}
           onCursor={setCursorDistance}
+          videoUrl={videoUrl}
+          videoName={videoName}
+          videoFile={videoFile}
+          videoDurationS={videoDurationS}
+          calibration={calibration}
+          offsetMs={offsetMs}
+          setVideoUrl={setVideoUrl}
+          setVideoName={setVideoName}
+          setVideoFile={setVideoFile}
+          setVideoDurationS={setVideoDurationS}
+          setCalibration={setCalibration}
+          setOffsetMs={setOffsetMs}
+        />
+      )}
+
+      {activeTab === "storyboard" && (
+        <StoryboardPanel
+          analysis={analysis}
+          videoFile={videoFile}
+          videoUrl={videoUrl}
+          videoDurationS={videoDurationS}
+          calibration={calibration}
+          publishedDemo={publishedDemo}
         />
       )}
 
@@ -761,42 +807,50 @@ function VideoSyncPanel({
   cursorDistance,
   seekRequest,
   onCursor,
+  videoUrl,
+  videoName,
+  videoFile,
+  videoDurationS,
+  calibration,
+  offsetMs,
+  setVideoUrl,
+  setVideoName,
+  setVideoFile,
+  setVideoDurationS,
+  setCalibration,
+  setOffsetMs,
 }: {
   analysis: XrkAnalysis;
   cursorDistance: number;
   seekRequest: SeekRequest | null;
   onCursor: (distance: number) => void;
+  videoUrl: string;
+  videoName: string;
+  videoFile: File | null;
+  videoDurationS: number;
+  calibration: VideoSyncCalibration | null;
+  offsetMs: number;
+  setVideoUrl: (value: string) => void;
+  setVideoName: (value: string) => void;
+  setVideoFile: (value: File | null) => void;
+  setVideoDurationS: (value: number) => void;
+  setCalibration: (value: VideoSyncCalibration | null) => void;
+  setOffsetMs: (value: number) => void;
 }) {
   const { t } = useI18n();
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [videoUrl, setVideoUrl] = useState("");
-  const [videoName, setVideoName] = useState("");
-  const [videoFile, setVideoFile] = useState<File | null>(null);
-  const [videoDurationS, setVideoDurationS] = useState(0);
   const [syncMessage, setSyncMessage] = useState("");
   const [syncError, setSyncError] = useState("");
   const [autoSyncing, setAutoSyncing] = useState(false);
   const [autoConfidence, setAutoConfidence] = useState<number | null>(null);
   const autoSyncAbortRef = useRef<AbortController | null>(null);
   const storageKey = `racing-video-sync:${analysis.track?.track_id ?? "unknown"}:${analysis.file_fingerprint}`;
-  const [calibration, setCalibration] = useState<VideoSyncCalibration | null>(() => {
-    if (typeof window === "undefined") return null;
-    return parseVideoSyncCalibration(window.localStorage.getItem(storageKey));
-  });
-  const [offsetMs, setOffsetMs] = useState(calibration?.offset_ms ?? 0);
   const targetPoints = analysis.track?.target ?? [];
   const cursorPoint = nearestPointByDistance(targetPoints, cursorDistance);
 
   useEffect(() => () => {
     autoSyncAbortRef.current?.abort();
-    if (videoUrl) URL.revokeObjectURL(videoUrl);
-  }, [videoUrl]);
-
-  useEffect(() => {
-    if (calibration) {
-      window.localStorage.setItem(storageKey, JSON.stringify(calibration));
-    }
-  }, [calibration, storageKey]);
+  }, []);
 
   useEffect(() => {
     if (!videoRef.current || !seekRequest || !analysis.track) return;
