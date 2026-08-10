@@ -185,3 +185,78 @@ function sampleSummary() {
     synthetic_curve_generated: false,
   };
 }
+
+test("server-renders a shared storyboard page instead of a 404", async () => {
+  const originalFetch = globalThis.fetch;
+  const storyboard = {
+    schema_version: 1,
+    token: "share-token-abc123456789",
+    watermark: "AI 生成，请与教练核实",
+    created_at: "2026-08-10T00:00:00+00:00",
+    expires_at: "2026-08-17T00:00:00+00:00",
+    analysis: {
+      reference_lap: 13,
+      target_lap: 8,
+      fastest_lap: { lap: 13, lap_time: 40.326 },
+    },
+    video: { duration_s: 700, required: true, uploaded: false },
+    nodes: [
+      {
+        id: "corner-1",
+        kind: "corner",
+        title: "第 1 弯：可改进 0.05 秒",
+        time_range: [519.8, 525.5],
+        distance_range_m: [110, 171],
+        telemetry_overlay: {
+          distance_m: [110, 140, 171],
+          session_time_s: [519.8, 521.0, 525.5],
+          speed_kmh: [80, 45, 74],
+          rpm: [9000, 7000, 10000],
+          longitudinal_g: [-0.8, -1.1, 0.2],
+          lateral_g: [0.1, 1.2, 0.3],
+          throttle: [],
+          brake: [],
+          available: { throttle: false, brake: false },
+        },
+        insight: "基于真实圈 13、8 的净收益 0.05 秒。",
+        drill: "连续三圈只改变这一处操作。",
+        evidence_laps: [13, 8],
+        corner: { name: "Suggested Zone 1", entry_distance_m: 110, exit_distance_m: 171 },
+        source: "structured",
+      },
+    ],
+  };
+  globalThis.fetch = async (input, init) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url === "https://backend.example/api/v1/storyboards/share-token-abc123456789") {
+      return new Response(JSON.stringify(storyboard), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+    workerUrl.searchParams.set("story-test", `${process.pid}-${Date.now()}`);
+    const { default: worker } = await import(workerUrl.href);
+    const response = await worker.fetch(
+      new Request("http://localhost/story/share-token-abc123456789", {
+        headers: { accept: "text/html", host: "localhost" },
+      }),
+      {
+        ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
+        API_URL: "https://backend.example",
+        API_PREFIX: "/api/v1",
+      },
+      { waitUntil() {}, passThroughOnException() {} },
+    );
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.match(html, /AI 驾驶复盘短片/);
+    assert.match(html, /AI 生成，请与教练核实/);
+    assert.match(html, /第 1 弯：可改进 0\.05 秒/);
+    assert.match(html, /连续三圈只改变这一处操作/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -77,6 +77,15 @@ const worker = {
       }
     }
 
+    if (url.pathname.startsWith("/story/") && request.method === "GET") {
+      const storyboard = await fetchPublicStoryboard(env, url.pathname);
+      if (storyboard) {
+        const forwardedHeaders = new Headers(request.headers);
+        forwardedHeaders.set("x-racing-storyboard", encodeURIComponent(storyboard));
+        request = new Request(request, { headers: forwardedHeaders });
+      }
+    }
+
     const response = await handler.fetch(request, env, ctx);
     if (url.pathname !== "/" || request.method !== "GET") return response;
 
@@ -115,6 +124,27 @@ async function fetchPublicDemoSummary(env: Env): Promise<string | null> {
     if (!response.ok) return null;
     const text = await response.text();
     return text.length <= 48_000 ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchPublicStoryboard(
+  env: Env,
+  pathname: string,
+): Promise<string | null> {
+  const token = pathname.replace(/^\/story\//, "");
+  const origin = runtimeApiOrigin(env);
+  if (!origin) return null;
+  if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) return null;
+  const prefix = (env.API_PREFIX ?? env.NEXT_PUBLIC_API_PREFIX ?? "/api/v1").replace(/\/+$/, "");
+  try {
+    const response = await fetch(`${origin}${prefix}/storyboards/${encodeURIComponent(token)}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return null;
+    const text = await response.text();
+    return text.length <= 250_000 ? text : null;
   } catch {
     return null;
   }
