@@ -338,3 +338,39 @@ def test_narrative_feedback_api(
             json={"node_id": "", "source": "coach", "locale": "zh", "thumbs_up": True},
         )
         assert invalid.status_code == 422
+
+
+def test_capabilities_llm_narrative_follows_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from backend.app.core.config import Settings
+    from backend.app.main import create_app
+    from backend.app.utils import storage
+
+    monkeypatch.setattr(storage, "DB_PATH", tmp_path / "sessions.sqlite3")
+    settings = Settings(
+        app_env="test",
+        app_mode="cloud",
+        database_url=f"sqlite:///{tmp_path / 'sessions.sqlite3'}",
+        allowed_hosts="testserver",
+        cors_origins="https://frontend.example",
+        xrk_server_import_enabled=False,
+        xrk_inspection_cache_dir=str(tmp_path / "cache"),
+    )
+    with TestClient(create_app(settings)) as client:
+        unset = client.get("/api/v1/system/capabilities").json()["llm_narrative"]
+        assert unset == {"available": False, "model": None}
+
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_MODEL", "deepseek-chat")
+    with TestClient(create_app(settings)) as client:
+        configured = client.get("/api/v1/system/capabilities").json()["llm_narrative"]
+        assert configured == {"available": True, "model": "deepseek-chat"}
+        assert "LLM_API_KEY" not in json.dumps(
+            client.get("/api/v1/system/capabilities").json(),
+            ensure_ascii=False,
+        )

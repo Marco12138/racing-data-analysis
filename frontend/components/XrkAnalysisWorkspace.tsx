@@ -88,12 +88,14 @@ export function XrkAnalysisWorkspace({
   onAnalyze,
   publishedDemo = false,
   initialVideoFile,
+  llmNarrative = { available: false, model: null },
 }: {
   analysis: XrkAnalysis;
   analyzing: boolean;
   onAnalyze: (options: Partial<XrkAnalyzeOptions>) => Promise<void>;
   publishedDemo?: boolean;
   initialVideoFile?: File | null;
+  llmNarrative?: { available: boolean; model: string | null };
 }) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<TabId>("overview");
@@ -338,10 +340,13 @@ export function XrkAnalysisWorkspace({
           calibration={calibration}
           offsetMs={offsetMs}
           publishedDemo={publishedDemo}
+          llmNarrative={llmNarrative}
         />
       )}
 
-      {activeTab === "coach" && <CoachSummaryPanel analysis={analysis} onCursor={selectDistance} />}
+      {activeTab === "coach" && (
+        <CoachSummaryPanel analysis={analysis} onCursor={selectDistance} llmNarrative={llmNarrative} />
+      )}
 
       {activeTab === "report" && <ReportPanel analysis={analysis} />}
     </section>
@@ -1188,9 +1193,11 @@ function formatConfidence(value: number): string {
 function CoachSummaryPanel({
   analysis,
   onCursor,
+  llmNarrative = { available: false, model: null },
 }: {
   analysis: XrkAnalysis;
   onCursor: (distance: number) => void;
+  llmNarrative?: { available: boolean; model: string | null };
 }) {
   const { t, locale } = useI18n();
   const [feedbackSent, setFeedbackSent] = useState<string | null>(null);
@@ -1220,6 +1227,9 @@ function CoachSummaryPanel({
   return (
     <div className="space-y-5">
       <Panel title={t("xrk.coach.title")} subtitle={t("xrk.coach.subtitle")}>
+        <p className={`llm-narrative-badge ${llmNarrative.available ? "is-on" : ""}`}>
+          {llmNarrative.available ? t("xrk.llm.enabled") : t("xrk.llm.disabled")}
+        </p>
         {analysis.narrative ? (
           <div>
             <p className="whitespace-pre-wrap text-sm leading-7 text-slate-200">

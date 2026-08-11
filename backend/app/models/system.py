@@ -30,6 +30,13 @@ class XrkServerImportCapability(BaseModel):
     message: str | None = None
 
 
+class LlmNarrativeCapability(BaseModel):
+    """Whether the optional LLM narrative layer is configured (never the key)."""
+
+    available: bool
+    model: str | None = None
+
+
 class DeploymentCapabilities(BaseModel):
     """Feature availability exposed to clients without leaking secrets."""
 
@@ -44,6 +51,7 @@ class DeploymentCapabilities(BaseModel):
     aim_imports: bool
     persistence: PersistenceCapability
     xrk_server_import: XrkServerImportCapability
+    llm_narrative: LlmNarrativeCapability
 
 
 class HealthStatus(BaseModel):
