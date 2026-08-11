@@ -14,6 +14,8 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Target,
+  ThumbsDown,
+  ThumbsUp,
   WandSparkles,
   Video,
 } from "lucide-react";
@@ -37,6 +39,8 @@ import type {
 import { autoSyncVideoTelemetry } from "../lib/xrkAnalysisApi";
 import { extractVideoSyncFeatures } from "../lib/videoFeatureExtraction";
 import { initialVideoState } from "../lib/videoSession";
+import { resolveApiConfig } from "../lib/config";
+import { submitNarrativeFeedback } from "../lib/feedbackApi";
 import {
   createVideoSyncCalibration,
   nearestPointByDistance,
@@ -1185,10 +1189,31 @@ function CoachSummaryPanel({
   analysis: XrkAnalysis;
   onCursor: (distance: number) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const [feedbackSent, setFeedbackSent] = useState<string | null>(null);
   const summary = analysis.ai_coach_summary;
   const improvement = analysis.achievable_improvement_range;
   const rangeAvailable = improvement.maximum_improvement_s > 0;
+
+  async function sendFeedback(corner: string, index: number, thumbsUp: boolean) {
+    try {
+      const config = await resolveApiConfig();
+      const ok = await submitNarrativeFeedback(
+        config.apiOrigin,
+        config.apiPrefix,
+        {
+          node_id: `priority-${index + 1}`,
+          token: analysis.inspection_id,
+          source: "coach",
+          locale: locale === "zh" ? "zh" : "en",
+          thumbs_up: thumbsUp,
+        },
+      );
+      if (ok) setFeedbackSent(corner);
+    } catch {
+      // Feedback is optional.
+    }
+  }
   return (
     <div className="space-y-5">
       <Panel title={t("xrk.coach.title")} subtitle={t("xrk.coach.subtitle")}>
@@ -1247,6 +1272,29 @@ function CoachSummaryPanel({
                         {t("xrk.coach.jump")}
                       </button>
                     )}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        aria-label={t("xrk.coach.feedbackHelpful")}
+                        disabled={feedbackSent === priority.corner}
+                        onClick={() => void sendFeedback(priority.corner, index, true)}
+                        className="rounded-md border border-slate-700 px-2.5 py-2 text-slate-200 hover:border-[#66e38f] disabled:opacity-50"
+                      >
+                        <ThumbsUp size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={t("xrk.coach.feedbackNotHelpful")}
+                        disabled={feedbackSent === priority.corner}
+                        onClick={() => void sendFeedback(priority.corner, index, false)}
+                        className="rounded-md border border-slate-700 px-2.5 py-2 text-slate-200 hover:border-[#ff5964] disabled:opacity-50"
+                      >
+                        <ThumbsDown size={14} />
+                      </button>
+                      {feedbackSent === priority.corner ? (
+                        <span className="text-xs text-emerald-300">{t("xrk.coach.feedbackThanks")}</span>
+                      ) : null}
+                    </div>
                   </div>
                   <p className="mt-3 text-sm leading-6 text-slate-300">{priority.why}</p>
                   <CoachField label={t("xrk.coach.whatToTest")} value={priority.what_to_test} />

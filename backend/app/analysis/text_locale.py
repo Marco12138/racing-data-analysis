@@ -14,17 +14,32 @@ Locale = str  # "zh" | "en"
 NUMBER_PATTERN = re.compile(r"\d")
 
 # Vague template words that make a teaching point useless without numbers.
-FORBIDDEN_EN = ("overall", "generally", "try to improve")
-FORBIDDEN_ZH = ("注意", "改善", "提高")
+FORBIDDEN_EN = ("overall", "generally", "try", "improve", "better")
+FORBIDDEN_ZH = ("注意", "改善", "提高", "更好", "尝试", "优化")
+
+# Corner/distance keywords that anchor a teaching point to evidence.
+DISTANCE_KEYWORDS = ("m", "米", "弯", "corner", "zone", "sector", "km/h", "rpm")
 
 
-def is_specific_text(text: str, language: str = "en") -> bool:
-    """A coach point must carry at least one number and avoid vague filler."""
+def _is_specific(text: str, language: str = "en") -> bool:
+    """A coach point must carry a number, a corner/distance anchor, and no vague filler."""
     if not NUMBER_PATTERN.search(text):
         return False
     lowered = text.lower()
+    if not any(keyword in lowered for keyword in DISTANCE_KEYWORDS):
+        return False
     banned = FORBIDDEN_ZH if language == "zh" else FORBIDDEN_EN
-    return not any(word in lowered for word in banned)
+    if language == "zh":
+        return not any(word in lowered for word in banned)
+    return not re.search(
+        r"\b(?:overall|generally|try|improve|better)\b",
+        lowered,
+    )
+
+
+def is_specific_text(text: str, language: str = "en") -> bool:
+    """Public alias of the specificity guard used by narrative layers."""
+    return _is_specific(text, language)
 
 
 def localize_pattern(pattern: str, language: str = "en") -> str:

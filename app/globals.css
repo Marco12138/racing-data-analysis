@@ -870,6 +870,40 @@ select {
   text-align: right;
 }
 
+.story-card__feedback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.story-card__feedback button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #94a3b8;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.story-card__feedback button:hover:not(:disabled) {
+  border-color: rgba(53, 214, 208, 0.6);
+  color: #35d6d0;
+}
+
+.story-card__feedback button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.story-card__feedback span {
+  color: #66e38f;
+  font-size: 0.74rem;
+}
+
 .story-share-page {
   max-width: 1180px;
   margin: 0 auto;

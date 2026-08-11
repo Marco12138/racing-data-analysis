@@ -76,6 +76,19 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS narrative_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_id TEXT NOT NULL,
+                token TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL,
+                locale TEXT NOT NULL,
+                thumbs_up INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
         _ensure_owner_column(conn, "sessions")
         _ensure_owner_column(conn, "video_jobs")
         _ensure_owner_column(conn, "video_markers")
@@ -356,6 +369,47 @@ def delete_storyboard(
             (token, actor.owner_id),
         )
         return cursor.rowcount > 0
+
+
+def save_narrative_feedback(
+    node_id: str,
+    token: str,
+    source: str,
+    locale: str,
+    thumbs_up: bool,
+) -> int:
+    """Persist one AI-advice thumbs up/down record."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute(
+            "INSERT INTO narrative_feedback (node_id, token, source, locale, thumbs_up, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (node_id, token, source, locale, 1 if thumbs_up else 0, _now()),
+        )
+        return int(cursor.lastrowid)
+
+
+def narrative_feedback_stats(limit: int = 50) -> dict:
+    """Return aggregate counts and the most recent feedback rows."""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        total = conn.execute("SELECT COUNT(*) AS count FROM narrative_feedback").fetchone()["count"]
+        thumbs_up = conn.execute(
+            "SELECT COUNT(*) AS count FROM narrative_feedback WHERE thumbs_up = 1"
+        ).fetchone()["count"]
+        recent = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT id, node_id, token, source, locale, thumbs_up, created_at "
+                "FROM narrative_feedback ORDER BY id DESC LIMIT ?",
+                (max(1, limit),),
+            ).fetchall()
+        ]
+    return {
+        "total": total,
+        "thumbs_up_count": thumbs_up,
+        "thumbs_down_count": total - thumbs_up,
+        "recent": recent,
+    }
 
 
 def _decode_json(value: str | None, default: object) -> object:
