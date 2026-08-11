@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from ..analysis.handling_analysis import generate_handling_flags
 from ..analysis.lap_analysis import analyze_laps
@@ -19,6 +19,7 @@ async def analyze_session(
     request: Request,
     lap_file: UploadFile = File(...),
     telemetry_file: UploadFile | None = File(default=None),
+    language: str = Form(default="en"),
 ) -> dict:
     """Analyze uploaded lap data and optional telemetry CSV data."""
     settings = request.app.state.settings
@@ -35,7 +36,13 @@ async def analyze_session(
     except (CsvUploadError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    report = generate_report(lap_result, telemetry_result, handling_flags)
+    normalized_language = "zh" if language == "zh" else "en"
+    report = generate_report(
+        lap_result,
+        telemetry_result,
+        handling_flags,
+        language=normalized_language,
+    )
     session_id = save_session_record(
         lap_filename=lap_file.filename or "lap.csv",
         telemetry_filename=telemetry_file.filename if telemetry_file else None,

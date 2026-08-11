@@ -15,6 +15,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from .api.analysis_routes import analyze_session, router as analysis_router
 from .api.cross_session_routes import router as cross_session_router
 from .api.errors import PublicApiError
+from .api.feedback_routes import router as feedback_router
 from .api.import_routes import router as import_router
 from .api.system_routes import (
     capabilities,
@@ -110,6 +111,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application.include_router(system_router, prefix=active_settings.api_v1_prefix)
     application.include_router(analysis_router, prefix=active_settings.api_v1_prefix)
+    application.include_router(feedback_router, prefix=active_settings.api_v1_prefix)
     application.include_router(import_router, prefix=active_settings.api_v1_prefix)
     application.include_router(xrk_router, prefix=active_settings.api_v1_prefix)
     application.include_router(cross_session_router, prefix=active_settings.api_v1_prefix)

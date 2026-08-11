@@ -648,7 +648,7 @@ def _fallback_title(moment: dict[str, Any], language: str = "en") -> str:
         prefix = f"第 {number} 弯" if number else str(moment["corner"])
         return f"{prefix}：可改进 {gain:.2f} 秒"
     prefix = f"Corner {number}" if number else str(moment["corner"])
-    return f"{prefix}: improve {gain:.2f}s"
+    return f"{prefix}: gain {gain:.2f}s"
 
 
 def _fallback_insight(moment: dict[str, Any], language: str = "en") -> str:

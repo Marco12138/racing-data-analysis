@@ -13,7 +13,7 @@ from backend.app.analysis.corner_consensus import build_ai_coach_summary
 from backend.app.analysis.llm_narrative import generate_llm_narrative
 from backend.app.analysis.report_generator import generate_report
 from backend.app.analysis.session_storyboard import build_storyboard
-from backend.app.analysis.text_locale import is_specific_text
+from backend.app.analysis.text_locale import _is_specific, is_specific_text
 from backend.app.analysis.xrk_session_analysis import generate_xrk_report
 
 
@@ -278,3 +278,63 @@ def test_is_specific_text_guards() -> None:
     assert not is_specific_text("注意改善整体节奏。", "zh")
     assert not is_specific_text("Try to improve the overall flow.", "en")
     assert not is_specific_text("保持现状。", "zh")
+    assert not is_specific_text("数字 123 但没有地点或距离锚点。", "zh")
+    assert not _is_specific("improve overall stability at 123.", "en")
+
+
+def test_narrative_feedback_api(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from backend.app.core.config import Settings
+    from backend.app.main import create_app
+    from backend.app.utils import storage
+
+    monkeypatch.setattr(storage, "DB_PATH", tmp_path / "sessions.sqlite3")
+    settings = Settings(
+        app_env="test",
+        app_mode="cloud",
+        database_url=f"sqlite:///{tmp_path / 'sessions.sqlite3'}",
+        allowed_hosts="testserver",
+        cors_origins="https://frontend.example",
+    )
+    with TestClient(create_app(settings)) as client:
+        created = client.post(
+            "/api/v1/feedback",
+            json={
+                "node_id": "priority-1",
+                "token": "inspection-abc",
+                "source": "coach",
+                "locale": "zh",
+                "thumbs_up": True,
+            },
+        )
+        assert created.status_code == 200
+        assert created.json()["received"] is True
+
+        storyboard_feedback = client.post(
+            "/api/v1/feedback",
+            json={
+                "node_id": "corner-1",
+                "token": "share-token-abc123456789",
+                "source": "storyboard",
+                "locale": "en",
+                "thumbs_up": False,
+            },
+        )
+        assert storyboard_feedback.status_code == 200
+
+        stats = client.get("/api/v1/feedback/stats").json()
+        assert stats["total"] == 2
+        assert stats["thumbs_up_count"] == 1
+        assert stats["thumbs_down_count"] == 1
+        assert len(stats["recent"]) == 2
+        assert stats["recent"][0]["source"] == "storyboard"
+
+        invalid = client.post(
+            "/api/v1/feedback",
+            json={"node_id": "", "source": "coach", "locale": "zh", "thumbs_up": True},
+        )
+        assert invalid.status_code == 422

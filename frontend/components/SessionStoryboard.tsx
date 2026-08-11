@@ -12,6 +12,8 @@ import {
   Play,
   Sparkles,
   Target,
+  ThumbsDown,
+  ThumbsUp,
 } from "lucide-react";
 import {
   CartesianGrid,
@@ -24,6 +26,8 @@ import {
 } from "recharts";
 
 import { useI18n } from "../lib/i18n";
+import { resolveApiConfig } from "../lib/config";
+import { submitNarrativeFeedback } from "../lib/feedbackApi";
 import type { StoryboardNode, StoryboardResponse } from "../lib/storyboardApi";
 
 export function SessionStoryboard({
@@ -35,13 +39,14 @@ export function SessionStoryboard({
   videoUrl: string | null;
   shareUrl: string;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [page, setPage] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [copiedImage, setCopiedImage] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [exportAllOpen, setExportAllOpen] = useState(false);
   const [exportAllBusy, setExportAllBusy] = useState(false);
+  const [feedbackSent, setFeedbackSent] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const exportAllRef = useRef<HTMLDivElement>(null);
@@ -150,6 +155,26 @@ export function SessionStoryboard({
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, [storyboard]);
 
+  const sendFeedback = useCallback(async (nodeId: string, thumbsUp: boolean) => {
+    try {
+      const config = await resolveApiConfig();
+      const ok = await submitNarrativeFeedback(
+        config.apiOrigin,
+        config.apiPrefix,
+        {
+          node_id: nodeId,
+          token: storyboard.token,
+          source: "storyboard",
+          locale: locale === "zh" ? "zh" : "en",
+          thumbs_up: thumbsUp,
+        },
+      );
+      if (ok) setFeedbackSent(nodeId);
+    } catch {
+      // Feedback is optional; failures should not block the review.
+    }
+  }, [storyboard.token, locale]);
+
   if (storyboard.nodes.length === 0) return null;
 
   return (
@@ -207,6 +232,8 @@ export function SessionStoryboard({
           videoRef={videoRef}
           onTogglePlayback={togglePlayback}
           onTimeUpdate={onTimeUpdate}
+          onFeedback={(thumbsUp) => void sendFeedback(node.id, thumbsUp)}
+          feedbackSent={feedbackSent === node.id}
         />
         {exporting ? <span className="storyboard__big-watermark">{storyboard.watermark}</span> : null}
       </div>
@@ -252,6 +279,8 @@ function StoryCard({
   videoRef,
   onTogglePlayback,
   onTimeUpdate,
+  onFeedback,
+  feedbackSent = false,
 }: {
   node: StoryboardNode;
   videoUrl: string | null;
@@ -260,6 +289,8 @@ function StoryCard({
   videoRef: RefObject<HTMLVideoElement | null> | null;
   onTogglePlayback: () => void;
   onTimeUpdate: () => void;
+  onFeedback?: (thumbsUp: boolean) => void;
+  feedbackSent?: boolean;
 }) {
   const { t } = useI18n();
   return (
@@ -302,6 +333,27 @@ function StoryCard({
           <p><Sparkles size={15} /> <strong>{t("story.insight")}：</strong>{node.insight}</p>
           <p><Target size={15} /> <strong>{t("story.drill")}：</strong>{node.drill || t("story.noDrill")}</p>
         </div>
+        {onFeedback ? (
+          <div className="story-card__feedback">
+            <button
+              type="button"
+              aria-label={t("story.feedbackHelpful")}
+              disabled={feedbackSent}
+              onClick={() => onFeedback(true)}
+            >
+              <ThumbsUp size={14} />
+            </button>
+            <button
+              type="button"
+              aria-label={t("story.feedbackNotHelpful")}
+              disabled={feedbackSent}
+              onClick={() => onFeedback(false)}
+            >
+              <ThumbsDown size={14} />
+            </button>
+            {feedbackSent ? <span>{t("story.feedbackThanks")}</span> : null}
+          </div>
+        ) : null}
         <small className="story-card__watermark">{watermark}</small>
       </div>
     </article>
