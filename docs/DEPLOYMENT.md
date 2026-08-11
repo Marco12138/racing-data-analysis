@@ -149,6 +149,33 @@ LLM_MODEL=deepseek-chat
   evaluation (10 sessions x 2 languages = 20 LLM calls at most) and writes
   samples under `tmp/narrative_eval/`.
 
+### 点亮 LLM 一键流程
+
+1. **Railway Dashboard** → 后端服务 `racing-ai-platform-api` → **Variables**，
+   添加 `LLM_BASE_URL`（deepseek 用 `https://api.deepseek.com/v1`）、
+   `LLM_API_KEY`、`LLM_MODEL=deepseek-chat`，然后重新 **Deploy**。
+2. 验证连通性（本地，脚本只从环境变量读 key，不写盘不打日志）：
+   ```bash
+   LLM_BASE_URL=... LLM_API_KEY=... LLM_MODEL=deepseek-chat \
+     python scripts/verify_llm_config.py
+   ```
+   也可以只设置变量后在 Railway 后端环境里执行同一命令。
+3. 生成评估样本（只读，默认最多 20 次 LLM 调用）：
+   ```bash
+   python scripts/evaluate_narrative.py --limit 10 --languages zh,en
+   # 快速冒烟（不调用 LLM）：
+   python scripts/evaluate_narrative.py --dry-run
+   ```
+4. 查看决策输出：
+   ```bash
+   python scripts/print_evaluation_verdict.py
+   # 或指定目录：python scripts/print_evaluation_verdict.py --path tmp/narrative_eval/<timestamp>/summary.json
+   ```
+   同时阅读 `tmp/narrative_eval/<timestamp>/report.md`。
+5. **决策标准**：5 个维度（具体性/准确性/语言/可执行性/安全性）LLM 全面优于
+   结构化回退才建议 `ENABLE_LLM`；任一维度未达标则为 `KEEP_STRUCTURED`，
+   把 `report.md` 发给 Codex 继续调 prompt。
+
 All three values are required. If any value is missing, the request fails, or
 the generated text contains a number absent from the compact structured
 evidence, the API omits `narrative` and keeps the existing template report.
