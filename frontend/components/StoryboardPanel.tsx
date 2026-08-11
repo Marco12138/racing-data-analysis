@@ -24,6 +24,7 @@ export function StoryboardPanel({
   calibration,
   offsetMs,
   publishedDemo = false,
+  llmNarrative = { available: false, model: null },
 }: {
   analysis: XrkAnalysis;
   videoFile: File | null;
@@ -32,6 +33,7 @@ export function StoryboardPanel({
   calibration: VideoSyncCalibration | null;
   offsetMs: number;
   publishedDemo?: boolean;
+  llmNarrative?: { available: boolean; model: string | null };
 }) {
   const { t, locale } = useI18n();
   const [creating, setCreating] = useState(false);
@@ -132,6 +134,9 @@ export function StoryboardPanel({
             <div>
               <h3>{t("xrk.storyboard.title")}</h3>
               <p>{t("xrk.storyboard.description")}</p>
+              <p className={`llm-narrative-badge ${llmNarrative.available ? "is-on" : ""}`}>
+                {llmNarrative.available ? t("xrk.llm.enabled") : t("xrk.llm.disabled")}
+              </p>
             </div>
           </div>
           {!canCreate ? (

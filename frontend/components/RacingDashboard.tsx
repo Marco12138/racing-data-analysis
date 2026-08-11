@@ -583,6 +583,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
                 onAnalyze={runXrkAnalysis}
                 publishedDemo={Boolean(publishedDemo)}
                 initialVideoFile={activeVideoFile}
+                llmNarrative={deploymentCapabilities?.llm_narrative ?? { available: false, model: null }}
               />
             ) : lapAnalysis ? (
               <>

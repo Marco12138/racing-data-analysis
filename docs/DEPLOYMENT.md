@@ -129,10 +129,25 @@ The XRK report can optionally add an evidence-bounded Chinese coaching
 narrative through an OpenAI-compatible chat completions endpoint:
 
 ```text
-LLM_BASE_URL=https://provider.example.com/v1
-LLM_API_KEY=<secret>
-LLM_MODEL=<compatible-model-name>
+# deepseek-chat typical endpoint: https://api.deepseek.com/v1
+# OpenAI official endpoint:       https://api.openai.com/v1
+LLM_BASE_URL=https://api.deepseek.com/v1
+LLM_API_KEY=<your-api-key>
+LLM_MODEL=deepseek-chat
 ```
+
+- Set these on the backend deployment only; never prefix them with
+  `NEXT_PUBLIC_` and never commit the key.
+- `GET /api/v1/system/capabilities` exposes `llm_narrative.available` and
+  `llm_narrative.model` but never the key.
+- When unset, the API keeps the structured, language-aware fallback and
+  behavior is unchanged.
+- The narrative layer only restates numbers present in the evidence; outputs
+  without numbers, without corner/distance anchors, or with vague filler are
+  rejected and fall back to the structured summary.
+- `scripts/evaluate_narrative.py` performs a bounded read-only quality
+  evaluation (10 sessions x 2 languages = 20 LLM calls at most) and writes
+  samples under `tmp/narrative_eval/`.
 
 All three values are required. If any value is missing, the request fails, or
 the generated text contains a number absent from the compact structured

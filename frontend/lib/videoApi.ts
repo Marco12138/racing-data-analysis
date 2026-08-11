@@ -77,6 +77,10 @@ export type DeploymentCapabilities = {
     error_code: string | null;
     message: string | null;
   };
+  llm_narrative: {
+    available: boolean;
+    model: string | null;
+  };
 };
 
 export function getDeploymentCapabilities(): Promise<DeploymentCapabilities> {

@@ -7,9 +7,11 @@ from fastapi import APIRouter, HTTPException, Request, status
 from ..models.system import (
     DeploymentCapabilities,
     HealthStatus,
+    LlmNarrativeCapability,
     PersistenceCapability,
     XrkServerImportCapability,
 )
+from ..analysis.llm_narrative import _llm_config
 from ..utils.storage import check_database
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -25,6 +27,7 @@ def capabilities(request: Request) -> DeploymentCapabilities:
     """Describe active deployment capabilities for the frontend."""
     settings = request.app.state.settings
     parser_probe = request.app.state.xrk_parser_registry.probe()
+    llm_config = _llm_config()
     return DeploymentCapabilities(
         environment=settings.app_env,
         mode=settings.app_mode,
@@ -53,6 +56,10 @@ def capabilities(request: Request) -> DeploymentCapabilities:
             timeout_seconds=settings.xrk_parse_timeout_seconds,
             error_code=parser_probe.error_code,
             message=parser_probe.message,
+        ),
+        llm_narrative=LlmNarrativeCapability(
+            available=llm_config is not None,
+            model=llm_config[2] if llm_config is not None else None,
         ),
     )
 
