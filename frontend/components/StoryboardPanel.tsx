@@ -33,7 +33,7 @@ export function StoryboardPanel({
   offsetMs: number;
   publishedDemo?: boolean;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [storyboard, setStoryboard] = useState<StoryboardResponse | null>(null);
@@ -65,6 +65,7 @@ export function StoryboardPanel({
       const result = await createStoryboardPayload(config.apiOrigin, config.apiPrefix, {
         analysis: {
           inspection_id: analysis.inspection_id,
+          language: locale === "zh" ? "zh" : "en",
           reference_lap: analysis.reference_lap,
           target_lap: analysis.target_lap,
           distance_step_m: 1,
@@ -77,6 +78,7 @@ export function StoryboardPanel({
             analysis.lap_quality.config.relative_gap_threshold_pct ?? 1,
         },
         alignment,
+        language: locale === "zh" ? "zh" : "en",
       });
       if (!result) {
         setError(t("xrk.storyboard.error"));

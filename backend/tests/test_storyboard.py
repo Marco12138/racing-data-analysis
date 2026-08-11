@@ -330,8 +330,10 @@ def test_storyboard_api_create_and_share_contract(
         *,
         alignment: StoryboardAlignment,
         max_nodes: int,
+        language: str = "en",
     ) -> dict[str, Any]:
         assert alignment.video_duration_s == 120.0
+        assert language == "en"
         return storyboard_payload
 
     monkeypatch.setattr(storyboard_routes, "analyze_xrk_session", fake_analyze)

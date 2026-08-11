@@ -7,6 +7,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .text_locale import localize_pattern
+
 
 DEFAULT_CONSENSUS_CONFIG: dict[str, float] = {
     "feature_similarity_threshold": 0.60,
@@ -16,6 +18,81 @@ DEFAULT_CONSENSUS_CONFIG: dict[str, float] = {
     "distance_tolerance_m": 10.0,
     "rpm_tolerance_pct": 4.0,
     "speed_tolerance_kmh": 2.5,
+}
+
+_COACH_TEXT: dict[str, dict[str, str]] = {
+    "en": {
+        "reference_statement": (
+            "All benchmarks come from real, completed laps that passed the Lap Quality Gate."
+        ),
+        "unique_reason": (
+            "This behavior appears as a fastest-lap difference but has not "
+            "shown enough repeatability to become a training reference."
+        ),
+        "emerging_reason": (
+            "A real-lap gain exists, but it has not repeated enough to train as a stable pattern."
+        ),
+        "rejected_reason": (
+            "The local gain is offset by downstream cost or a non-positive net result."
+        ),
+        "limitation_synthetic": "No synthetic target lap or synthetic RPM curve is produced.",
+        "limitation_range": "The improvement range is empirical and conservative.",
+        "limitation_coexist": "Not every validated improvement is guaranteed to coexist in one lap.",
+        "limitation_brake": (
+            "No direct brake channel is present; braking remains an inference and cannot be confirmed."
+        ),
+    },
+    "zh": {
+        "reference_statement": "所有基准均来自真实完成且通过圈质量门的圈。",
+        "unique_reason": "该行为只出现在最快圈中，重复性不足，暂不作为训练基准。",
+        "emerging_reason": "真实圈存在收益，但重复性不足以作为稳定模式进行训练。",
+        "rejected_reason": "本地收益被下游代价抵消，或净收益非正。",
+        "limitation_synthetic": "不生成合成目标圈或合成 RPM 曲线。",
+        "limitation_range": "改进区间为经验性保守估计。",
+        "limitation_coexist": "并非每个验证过的改进都保证能在一圈内共存。",
+        "limitation_brake": "缺少直接刹车通道，刹车只能作为推断，无法确认。",
+    },
+}
+
+_PRIORITY_TEXT: dict[str, dict[str, str]] = {
+    "en": {
+        "why": (
+            "The pattern appears in {count} eligible laps and retains "
+            "a {gain:.3f}s net gain after downstream cost."
+        ),
+        "what_to_test_target": (
+            "Test a sustained RPM recovery near {target:.1f} m while keeping the preceding "
+            "preparation unchanged."
+        ),
+        "what_to_test_fallback": (
+            "Repeat the measured fast-lap exit pattern without changing more than one input."
+        ),
+        "drill": (
+            "Run three consecutive laps changing only the recovery phase, then compare the "
+            "delta at corner exit and at the downstream endpoint."
+        ),
+        "success_1": "The behavior appears in at least two of three comparable laps.",
+        "success_2": "The time advantage remains positive at the downstream endpoint.",
+        "success_3": "No secondary RPM drop or exit-speed loss is introduced.",
+        "stop": (
+            "Stop the experiment if the earlier recovery creates a secondary RPM drop, "
+            "trajectory instability, or a downstream time loss."
+        ),
+        "limitation_brake": (
+            "Brake application cannot be confirmed without a direct brake channel."
+        ),
+    },
+    "zh": {
+        "why": "该模式出现在 {count} 个合格圈中，扣除下游代价后净收益 {gain:.3f}s。",
+        "what_to_test_target": "在 {target:.1f} m 处提前恢复 RPM，并保持此前准备动作不变。",
+        "what_to_test_fallback": "复现测得的最快圈出弯模式，单次只改变一个操作。",
+        "drill": "连续跑 3 圈，只改变恢复阶段，然后对比弯心出口与下游终点的圈时差。",
+        "success_1": "该行为在可比较的 3 圈中至少 2 圈出现。",
+        "success_2": "下游终点的时间优势仍为正值。",
+        "success_3": "未引入二次 RPM 下降或出弯速度损失。",
+        "stop": "若提前恢复导致二次 RPM 下降、轨迹不稳定或下游时间损失，立即停止实验。",
+        "limitation_brake": "没有直接刹车通道，无法确认刹车操作。",
+    },
 }
 
 
@@ -296,8 +373,11 @@ def build_ai_coach_summary(
     achievable_range: dict[str, Any],
     *,
     direct_brake_available: bool,
+    language: str = "en",
 ) -> dict[str, Any]:
     """Turn structured real-lap evidence into a conservative coach summary."""
+    t = _COACH_TEXT["zh" if language == "zh" else "en"]
+    pt = _PRIORITY_TEXT["zh" if language == "zh" else "en"]
     corners = consensus.get("corners", [])
     transferable = sorted(
         (corner for corner in corners if corner["transferable_improvement"]),
@@ -326,13 +406,13 @@ def build_ai_coach_summary(
         if corner["common_fast_pattern"]
     ]
     priorities = [
-        _training_priority(corner, direct_brake_available)
+        _training_priority(corner, direct_brake_available, language)
         for corner in transferable[:3]
     ]
     strengths = [
         {
             "corner": corner["corner"],
-            "finding": corner["common_fast_pattern"][0],
+            "finding": localize_pattern(corner["common_fast_pattern"][0], language),
             "evidence": corner["evidence"]["features_by_lap"],
         }
         for corner in corners
@@ -341,7 +421,7 @@ def build_ai_coach_summary(
     ][:3]
     return {
         "reference_statement": (
-            "All benchmarks come from real, completed laps that passed the Lap Quality Gate."
+            t["reference_statement"]
         ),
         "top_valid_laps": top_laps[:3],
         "common_fast_patterns": common_patterns,
@@ -363,8 +443,7 @@ def build_ai_coach_summary(
                 "transferable_improvement": False,
                 "confidence": corner["confidence"],
                 "reason": (
-                    "This behavior appears as a fastest-lap difference but has not "
-                    "shown enough repeatability to become a training reference."
+                    t["unique_reason"]
                 ),
             }
             for corner in corners
@@ -373,7 +452,7 @@ def build_ai_coach_summary(
         "emerging_improvements": [
             {
                 "corner": corner["corner"],
-                "reason": "A real-lap gain exists, but it has not repeated enough to train as a stable pattern.",
+                "reason": t["emerging_reason"],
                 "supporting_laps": corner["supporting_laps"],
                 "confidence": corner["confidence"],
             }
@@ -385,7 +464,7 @@ def build_ai_coach_summary(
                 "local_gain_s": corner["local_gain"],
                 "downstream_cost_s": corner["downstream_cost"],
                 "net_gain_s": corner["net_gain"],
-                "reason": "The local gain is offset by downstream cost or a non-positive net result.",
+                "reason": t["rejected_reason"],
             }
             for corner in rejected[:3]
         ],
@@ -393,15 +472,13 @@ def build_ai_coach_summary(
         "stable_strengths": strengths,
         "achievable_improvement_range": achievable_range,
         "limitations": [
-            "No synthetic target lap or synthetic RPM curve is produced.",
-            "The improvement range is empirical and conservative.",
-            "Not every validated improvement is guaranteed to coexist in one lap.",
+            t["limitation_synthetic"],
+            t["limitation_range"],
+            t["limitation_coexist"],
             *(
                 []
                 if direct_brake_available
-                else [
-                    "No direct brake channel is present; braking remains an inference and cannot be confirmed."
-                ]
+                else [t["limitation_brake"]]
             ),
         ],
     }
@@ -410,7 +487,9 @@ def build_ai_coach_summary(
 def _training_priority(
     corner: dict[str, Any],
     direct_brake_available: bool,
+    language: str = "en",
 ) -> dict[str, Any]:
+    pt = _PRIORITY_TEXT["zh" if language == "zh" else "en"]
     features = corner["evidence"]["features_by_lap"]
     recoveries = [
         feature["reacceleration_distance_m"]
@@ -419,37 +498,30 @@ def _training_priority(
     ]
     target = round(float(np.median(recoveries)), 1) if recoveries else None
     what_to_test = (
-        f"Test a sustained RPM recovery near {target:.1f} m while keeping the preceding "
-        "preparation unchanged."
+        pt["what_to_test_target"].format(target=target)
         if target is not None
-        else "Repeat the measured fast-lap exit pattern without changing more than one input."
+        else pt["what_to_test_fallback"]
     )
     return {
         "corner": corner["corner"],
-        "why": (
-            f"The pattern appears in {corner['occurrence_count']} eligible laps and retains "
-            f"a {corner['net_gain']:.3f}s net gain after downstream cost."
+        "why": pt["why"].format(
+            count=corner["occurrence_count"],
+            gain=corner["net_gain"],
         ),
         "what_to_test": what_to_test,
-        "training_drill": (
-            "Run three consecutive laps changing only the recovery phase, then compare the "
-            "delta at corner exit and at the downstream endpoint."
-        ),
+        "training_drill": pt["drill"],
         "success_criteria": [
-            "The behavior appears in at least two of three comparable laps.",
-            "The time advantage remains positive at the downstream endpoint.",
-            "No secondary RPM drop or exit-speed loss is introduced.",
+            pt["success_1"],
+            pt["success_2"],
+            pt["success_3"],
         ],
-        "stop_condition": (
-            "Stop the experiment if the earlier recovery creates a secondary RPM drop, "
-            "trajectory instability, or a downstream time loss."
-        ),
+        "stop_condition": pt["stop"],
         "evidence": corner["evidence"],
         "confidence": corner["confidence"],
         "limitation": (
             None
             if direct_brake_available
-            else "Brake application cannot be confirmed without a direct brake channel."
+            else pt["limitation_brake"]
         ),
     }
 

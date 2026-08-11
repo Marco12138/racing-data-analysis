@@ -45,6 +45,7 @@ def analyze_xrk_session(
     manual_zones: list[dict[str, Any]] | None = None,
     lap_quality_config: dict[str, float] | None = None,
     max_comparison_points: int = 5_000,
+    language: str = "en",
 ) -> dict[str, Any]:
     """Run all supported analyses while preserving unavailable capabilities."""
     timing = {
@@ -78,12 +79,13 @@ def analyze_xrk_session(
         reference_lap,
         target_lap,
         quality_summary,
+        language=language,
     )
     if not manifest.get("has_gps"):
         base["warnings"].append(
             "GPS is unavailable; track, distance alignment, sectors, and zones were skipped."
         )
-        base["report"] = generate_xrk_report(base)
+        base["report"] = generate_xrk_report(base, language=language)
         return base
 
     cleaned, gps_quality = clean_gps_points(telemetry)
@@ -92,6 +94,7 @@ def analyze_xrk_session(
             "GPS samples did not pass quality checks; track analysis is unavailable."
         )
         base["gps_quality"] = gps_quality
+        base["report"] = generate_xrk_report(base, language=language)
         return base
     processed = calculate_track_curvature(cleaned)
     available_after_cleaning = sorted(int(value) for value in processed["lap"].unique())
@@ -109,7 +112,7 @@ def analyze_xrk_session(
             "No GPS-complete laps passed the Lap Quality Gate; distance comparison is unavailable."
         )
         base["lap_quality"] = quality_summary
-        base["report"] = generate_xrk_report(base)
+        base["report"] = generate_xrk_report(base, language=language)
         return base
     if reference_lap not in eligible_after_cleaning:
         reference_lap = eligible_after_cleaning[0]
@@ -215,6 +218,7 @@ def analyze_xrk_session(
         achievable_range,
         direct_brake_available="brake"
         in manifest.get("available_canonical_channels", []),
+        language=language,
     )
     reference_events = [event for event in events if event["lap"] == reference_lap]
     target_events = [event for event in events if event["lap"] == target_lap]
@@ -283,7 +287,7 @@ def analyze_xrk_session(
             "video_sync": video_sync_payload(timing),
         }
     )
-    base["report"] = generate_xrk_report(base)
+    base["report"] = generate_xrk_report(base, language=language)
     base["warnings"].extend(sector_result["warnings"])
     return json_safe(base)
 
@@ -294,8 +298,23 @@ def basic_response(
     reference_lap: int,
     target_lap: int,
     quality_summary: dict[str, Any],
+    language: str = "en",
 ) -> dict[str, Any]:
     """Create a capability-aware response before optional GPS analysis."""
+    zh = language == "zh"
+    reference_statement = (
+        "所有基准均来自真实完成且通过圈质量门的圈。"
+        if zh
+        else "All benchmarks come from real, completed laps that passed the Lap Quality Gate."
+    )
+    coach_limitations = (
+        ["不生成合成目标圈或合成 RPM 曲线。", "弯道共识与下游验证需要 GPS 数据。"]
+        if zh
+        else [
+            "No synthetic target lap or synthetic RPM curve is produced.",
+            "GPS is required for corner consensus and downstream validation.",
+        ]
+    )
     lap_rows = [
         {
             "lap": lap,
@@ -363,9 +382,7 @@ def basic_response(
             "limitations": ["Distance-based corner evidence is unavailable."],
         },
         "ai_coach_summary": {
-            "reference_statement": (
-                "All benchmarks come from real, completed laps that passed the Lap Quality Gate."
-            ),
+            "reference_statement": reference_statement,
             "top_valid_laps": quality_summary["top_valid_laps"],
             "common_fast_patterns": [],
             "fastest_lap_net_differences": [],
@@ -374,10 +391,7 @@ def basic_response(
             "rejected_apparent_improvements": [],
             "training_priorities": [],
             "stable_strengths": [],
-            "limitations": [
-                "No synthetic target lap or synthetic RPM curve is produced.",
-                "GPS is required for corner consensus and downstream validation.",
-            ],
+            "limitations": coach_limitations,
         },
         "video_sync": video_sync_payload(timing),
         "warnings": list(manifest.get("warnings", [])),
@@ -529,8 +543,72 @@ def evidence_catalog(manifest: dict[str, Any]) -> dict[str, list[str]]:
     }
 
 
-def generate_xrk_report(result: dict[str, Any]) -> str:
+_XRK_REPORT_TEXT: dict[str, dict[str, str]] = {
+    "en": {
+        "measured": "Measured",
+        "laps": "- {count} timed laps were read from the logger.",
+        "fastest": "- The fastest logger lap is Lap {lap} at {lap_time:.3f}s.",
+        "gate": "- Every benchmark in this report is a real completed lap that passed the Lap Quality Gate.",
+        "rpm": "- RPM is available as a directly recorded channel.",
+        "gps": "- GPS position and GPS speed are available as recorded channels.",
+        "calculated": "Calculated",
+        "refs": "- Reference Lap: {reference}; Selected Lap: {target}.",
+        "top_laps": "- Top valid laps: {laps}.",
+        "no_top": "- No reference-eligible Top laps are available.",
+        "range": "- Empirical achievable improvement range: {minimum:.3f}–{maximum:.3f}s ({confidence} confidence).",
+        "zone": "- {name} has the largest selected-lap zone delta at {loss:+.3f}s.",
+        "finding": "- {label}: reference {reference:.3f} vs selected {target:.3f} ({difference:+.3f} {unit}).",
+        "inferred": "Inferred",
+        "events": "- Conservative driver-action candidates: {events}.",
+        "no_events": "- No driver-action candidate passed the current evidence thresholds.",
+        "brake": (
+            "- Confirmed braking is unavailable because no direct brake channel is present; "
+            "BRAKING_LIKELY is an inference from RPM, speed, longitudinal G, and curvature."
+        ),
+        "virtual": "- Virtual sectors and Suggested Zones are calculated analysis aids, not official timing points.",
+        "coach": "AI Coach Summary",
+        "priority": "- Priority {index}, {corner}: {what}",
+        "rejected": "- Rejected {corner}: local gain {local:.3f}s, downstream cost {downstream:.3f}s, net {net:+.3f}s.",
+        "unique": "- Fastest-lap-only {corner}: {features}. This is not a stable training reference.",
+        "policy": "Reference policy",
+        "policy_1": "- No stitched target lap or synthetic RPM trace is generated.",
+        "policy_2": "- The improvement range is empirical and conservative.",
+        "policy_3": "- Valid improvements are not guaranteed to coexist in the same lap.",
+    },
+    "zh": {
+        "measured": "测量",
+        "laps": "- 已从记录仪读取 {count} 圈计时数据。",
+        "fastest": "- 记录仪最快圈为第 {lap} 圈，{lap_time:.3f}s。",
+        "gate": "- 本报告中的每个基准都是通过圈质量门的真实完成圈。",
+        "rpm": "- RPM 为直接记录的通道。",
+        "gps": "- GPS 位置与 GPS 速度为记录通道。",
+        "calculated": "计算",
+        "refs": "- 参考圈：第 {reference} 圈；对比圈：第 {target} 圈。",
+        "top_laps": "- 有效最快圈：{laps}。",
+        "no_top": "- 无通过圈质量门的参考有效圈。",
+        "range": "- 经验可改进区间：{minimum:.3f}–{maximum:.3f}s（{confidence} 置信度）。",
+        "zone": "- {name} 是所选圈 Zone 差最大的位置，差值为 {loss:+.3f}s。",
+        "finding": "- {label}：参考 {reference:.3f}，对比 {target:.3f}（{difference:+.3f} {unit}）。",
+        "inferred": "推断",
+        "events": "- 保守驾驶行为候选：{events}。",
+        "no_events": "- 无驾驶行为候选通过当前证据阈值。",
+        "brake": "- 缺少直接刹车通道，无法确认刹车；BRAKING_LIKELY 由 RPM、速度、纵向 G 与曲率推断。",
+        "virtual": "- 虚拟 Sector 与建议 Zone 为计算辅助，不是官方计时点。",
+        "coach": "AI 教练摘要",
+        "priority": "- 重点 {index}，{corner}：{what}",
+        "rejected": "- 已拒绝 {corner}：本地收益 {local:.3f}s，下游代价 {downstream:.3f}s，净收益 {net:+.3f}s。",
+        "unique": "- 仅最快圈出现 {corner}：{features}。该现象不是稳定的训练基准。",
+        "policy": "参考口径",
+        "policy_1": "- 不生成拼接目标圈或合成 RPM 曲线。",
+        "policy_2": "- 改进区间为经验性保守估计。",
+        "policy_3": "- 验证过的改进不保证能在同一圈内共存。",
+    },
+}
+
+
+def generate_xrk_report(result: dict[str, Any], language: str = "en") -> str:
     """Generate a measured/calculated/inferred driver review."""
+    t = _XRK_REPORT_TEXT["zh" if language == "zh" else "en"]
     fastest = result["fastest_lap"]
     quality = result.get("lap_quality") or {}
     top_laps = quality.get("top_valid_laps", [])
@@ -547,51 +625,65 @@ def generate_xrk_report(result: dict[str, Any]) -> str:
         default=None,
     )
     lines = [
-        "Measured",
-        f"- {len(result['lap_rows'])} timed laps were read from the logger.",
-        f"- The fastest logger lap is Lap {fastest['lap']} at {fastest['lap_time']:.3f}s.",
-        "- Every benchmark in this report is a real completed lap that passed the Lap Quality Gate.",
+        t["measured"],
+        t["laps"].format(count=len(result["lap_rows"])),
+        t["fastest"].format(lap=fastest["lap"], lap_time=fastest["lap_time"]),
+        t["gate"],
     ]
     if result["capabilities"]["rpm"]:
-        lines.append("- RPM is available as a directly recorded channel.")
+        lines.append(t["rpm"])
     if result["capabilities"]["gps"]:
-        lines.append("- GPS position and GPS speed are available as recorded channels.")
+        lines.append(t["gps"])
     lines.extend(
         [
             "",
-            "Calculated",
-            f"- Reference Lap: {result['reference_lap']}; Selected Lap: {result['target_lap']}.",
+            t["calculated"],
+            t["refs"].format(
+                reference=result["reference_lap"],
+                target=result["target_lap"],
+            ),
             (
-                "- Top valid laps: "
-                + ", ".join(
-                    f"Lap {row['lap']} ({row['lap_time']:.3f}s)"
-                    for row in top_laps
+                t["top_laps"].format(
+                    laps=", ".join(
+                        (
+                            f"Lap {row['lap']} ({row['lap_time']:.3f}s)"
+                            if language != "zh"
+                            else f"第 {row['lap']} 圈（{row['lap_time']:.3f}s）"
+                        )
+                        for row in top_laps
+                    )
                 )
-                + "."
                 if top_laps
-                else "- No reference-eligible Top laps are available."
+                else t["no_top"]
             ),
         ]
     )
     if improvement.get("maximum_improvement_s", 0) > 0:
         lines.append(
-            "- Empirical achievable improvement range: "
-            f"{improvement['minimum_improvement_s']:.3f}–"
-            f"{improvement['maximum_improvement_s']:.3f}s "
-            f"({improvement['confidence']} confidence)."
+            t["range"].format(
+                minimum=improvement["minimum_improvement_s"],
+                maximum=improvement["maximum_improvement_s"],
+                confidence=improvement["confidence"],
+            )
         )
     if largest_zone:
         lines.append(
-            f"- {largest_zone['name']} has the largest selected-lap zone delta "
-            f"at {largest_zone['estimated_zone_loss_s']:+.3f}s."
+            t["zone"].format(
+                name=largest_zone["name"],
+                loss=largest_zone["estimated_zone_loss_s"],
+            )
         )
         for finding in largest_zone.get("findings", [])[:4]:
             lines.append(
-                f"- {finding['label']}: reference {finding['reference']:.3f} "
-                f"vs selected {finding['target']:.3f} "
-                f"({finding['difference']:+.3f} {finding['unit']})."
+                t["finding"].format(
+                    label=finding["label"],
+                    reference=finding["reference"],
+                    target=finding["target"],
+                    difference=finding["difference"],
+                    unit=finding["unit"],
+                )
             )
-    lines.extend(["", "Inferred"])
+    lines.extend(["", t["inferred"]])
     target_events = [
         event
         for event in result.get("events", [])
@@ -602,51 +694,54 @@ def generate_xrk_report(result: dict[str, Any]) -> str:
         event_counts[event["event_type"]] = event_counts.get(event["event_type"], 0) + 1
     if event_counts:
         lines.append(
-            "- Conservative driver-action candidates: "
-            + ", ".join(
-                f"{event_type} {count}"
-                for event_type, count in sorted(event_counts.items())
+            t["events"].format(
+                events=", ".join(
+                    f"{event_type} {count}"
+                    for event_type, count in sorted(event_counts.items())
+                )
             )
-            + "."
         )
     else:
-        lines.append("- No driver-action candidate passed the current evidence thresholds.")
+        lines.append(t["no_events"])
     if not result["capabilities"]["direct_brake"]:
-        lines.append(
-            "- Confirmed braking is unavailable because no direct brake channel is present; "
-            "BRAKING_LIKELY is an inference from RPM, speed, longitudinal G, and curvature."
-        )
-    lines.append(
-        "- Virtual sectors and Suggested Zones are calculated analysis aids, not official timing points."
-    )
+        lines.append(t["brake"])
+    lines.append(t["virtual"])
     priorities = coach.get("training_priorities", [])
     if priorities:
-        lines.extend(["", "AI Coach Summary"])
+        lines.extend(["", t["coach"]])
         for index, priority in enumerate(priorities[:3], start=1):
             lines.append(
-                f"- Priority {index}, {priority['corner']}: {priority['what_to_test']}"
+                t["priority"].format(
+                    index=index,
+                    corner=priority["corner"],
+                    what=priority["what_to_test"],
+                )
             )
     rejected = coach.get("rejected_apparent_improvements", [])
     for item in rejected[:3]:
         lines.append(
-            f"- Rejected {item['corner']}: local gain {item['local_gain_s']:.3f}s, "
-            f"downstream cost {item['downstream_cost_s']:.3f}s, "
-            f"net {item['net_gain_s']:+.3f}s."
+            t["rejected"].format(
+                corner=item["corner"],
+                local=item["local_gain_s"],
+                downstream=item["downstream_cost_s"],
+                net=item["net_gain_s"],
+            )
         )
     unique_features = coach.get("fastest_lap_unique_features", [])
     for item in unique_features[:3]:
         lines.append(
-            f"- Fastest-lap-only {item['corner']}: "
-            + "; ".join(item["features"])
-            + ". This is not a stable training reference."
+            t["unique"].format(
+                corner=item["corner"],
+                features="; ".join(item["features"]),
+            )
         )
     lines.extend(
         [
             "",
-            "Reference policy",
-            "- No stitched target lap or synthetic RPM trace is generated.",
-            "- The improvement range is empirical and conservative.",
-            "- Valid improvements are not guaranteed to coexist in the same lap.",
+            t["policy"],
+            t["policy_1"],
+            t["policy_2"],
+            t["policy_3"],
         ]
     )
     return "\n".join(lines)

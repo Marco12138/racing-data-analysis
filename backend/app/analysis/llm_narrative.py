@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from .text_locale import is_specific_text
+
 LLM_TIMEOUT_SECONDS = 30.0
 _NUMBER_PATTERN = re.compile(r"(?<![\w.])[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?")
 
@@ -18,11 +20,27 @@ SYSTEM_PROMPT = """你是一名谨慎的卡丁车数据复盘教练。
 你只能使用用户提供的 JSON 证据，不得补充、推算、换算或编造任何数字。
 测量值、计算值和推断必须保持原有证据边界；不能把疑似制动写成确认制动。
 所有参考圈都是真实完成且通过质量门的圈，不得生成理论圈、合成圈或目标 RPM 曲线。
-请使用中文，输出三个训练重点。每个重点严格使用以下结构，不使用阿拉伯数字编号：
+每个训练重点必须包含具体证据数字（弯角/距离、时间或转速），禁止使用
+“注意”“改善”“提高”“overall”“generally”“try to improve”等没有数字的宽泛措辞。
+请使用 {language} 输出，每个重点严格使用以下结构，不使用阿拉伯数字编号：
 训练重点一/二/三：简短结论
 对应证据：只复述 JSON 中已有的事实和数字
 练习建议：一句可执行、可在下一节练习验证的建议
 如果证据不足，用“证据不足，暂不建议改变现有操作”明确说明，不得补造依据。
+
+好示例（含弯角、距离、时间与练习）：
+训练重点一：Zone 4（512.4-590.0 m）更早恢复油门，净收益 0.24s。
+对应证据：真实圈 10、13，出弯后下游代价 0.00s。
+练习建议：连续 3 圈只改恢复点，在 540 m 处对比弯心出口速度。
+
+训练重点二：Zone 1（110.0-171.0 m）抬油门位置稳定，净收益 0.05s。
+对应证据：Lap 8、13 的抬油门位置均为 110 m。
+练习建议：连续 3 圈保持抬油门点不变，对比 Sector 1 用时。
+
+差示例（宽泛、无数字，禁止模仿）：
+训练重点：注意改善整体节奏。
+对应证据：车手表现一般。
+练习建议：try to improve 综合表现。
 """
 
 
@@ -149,6 +167,7 @@ async def generate_llm_narrative(
     evidence: dict[str, Any],
     *,
     client: httpx.AsyncClient | None = None,
+    language: str = "en",
 ) -> str | None:
     """Return an optional narrative, falling back silently on any failure."""
     config = _llm_config()
@@ -160,7 +179,12 @@ async def generate_llm_narrative(
         "temperature": 0.2,
         "max_tokens": 900,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT.format(
+                    language="中文" if language == "zh" else "English"
+                ),
+            },
             {
                 "role": "user",
                 "content": "以下是唯一允许使用的结构化证据：\n"
@@ -184,7 +208,11 @@ async def generate_llm_narrative(
         if not isinstance(content, str) or not content.strip():
             return None
         narrative = content.strip()
-        return narrative if _numbers_are_grounded(narrative, evidence) else None
+        if not _numbers_are_grounded(narrative, evidence):
+            return None
+        if not is_specific_text(narrative, language):
+            return None
+        return narrative
     except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError):
         return None
     finally:

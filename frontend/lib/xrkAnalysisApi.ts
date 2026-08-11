@@ -294,6 +294,7 @@ export type XrkAnalyzeOptions = {
   sector_boundaries_m?: number[] | null;
   lap_quality_absolute_gap_s?: number;
   lap_quality_relative_gap_pct?: number;
+  language?: "zh" | "en";
   manual_zones?: Array<{
     id?: string;
     name?: string;

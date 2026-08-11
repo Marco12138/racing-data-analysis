@@ -9,7 +9,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 from fastapi import APIRouter, File, Request, Response, UploadFile
@@ -68,6 +68,7 @@ class XrkAnalyzeRequest(BaseModel):
     manual_zones: list[ManualZoneRequest] = Field(default_factory=list, max_length=30)
     lap_quality_absolute_gap_s: float = Field(default=0.5, ge=0.05, le=5.0)
     lap_quality_relative_gap_pct: float = Field(default=1.0, ge=0.1, le=10.0)
+    language: Literal["zh", "en"] = "en"
 
 
 class VideoFeaturePoint(BaseModel):
@@ -326,6 +327,7 @@ async def analyze_xrk(
                 "relative_gap_threshold_pct": payload.lap_quality_relative_gap_pct,
             },
             max_comparison_points=settings.xrk_max_comparison_points,
+            language=payload.language,
         )
         narrative = await generate_llm_narrative(
             build_xrk_narrative_evidence(result)
