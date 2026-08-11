@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import {
   Activity,
   BarChart3,
@@ -85,6 +86,9 @@ export function PublicDemoClient({ initialDemo }: { initialDemo: PublicDemoSumma
               <button type="button" className={locale === "zh" ? "is-active" : ""} onClick={() => setLocale("zh")}>中</button>
               <button type="button" className={locale === "en" ? "is-active" : ""} onClick={() => setLocale("en")}>EN</button>
             </div>
+            <Link href="/profile" className="nav-command">
+              {t("nav.profile")}
+            </Link>
             <button type="button" className="nav-command" onClick={() => openDashboard(false)}>
               {t("nav.openDashboard")}
             </button>

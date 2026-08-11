@@ -79,6 +79,8 @@ import { MultiSessionWorkspace } from "./MultiSessionWorkspace";
 import { NewSessionCard } from "./NewSessionCard";
 import { commitPendingVideo, isXrkFileName } from "../lib/sessionUpload";
 import { useI18n } from "../lib/i18n";
+import { buildSessionSummary } from "../lib/driverProfile";
+import { saveSessionSummary } from "../lib/driverProfileDb";
 import {
   clearVideoJob,
   createVideoJob,
@@ -355,6 +357,22 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       setAimImportStatus("loaded");
       setActiveVideoFile((current) => commitPendingVideo(pendingVideo, current));
       setPendingVideoFile(null);
+      void saveSessionSummary(buildSessionSummary({
+        inspection_id: result.inspection_id,
+        track_id: result.track?.track_id ?? "unknown-track",
+        track_name: trackName,
+        driver_name: driverName,
+        vehicle_name: vehicleName,
+        fastest_lap: result.fastest_lap,
+        corner_improvements: (result.consensus_benchmark?.corners ?? [])
+          .filter((corner) => corner.net_gain > 0)
+          .map((corner) => ({ corner: corner.corner, net_gain: corner.net_gain })),
+        training_priorities: (result.ai_coach_summary?.training_priorities ?? [])
+          .map((priority) => priority.what_to_test)
+          .filter(Boolean),
+      })).catch(() => {
+        // The local driver profile is optional; analysis still completes.
+      });
     } catch (error) {
       if ((error as Error).name !== "AbortError") {
         setDataError(formatXrkClientError(error as Error));

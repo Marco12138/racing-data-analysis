@@ -1044,6 +1044,142 @@ select {
   cursor: wait;
 }
 
+.profile-page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px 20px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.profile-page__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.profile-page__header h1 {
+  margin: 4px 0 4px;
+  font-size: 1.6rem;
+  color: #fff;
+}
+
+.profile-page__header p:not(.hero-kicker) {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.profile-page__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.profile-page__actions label.story-button {
+  cursor: pointer;
+}
+
+.profile-page__notice {
+  margin: 0;
+  color: #66e38f;
+  font-size: 0.85rem;
+}
+
+.profile-page__error {
+  margin: 0;
+  color: #fca5a5;
+  font-size: 0.85rem;
+}
+
+.profile-page__hint {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.profile-page__section {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  background: #0d1420;
+  padding: 18px;
+}
+
+.profile-page__section h2 {
+  margin: 0 0 14px;
+  color: #fff;
+  font-size: 1.05rem;
+}
+
+.profile-page__chart {
+  margin-top: 12px;
+}
+
+.profile-page__chart h3 {
+  margin: 0 0 8px;
+  color: #cbd5e1;
+  font-size: 0.9rem;
+}
+
+.profile-page__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.profile-page__list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  border-bottom: 1px solid #1e293b;
+  padding-bottom: 8px;
+}
+
+.profile-page__list li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.profile-page__list strong {
+  color: #e2e8f0;
+  font-size: 0.88rem;
+}
+
+.profile-page__list span {
+  color: #94a3b8;
+  font-size: 0.8rem;
+  text-align: right;
+}
+
+.persistent-weakness-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  border: 1px solid rgba(246, 201, 69, 0.35);
+  background: rgba(246, 201, 69, 0.07);
+  color: #e6cf83;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.persistent-weakness-hint svg {
+  flex: none;
+  margin-top: 2px;
+}
+
 .storyboard-export-all {
   position: fixed;
   inset: 0;
