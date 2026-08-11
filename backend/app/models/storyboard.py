@@ -77,6 +77,28 @@ class StoryboardAnalysisSummary(DemoModel):
     fastest_lap: dict | None = None
 
 
+class StoryboardAlignmentInfo(DemoModel):
+    """Echoed alignment anchor so exported artifacts stay self-contained."""
+
+    offset_ms: int
+    video_duration_s: float
+    target_lap: int | None = None
+    telemetry_session_time_s: float | None = None
+    video_time_s: float | None = None
+    video_size_bytes: int | None = None
+    video_last_modified_ms: int | None = None
+    video_mime_type: str | None = None
+
+
+class StoryboardManualZone(DemoModel):
+    """One user-defined non-wrapping track analysis range."""
+
+    id: str | None = None
+    name: str | None = None
+    entry_distance_m: float
+    exit_distance_m: float
+
+
 class StoryboardResponse(BaseModel):
     """Versioned read-only storyboard payload returned to the creator and share page."""
 
@@ -89,4 +111,6 @@ class StoryboardResponse(BaseModel):
     expires_at: str
     analysis: StoryboardAnalysisSummary
     video: StoryboardVideoInfo
+    alignment: StoryboardAlignmentInfo | None = None
+    manual_zones: list[StoryboardManualZone] = []
     nodes: list[StoryboardNode]

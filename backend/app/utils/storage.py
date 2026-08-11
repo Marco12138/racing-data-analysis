@@ -344,6 +344,20 @@ def load_storyboard(
         return _decode_json(row["payload_json"], None)
 
 
+def delete_storyboard(
+    token: str,
+    *,
+    actor: ActorContext = ANONYMOUS_ACTOR,
+) -> bool:
+    """Delete one storyboard owned by the actor; returns whether it existed."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute(
+            "DELETE FROM storyboards WHERE token = ? AND owner_id = ?",
+            (token, actor.owner_id),
+        )
+        return cursor.rowcount > 0
+
+
 def _decode_json(value: str | None, default: object) -> object:
     """Decode optional stored JSON with a safe default."""
     if not value:

@@ -15,7 +15,9 @@ from backend.app.api import storyboard_routes
 from backend.app.analysis.session_storyboard import (
     StoryboardAlignment,
     build_storyboard,
+    clear_narrative_cache,
     select_teaching_moments,
+    narrative_stats_snapshot,
 )
 from backend.app.core.config import Settings
 from backend.app.main import create_app
@@ -157,6 +159,7 @@ def test_storyboard_llm_must_restate_evidence_numbers_only(
     from backend.app.analysis import session_storyboard
 
     analysis = demo_analysis()
+    clear_narrative_cache()
     monkeypatch.setattr(
         session_storyboard,
         "_llm_config",
@@ -183,6 +186,7 @@ def test_storyboard_llm_must_restate_evidence_numbers_only(
     )
     assert all(node["source"] == "llm" for node in grounded["nodes"])
 
+    clear_narrative_cache()
     ungrounded_content = json.dumps(
         [
             {
@@ -203,6 +207,56 @@ def test_storyboard_llm_must_restate_evidence_numbers_only(
     )
     assert all(node["source"] == "structured" for node in ungrounded["nodes"])
     assert all("99.99" not in node["insight"] for node in ungrounded["nodes"])
+
+
+def test_storyboard_narrative_is_cached_per_evidence_fingerprint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Identical evidence reuses the cached narrative instead of calling LLM again."""
+    from backend.app.analysis import session_storyboard
+
+    analysis = demo_analysis()
+    clear_narrative_cache()
+    before = narrative_stats_snapshot()
+    # Baseline build without LLM config stays structured.
+    structured = build_storyboard(analysis, None, alignment=alignment())
+    assert all(node["source"] == "structured" for node in structured["nodes"])
+    monkeypatch.setattr(
+        session_storyboard,
+        "_llm_config",
+        lambda: ("https://llm.example", "test-key", "test-model"),
+    )
+    content = json.dumps(
+        [
+            {
+                "id": node["id"],
+                "title": f"第 {_node_number(node['id'])} 弯：可改进 {node['net_gain_s']:.3f} 秒",
+                "insight": "基于真实圈，该模式可重复。",
+                "drill": "连续三圈只改变这一处操作。",
+            }
+            for node in structured["nodes"]
+        ],
+        ensure_ascii=False,
+    )
+
+    class CountingClient(_FakeChatClient):
+        def __init__(self) -> None:
+            super().__init__(content)
+            self.post_count = 0
+
+        async def post(self, *args: Any, **kwargs: Any) -> _FakeChatResponse:
+            self.post_count += 1
+            return await super().post(*args, **kwargs)
+
+    client = CountingClient()
+    first = build_storyboard(analysis, None, alignment=alignment(), llm_client=client)
+    second = build_storyboard(analysis, None, alignment=alignment(), llm_client=client)
+    assert client.post_count == 1
+    assert all(node["source"] == "llm" for node in first["nodes"])
+    assert all(node["source"] == "llm" for node in second["nodes"])
+    stats = narrative_stats_snapshot()
+    assert stats["cache_hits"] - before["cache_hits"] == 1
+    assert stats["calls"] - before["calls"] == 1
 
 
 def _node_number(node_id: str) -> str:
@@ -304,7 +358,13 @@ def test_storyboard_api_create_and_share_contract(
                     "distance_step_m": 1,
                     "sector_count": 3,
                     "sector_boundaries_m": None,
-                    "manual_zones": [],
+                    "manual_zones": [
+                        {
+                            "name": "T1",
+                            "entry_distance_m": 10.0,
+                            "exit_distance_m": 30.0,
+                        }
+                    ],
                     "lap_quality_absolute_gap_s": 0.5,
                     "lap_quality_relative_gap_pct": 1,
                 },
@@ -328,6 +388,16 @@ def test_storyboard_api_create_and_share_contract(
         assert shared.status_code == 200
         assert shared.json()["nodes"][0]["id"] == "corner-1"
         assert shared.json()["watermark"] == "AI 生成，请与教练核实"
+        assert shared.json()["alignment"]["offset_ms"] == 0
+        assert shared.json()["alignment"]["video_duration_s"] == 120.0
+        assert shared.json()["manual_zones"][0]["name"] == "T1"
+
+        deleted = client.delete(f"/api/v1/storyboards/{token}")
+        assert deleted.status_code == 200
+        assert deleted.json() == {"deleted": True}
+        assert client.get(f"/api/v1/storyboards/{token}").status_code == 404
+        assert client.delete(f"/api/v1/storyboards/{token}").status_code == 404
 
         assert client.get("/api/v1/storyboards/not-a-real-token").status_code == 404
         assert client.get("/api/v1/storyboards/short").status_code == 404
+        assert client.delete("/api/v1/storyboards/short").status_code == 404

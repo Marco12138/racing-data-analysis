@@ -9,8 +9,10 @@ is ever produced here; when evidence is insufficient the builder fails closed.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,6 +25,18 @@ from .llm_narrative import _llm_config, _numbers_are_grounded
 STORYBOARD_SCHEMA_VERSION = 1
 WATERMARK = "AI 生成，请与教练核实"
 DEFAULT_TTL_SECONDS = 7 * 24 * 3600
+NARRATIVE_CACHE_TTL_SECONDS = 6 * 3600
+
+logger = logging.getLogger("racing.storyboard")
+
+# In-process narrative cache keyed by the evidence fingerprint so an identical
+# session/analysis does not pay repeated LLM calls. Failures are never cached.
+_NARRATIVE_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+narrative_stats = {
+    "calls": 0,
+    "failures": 0,
+    "cache_hits": 0,
+}
 
 MIN_NODES = 1
 MAX_NODES = 5
@@ -217,18 +231,11 @@ def build_storyboard(
     if len(nodes) < MIN_NODES:
         raise ValueError("A storyboard requires at least one in-bounds teaching moment.")
 
-    generated = None
-    if nodes and _llm_config() is not None:
-        try:
-            generated = asyncio.run(
-                _generate_node_copy(
-                    nodes,
-                    analysis,
-                    client=llm_client,
-                )
-            )
-        except RuntimeError:
-            generated = None
+    generated = _generate_or_load_narrative(
+        nodes,
+        analysis,
+        client=llm_client,
+    )
     if generated:
         for node, copy in zip(nodes, generated, strict=True):
             if not copy:
@@ -256,6 +263,76 @@ def build_storyboard(
         },
         "nodes": nodes,
     }
+
+
+def _generate_or_load_narrative(
+    nodes: list[dict[str, Any]],
+    analysis: dict[str, Any],
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> list[dict[str, Any]] | None:
+    """Return cached or freshly generated node copies (None keeps structured)."""
+    if not nodes or _llm_config() is None:
+        return None
+    cache_key = _narrative_cache_key(analysis, nodes)
+    cached = _narrative_cache_get(cache_key)
+    if cached is not None:
+        narrative_stats["cache_hits"] += 1
+        logger.info(
+            "storyboard_narrative cache_hit key=%s nodes=%d",
+            cache_key,
+            len(nodes),
+        )
+        return cached
+    try:
+        generated = asyncio.run(
+            _generate_node_copy(
+                nodes,
+                analysis,
+                client=client,
+            )
+        )
+    except RuntimeError:
+        generated = None
+    if generated is not None:
+        _narrative_cache_set(cache_key, generated)
+    return generated
+
+
+def _narrative_cache_key(
+    analysis: dict[str, Any],
+    nodes: list[dict[str, Any]],
+) -> str:
+    fingerprint = str(analysis.get("file_fingerprint") or "unknown")
+    reference_lap = analysis.get("reference_lap")
+    target_lap = analysis.get("target_lap")
+    node_ids = "|".join(str(node.get("id")) for node in nodes)
+    return f"{fingerprint}:{reference_lap}:{target_lap}:{node_ids}"
+
+
+def _narrative_cache_get(key: str) -> list[dict[str, Any]] | None:
+    entry = _NARRATIVE_CACHE.get(key)
+    if entry is None:
+        return None
+    stored_at, value = entry
+    if time.monotonic() - stored_at > NARRATIVE_CACHE_TTL_SECONDS:
+        _NARRATIVE_CACHE.pop(key, None)
+        return None
+    return value
+
+
+def _narrative_cache_set(key: str, value: list[dict[str, Any]]) -> None:
+    _NARRATIVE_CACHE[key] = (time.monotonic(), value)
+
+
+def clear_narrative_cache() -> None:
+    """Clear the in-process narrative cache (used by tests)."""
+    _NARRATIVE_CACHE.clear()
+
+
+def narrative_stats_snapshot() -> dict[str, int]:
+    """Return a copy of LLM narrative usage counters for observability."""
+    return dict(narrative_stats)
 
 
 def _event_moments(analysis: dict[str, Any], *, max_nodes: int) -> list[dict[str, Any]]:
@@ -614,6 +691,9 @@ async def _generate_node_copy(
     }
     owned_client = client is None
     active_client = client or httpx.AsyncClient(timeout=30.0)
+    narrative_stats["calls"] += 1
+    started_at = time.monotonic()
+    estimated_input_tokens = len(prompt) // 4
     try:
         response = await active_client.post(
             f"{base_url.rstrip('/')}/chat/completions",
@@ -625,8 +705,22 @@ async def _generate_node_copy(
         )
         response.raise_for_status()
         content = response.json()["choices"][0]["message"]["content"]
+        duration_ms = round((time.monotonic() - started_at) * 1000)
+        logger.info(
+            "storyboard_narrative success duration_ms=%d "
+            "estimated_input_tokens=%d estimated_output_tokens=%d",
+            duration_ms,
+            estimated_input_tokens,
+            len(content) // 4,
+        )
         parsed = _parse_json_array(content)
         if not parsed:
+            narrative_stats["failures"] += 1
+            logger.warning(
+                "storyboard_narrative failure reason=unparseable "
+                "duration_ms=%d",
+                duration_ms,
+            )
             return None
         by_id = {str(item.get("id")): item for item in parsed}
         result: list[dict[str, Any]] = []
@@ -645,11 +739,22 @@ async def _generate_node_copy(
                 continue
             combined = " ".join(candidate.values())
             if not _numbers_are_grounded(combined, node_evidence):
+                narrative_stats["failures"] += 1
+                logger.warning(
+                    "storyboard_narrative failure reason=ungrounded node=%s",
+                    node.get("id"),
+                )
                 result.append({})
                 continue
             result.append(candidate)
         return result
-    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError):
+    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
+        narrative_stats["failures"] += 1
+        logger.warning(
+            "storyboard_narrative failure reason=%s duration_ms=%d",
+            type(exc).__name__,
+            round((time.monotonic() - started_at) * 1000),
+        )
         return None
     finally:
         if owned_client:

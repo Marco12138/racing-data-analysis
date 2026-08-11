@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildStoryboardAlignmentInput,
   canCreateStoryboard,
+  deleteStoryboardPayload,
   fetchStoryboardPayload,
   parseStoryboardResponse,
 } from "../frontend/lib/storyboardApi.ts";
@@ -21,6 +22,19 @@ function validPayload() {
       fastest_lap: { lap: 13, lap_time: 40.326 },
     },
     video: { duration_s: 620, required: true, uploaded: false },
+    alignment: {
+      offset_ms: 150,
+      video_duration_s: 620,
+      target_lap: 8,
+      telemetry_session_time_s: 100.5,
+      video_time_s: 101.2,
+      video_size_bytes: 1024,
+      video_last_modified_ms: 42,
+      video_mime_type: "video/mp4",
+    },
+    manual_zones: [
+      { id: "z1", name: "T1", entry_distance_m: 110, exit_distance_m: 171 },
+    ],
     nodes: [
       {
         id: "corner-1",
@@ -56,6 +70,18 @@ test("accepts a valid backend storyboard payload", () => {
   assert.equal(parsed?.nodes[0].time_range[1], 518.4);
   assert.equal(parsed?.nodes[0].telemetry_overlay.speed_kmh.length, 3);
   assert.equal(parsed?.nodes[0].corner?.name, "Suggested Zone 1");
+  assert.equal(parsed?.alignment?.offset_ms, 150);
+  assert.equal(parsed?.alignment?.telemetry_session_time_s, 100.5);
+  assert.equal(parsed?.manual_zones[0].name, "T1");
+});
+
+test("accepts storyboards without alignment or manual zones", () => {
+  const payload = validPayload();
+  delete payload.alignment;
+  delete payload.manual_zones;
+  const parsed = parseStoryboardResponse(payload);
+  assert.equal(parsed?.alignment, null);
+  assert.deepEqual(parsed?.manual_zones, []);
 });
 
 test("rejects untrusted or malformed storyboard payloads", () => {
@@ -172,4 +198,16 @@ test("fetchStoryboardPayload returns null instead of trusting bad responses", as
   assert.equal(await fetchStoryboardPayload("https://api.example", "/api/v1", "token-1", notFound), null);
   assert.equal(await fetchStoryboardPayload("https://api.example", "/api/v1", "token-1", invalid), null);
   assert.equal(await fetchStoryboardPayload("https://api.example", "/api/v1", "token-1", networkError), null);
+});
+
+test("deleteStoryboardPayload reflects the backend result", async () => {
+  const deleted = async () => new Response(JSON.stringify({ deleted: true }), { status: 200 });
+  const missing = async () => new Response("{}", { status: 404 });
+  const throws = async () => {
+    throw new Error("network down");
+  };
+
+  assert.equal(await deleteStoryboardPayload("https://api.example", "/api/v1", "token-1", deleted), true);
+  assert.equal(await deleteStoryboardPayload("https://api.example", "/api/v1", "token-1", missing), false);
+  assert.equal(await deleteStoryboardPayload("https://api.example", "/api/v1", "token-1", throws), false);
 });
