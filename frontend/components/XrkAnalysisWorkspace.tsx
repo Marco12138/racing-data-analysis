@@ -52,6 +52,7 @@ import {
 } from "../lib/videoTelemetrySync";
 import { useI18n, type TranslationKey } from "../lib/i18n";
 import { StoryboardPanel } from "./StoryboardPanel";
+import { PersistentWeaknessHint } from "./PersistentWeaknessHint";
 
 function createObjectUrl(file: File): string {
   if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
@@ -217,6 +218,8 @@ export function XrkAnalysisWorkspace({
           </button>
         ))}
       </nav>
+
+      {analysis.track ? <PersistentWeaknessHint trackId={analysis.track.track_id} /> : null}
 
       {analyzing && (
         <div className="rounded-md border border-[#35d6d0]/30 bg-[#35d6d0]/10 px-4 py-3 text-sm text-cyan-100">
