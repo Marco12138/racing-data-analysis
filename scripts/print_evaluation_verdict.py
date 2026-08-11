@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Print a human-readable verdict for the latest narrative evaluation.
+
+Finds the newest tmp/narrative_eval/*/summary.json (or --path), prints the
+per-dimension win table, the top issues, and the final recommendation.
+Exit code: 0 = recommend enabling the LLM, 1 = keep structured/keep tuning.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+EVAL_ROOT = REPOSITORY_ROOT / "tmp/narrative_eval"
+
+CYAN = "\033[36m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+RED = "\033[31m"
+RESET = "\033[0m"
+
+
+def latest_summary(path: Path | None) -> tuple[Path, Path]:
+    if path is not None:
+        target = Path(path).expanduser().resolve()
+        if not target.is_file():
+            raise SystemExit(f"找不到 summary.json：{target}")
+        return target, target.parent
+    candidates = sorted(EVAL_ROOT.glob("*/summary.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not candidates:
+        raise SystemExit(
+            "tmp/narrative_eval/ 下没有 summary.json。"
+            "请先运行 scripts/evaluate_narrative.py。"
+        )
+    return candidates[0], candidates[0].parent
+
+
+def collect_issues(directory: Path, limit: int = 5) -> list[str]:
+    issues: list[str] = []
+    for path in sorted(directory.glob("*_*.json")):
+        if path.name == "summary.json":
+            continue
+        try:
+            row = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        for issue in row.get("issues", []):
+            if issue not in issues:
+                issues.append(issue)
+        if len(issues) >= limit:
+            break
+    return issues[:limit]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--path", type=Path, default=None)
+    args = parser.parse_args()
+    summary_path, directory = latest_summary(args.path)
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    recommendation = summary.get("overall_recommendation", "KEEP_STRUCTURED")
+
+    print(f"{CYAN}=== LLM 叙事评估 Verdict ==={RESET}")
+    print(f"评估目录：{directory}")
+    print(f"生成时间：{summary.get('generated_at')}")
+    print(f"样本数：{summary.get('sessions')}；调用数：{summary.get('calls')}")
+    if summary.get("dry_run"):
+        print(f"{YELLOW}本次为 dry-run，未调用 LLM。{RESET}")
+    print()
+    print(f"{CYAN}各维度胜率（LLM vs 结构化）{RESET}")
+    print(f"{'维度':<22}{'LLM 胜':>8}{'结构化胜':>10}{'平局':>8}")
+    print("-" * 50)
+    for dim, counts in summary.get("win_rate", {}).items():
+        print(f"{dim:<22}{counts['llm_win']:>8}{counts['structured_win']:>10}{counts['tie']:>8}")
+
+    issues = collect_issues(directory)
+    if issues:
+        print()
+        print(f"{YELLOW}关键 issue（前 {len(issues)} 条）{RESET}")
+        for issue in issues:
+            print(f"  - {issue}")
+
+    weak_dims = summary.get("weak_dims", [])
+    print()
+    if recommendation == "ENABLE_LLM":
+        print(f"{GREEN}最终建议：启用 LLM 叙事（5 个维度全面优于结构化）。{RESET}")
+        return 0
+    print(f"{RED}最终建议：KEEP_STRUCTURED —— 继续调 prompt 后再评估。{RESET}")
+    if weak_dims:
+        print(f"{YELLOW}待改进维度：{', '.join(weak_dims)}{RESET}")
+    print("把 report.md 发给 Codex 作为下一轮 prompt 调整依据。")
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

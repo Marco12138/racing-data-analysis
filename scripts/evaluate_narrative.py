@@ -36,10 +36,15 @@ from backend.app.analysis.llm_narrative import (  # noqa: E402
     generate_llm_narrative,
 )
 from backend.app.analysis.xrk_session_analysis import generate_xrk_report  # noqa: E402
+from verify_llm_config import VerifyError, config_from_env  # noqa: E402
 
 DEMO_ARTIFACT = REPOSITORY_ROOT / "public/demo/reviewed-real-session.json"
 SAMPLES_DIR = REPOSITORY_ROOT / "tmp/narrative_eval/samples"
 FORBIDDEN_SAFETY = ("理论圈", "合成圈", "synthetic target lap", "synthetic rpm")
+
+COST_PER_1M_TOKENS: dict[str, dict[str, float]] = {
+    "deepseek-chat": {"input": 0.27, "output": 1.10},
+}
 
 
 def score_specificity(text: str | None) -> int:
@@ -151,12 +156,18 @@ def load_samples(limit: int) -> list[dict[str, Any]]:
 async def evaluate_session(
     session: dict[str, Any],
     languages: list[str],
+    *,
+    dry_run: bool = False,
 ) -> list[dict[str, Any]]:
     analysis = session["analysis"]
     evidence = build_xrk_narrative_evidence(analysis)
     rows: list[dict[str, Any]] = []
     for language in languages:
-        llm_text = await generate_llm_narrative(evidence, language=language)
+        llm_text = (
+            None
+            if dry_run
+            else await generate_llm_narrative(evidence, language=language)
+        )
         structured_text = generate_xrk_report(analysis, language=language)
         llm_eval = evaluate_text(llm_text, language, analysis)
         structured_eval = evaluate_text(structured_text, language, analysis)
@@ -174,6 +185,7 @@ async def evaluate_session(
                 issues.append("llm 出现理论圈/合成圈等违规表述")
             if not re.search(r"弯|Zone|Corner|Sector|\bm\b", llm_text or "", re.IGNORECASE):
                 issues.append("llm 未提及具体弯角编号")
+        token_usage, cost_estimate = estimate_usage(evidence, llm_text)
         rows.append(
             {
                 "inspection_id": session["inspection_id"],
@@ -182,12 +194,38 @@ async def evaluate_session(
                 "model": _llm_config()[2] if _llm_config() is not None else None,
                 "llm_narrative": llm_text,
                 "structured_fallback": structured_text,
+                "token_usage": token_usage,
+                "cost_estimate": cost_estimate,
                 "specificity_score": {"llm": llm_eval["specificity_score"], "structured": structured_eval["specificity_score"]},
                 "issues": issues,
                 "dims": {"llm": llm_eval, "structured": structured_eval},
             }
         )
     return rows
+
+
+def estimate_usage(
+    evidence: dict[str, Any],
+    llm_text: str | None,
+) -> tuple[dict[str, int], dict[str, Any]]:
+    """Estimate tokens and cost without exposing any secret."""
+    input_tokens = max(1, len(json.dumps(evidence, ensure_ascii=False)) // 4)
+    output_tokens = max(0, len(llm_text or "") // 4)
+    model = _llm_config()[2] if _llm_config() is not None else None
+    rates = COST_PER_1M_TOKENS.get(model or "")
+    if rates is None:
+        return (
+            {"estimated_input_tokens": input_tokens, "estimated_output_tokens": output_tokens},
+            {"estimated_usd": None, "note": "未知模型定价，跳过成本估算"},
+        )
+    cost = (
+        input_tokens / 1_000_000 * rates["input"]
+        + output_tokens / 1_000_000 * rates["output"]
+    )
+    return (
+        {"estimated_input_tokens": input_tokens, "estimated_output_tokens": output_tokens},
+        {"estimated_usd": round(cost, 5), "note": "按模型单价估算，仅供参考"},
+    )
 
 
 def compare_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
@@ -210,15 +248,69 @@ def compare_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
     return tally
 
 
+def decide_recommendation(
+    rows: list[dict[str, Any]],
+    tally: dict[str, dict[str, int]],
+) -> tuple[str, list[str]]:
+    """Return (overall_recommendation, weak_dims)."""
+    llm_generated = sum(1 for row in rows if row["llm_narrative"] is not None)
+    if llm_generated == 0:
+        return (
+            "KEEP_STRUCTURED",
+            ["llm 未生成任何叙事（未配置或全部回退）"],
+        )
+    weak_dims: list[str] = []
+    for dim, counts in tally.items():
+        if counts["llm_win"] <= counts["structured_win"]:
+            weak_dims.append(dim)
+    if not weak_dims:
+        return "ENABLE_LLM", []
+    return "KEEP_STRUCTURED", weak_dims
+
+
+def write_report(out_dir: Path, summary: dict[str, Any], rows: list[dict[str, Any]]) -> None:
+    lines = [
+        "# LLM 叙事质量评估报告",
+        "",
+        f"- 生成时间：{summary['generated_at']}",
+        f"- 样本 session 数：{summary['sessions']}",
+        f"- 评估调用数：{summary['calls']}",
+        f"- 结论：**{summary['overall_recommendation']}**",
+    ]
+    if summary.get("weak_dims"):
+        lines.append(f"- 待改进维度：{', '.join(summary['weak_dims'])}")
+    lines.extend(["", "## 各维度胜率（LLM vs 结构化）", "", "| 维度 | LLM 胜 | 结构化胜 | 平局 |", "| --- | --- | --- | --- |"])
+    for dim, counts in summary["win_rate"].items():
+        lines.append(f"| {dim} | {counts['llm_win']} | {counts['structured_win']} | {counts['tie']} |")
+    lines.extend(["", "## 样本明细", ""])
+    for row in rows:
+        lines.append(
+            f"- {row['inspection_id']} ({row['language']})："
+            f"具体性 LLM={row['specificity_score']['llm']} / 结构化={row['specificity_score']['structured']}；"
+            f"issues：{'; '.join(row['issues']) if row['issues'] else '无'}"
+        )
+    lines.append("")
+    (out_dir / "report.md").write_text("\n".join(lines), encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--languages", default="zh,en")
+    parser.add_argument("--output-dir", type=Path, default=None)
+    parser.add_argument("--dry-run", action="store_true", help="不调用 LLM，只生成结构化样本")
     args = parser.parse_args()
     languages = [item.strip() for item in args.languages.split(",") if item.strip() in {"zh", "en"}]
     if not languages:
         print("--languages must contain zh and/or en", file=sys.stderr)
         return 2
+    if not args.dry_run:
+        try:
+            config_from_env()
+        except VerifyError as exc:
+            print(f"错误：{exc}", file=sys.stderr)
+            print("使用 --dry-run 可跳过 LLM，仅生成结构化样本。", file=sys.stderr)
+            return 2
 
     samples = load_samples(max(1, min(args.limit, 10)))
     if not samples:
@@ -226,12 +318,12 @@ def main() -> int:
         return 1
 
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    out_dir = REPOSITORY_ROOT / "tmp/narrative_eval" / timestamp
+    out_dir = args.output_dir or (REPOSITORY_ROOT / "tmp/narrative_eval" / timestamp)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     all_rows: list[dict[str, Any]] = []
     for session in samples:
-        rows = asyncio.run(evaluate_session(session, languages))
+        rows = asyncio.run(evaluate_session(session, languages, dry_run=args.dry_run))
         all_rows.extend(rows)
         for row in rows:
             target = out_dir / f"{row['inspection_id']}_{row['language']}.json"
@@ -244,6 +336,8 @@ def main() -> int:
                     "model",
                     "llm_narrative",
                     "structured_fallback",
+                    "token_usage",
+                    "cost_estimate",
                     "specificity_score",
                     "issues",
                 )
@@ -253,18 +347,24 @@ def main() -> int:
                 encoding="utf-8",
             )
 
+    tally = compare_rows(all_rows)
+    recommendation, weak_dims = decide_recommendation(all_rows, tally)
     summary = {
         "generated_at": datetime.now(UTC).isoformat(),
         "sessions": len(samples),
         "calls": len(all_rows),
-        "win_rate": compare_rows(all_rows),
+        "dry_run": args.dry_run,
+        "win_rate": tally,
+        "overall_recommendation": recommendation,
+        "weak_dims": weak_dims,
     }
     (out_dir / "summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    write_report(out_dir, summary, all_rows)
     print(f"Evaluated {len(samples)} sessions x {len(languages)} languages -> {out_dir}")
-    print(json.dumps(summary["win_rate"], ensure_ascii=False, indent=2))
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 
 
