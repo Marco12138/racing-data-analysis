@@ -6,6 +6,7 @@ import asyncio
 import re
 import secrets
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 import pandas as pd
 from fastapi import APIRouter, Request
@@ -38,6 +39,7 @@ class StoryboardCreateRequest(BaseModel):
 
     analysis: XrkAnalyzeRequest
     alignment: StoryboardAlignmentRequest
+    language: Literal["zh", "en"] = "en"
 
 
 @router.post("/storyboard", response_model=StoryboardResponse)
@@ -78,6 +80,7 @@ async def create_storyboard(
                 "relative_gap_threshold_pct": payload.analysis.lap_quality_relative_gap_pct,
             },
             max_comparison_points=settings.xrk_max_comparison_points,
+            language=payload.language,
         )
         storyboard = await asyncio.to_thread(
             build_storyboard,
@@ -91,6 +94,7 @@ async def create_storyboard(
                 video_time_s=payload.alignment.video_time_s,
             ),
             max_nodes=5,
+            language=payload.language,
         )
     except ValueError as exc:
         raise PublicApiError(

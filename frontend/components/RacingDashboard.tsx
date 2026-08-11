@@ -78,6 +78,7 @@ import { XrkInspectionWorkspace } from "./XrkInspectionWorkspace";
 import { MultiSessionWorkspace } from "./MultiSessionWorkspace";
 import { NewSessionCard } from "./NewSessionCard";
 import { commitPendingVideo, isXrkFileName } from "../lib/sessionUpload";
+import { useI18n } from "../lib/i18n";
 import {
   clearVideoJob,
   createVideoJob,
@@ -100,6 +101,7 @@ const demoLapRows = normalizeLapRows(parseCsv(sampleLapCsv));
 const demoTelemetryRows = normalizeTelemetryRows(parseCsv(sampleTelemetryCsv));
 
 export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean }) {
+  const { locale } = useI18n();
   const [lapRows, setLapRows] = useState(() => initialDemo ? [...demoLapRows] : normalizeLapRows([]));
   const [telemetryRows, setTelemetryRows] = useState(() => initialDemo ? [...demoTelemetryRows] : normalizeTelemetryRows([]));
   const [driverName, setDriverName] = useState(initialDemo ? "Demo Driver" : "Driver");
@@ -324,6 +326,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       const result = await analyzeXrkInspection(
         {
           inspection_id: inspection.inspection_id,
+          language: locale === "zh" ? "zh" : "en",
           reference_lap: options.reference_lap ?? xrkAnalysis?.reference_lap ?? null,
           target_lap: options.target_lap ?? xrkAnalysis?.target_lap ?? null,
           distance_step_m: options.distance_step_m ?? 1,

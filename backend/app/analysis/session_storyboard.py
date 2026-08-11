@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 
 from .llm_narrative import _llm_config, _numbers_are_grounded
+from .text_locale import is_specific_text, localize_pattern
 
 STORYBOARD_SCHEMA_VERSION = 1
 WATERMARK = "AI 生成，请与教练核实"
@@ -28,6 +29,31 @@ DEFAULT_TTL_SECONDS = 7 * 24 * 3600
 NARRATIVE_CACHE_TTL_SECONDS = 6 * 3600
 
 logger = logging.getLogger("racing.storyboard")
+
+STORYBOARD_SYSTEM_PROMPT = """你是一名谨慎的卡丁车数据复盘教练，负责把一次 session 的关键洞察
+组织成 60-90 秒的复盘内容。对每个教学时刻输出三项，全部使用 {language}：
+title：一句短视频标题，必须包含证据中的数字（距离/时间/转速）；
+insight：1-2 句教练建议，只复述证据中已有的数字；
+drill：1 条可执行练习建议，必须包含练习动作、具体距离与停止条件。
+只返回 JSON 数组：[{{"id":"...","title":"...","insight":"...","drill":"..."}}]。
+禁止编造证据之外的数字、合成圈或理论圈；禁止使用“注意”“改善”“提高”
+“overall”“generally”“try to improve”等没有数字的宽泛措辞；
+证据不足时用“证据不足，暂不建议改变现有操作”明确说明。
+
+好示例（含弯角、距离、时间与练习）：
+{{"id":"corner-4","title":"第 4 弯：更早恢复油门，净收益 0.24s",
+"insight":"真实圈 10、13 在 512.4-590.0 m 提前恢复油门，净收益 0.24s。",
+"drill":"练习：连续 3 圈只改恢复点，在 540 m 对比弯心出口速度。停止条件：若出弯速度下降，停止实验。"}}
+
+{{"id":"corner-1","title":"第 1 弯：抬油门位置稳定，净收益 0.05s",
+"insight":"真实圈 8、13 的抬油门位置均为 110 m，净收益 0.05s。",
+"drill":"练习：连续 3 圈保持抬油门点不变，对比 Sector 1 用时。停止条件：若弯中最低速度下降，停止实验。"}}
+
+差示例（宽泛、无数字，禁止模仿）：
+{{"id":"corner-4","title":"第 4 弯：注意改善",
+"insight":"整体表现一般，建议提高稳定性。",
+"drill":"try to improve 综合表现。"}}
+"""
 
 # In-process narrative cache keyed by the evidence fingerprint so an identical
 # session/analysis does not pay repeated LLM calls. Failures are never cached.
@@ -120,6 +146,7 @@ def select_teaching_moments(
                 "pattern": _first_pattern(corner),
                 "what_to_test": str((priority or {}).get("what_to_test") or ""),
                 "training_drill": str((priority or {}).get("training_drill") or ""),
+                "stop_condition": str((priority or {}).get("stop_condition") or ""),
             }
         )
 
@@ -139,6 +166,7 @@ def build_storyboard(
     alignment: StoryboardAlignment,
     max_nodes: int = MAX_NODES,
     llm_client: httpx.AsyncClient | None = None,
+    language: str = "en",
 ) -> dict[str, Any]:
     """Build the complete storyboard payload from analyzed real evidence."""
     if alignment.video_duration_s <= 0 or not np.isfinite(alignment.video_duration_s):
@@ -173,15 +201,15 @@ def build_storyboard(
                 {
                     "id": f"corner-{_corner_number(moment['corner'], moment['corner_id'])}",
                     "kind": "corner",
-                    "title": _fallback_title(moment),
+                    "title": _fallback_title(moment, language),
                     "time_range": video_range,
                     "distance_range_m": [
                         round(float(moment["entry_distance_m"]), 3),
                         round(float(moment["exit_distance_m"]), 3),
                     ],
                     "telemetry_overlay": overlay,
-                    "insight": _fallback_insight(moment),
-                    "drill": _fallback_drill(moment),
+                    "insight": _fallback_insight(moment, language),
+                    "drill": _fallback_drill(moment, language),
                     "evidence_laps": moment["supporting_laps"],
                     "net_gain_s": round(float(moment["net_gain"]), 3),
                     "corner": {
@@ -207,15 +235,15 @@ def build_storyboard(
                 {
                     "id": f"event-{moment['event_index']}",
                     "kind": "event",
-                    "title": _fallback_event_title(moment),
+                    "title": _fallback_event_title(moment, language),
                     "time_range": video_range,
                     "distance_range_m": [
                         round(float(moment["start_distance_m"]), 3),
                         round(float(moment["end_distance_m"]), 3),
                     ],
                     "telemetry_overlay": overlay,
-                    "insight": _fallback_event_insight(moment),
-                    "drill": _fallback_event_drill(moment),
+                    "insight": _fallback_event_insight(moment, language),
+                    "drill": _fallback_event_drill(moment, language),
                     "evidence_laps": [int(moment["lap"])],
                     "corner": None,
                     "source": "structured",
@@ -235,6 +263,7 @@ def build_storyboard(
         nodes,
         analysis,
         client=llm_client,
+        language=language,
     )
     if generated:
         for node, copy in zip(nodes, generated, strict=True):
@@ -270,11 +299,12 @@ def _generate_or_load_narrative(
     analysis: dict[str, Any],
     *,
     client: httpx.AsyncClient | None = None,
+    language: str = "en",
 ) -> list[dict[str, Any]] | None:
     """Return cached or freshly generated node copies (None keeps structured)."""
     if not nodes or _llm_config() is None:
         return None
-    cache_key = _narrative_cache_key(analysis, nodes)
+    cache_key = _narrative_cache_key(analysis, nodes, language)
     cached = _narrative_cache_get(cache_key)
     if cached is not None:
         narrative_stats["cache_hits"] += 1
@@ -290,6 +320,7 @@ def _generate_or_load_narrative(
                 nodes,
                 analysis,
                 client=client,
+                language=language,
             )
         )
     except RuntimeError:
@@ -302,12 +333,13 @@ def _generate_or_load_narrative(
 def _narrative_cache_key(
     analysis: dict[str, Any],
     nodes: list[dict[str, Any]],
+    language: str = "en",
 ) -> str:
     fingerprint = str(analysis.get("file_fingerprint") or "unknown")
     reference_lap = analysis.get("reference_lap")
     target_lap = analysis.get("target_lap")
     node_ids = "|".join(str(node.get("id")) for node in nodes)
-    return f"{fingerprint}:{reference_lap}:{target_lap}:{node_ids}"
+    return f"{language}:{fingerprint}:{reference_lap}:{target_lap}:{node_ids}"
 
 
 def _narrative_cache_get(key: str) -> list[dict[str, Any]] | None:
@@ -380,6 +412,7 @@ def _event_moments(analysis: dict[str, Any], *, max_nodes: int) -> list[dict[str
                 "confidence": str(event.get("confidence") or "medium"),
                 "training_drill": str(priority.get("training_drill") or "").strip(),
                 "what_to_test": str(priority.get("what_to_test") or "").strip(),
+                "stop_condition": str(priority.get("stop_condition") or "").strip(),
             }
         )
     return moments
@@ -608,49 +641,113 @@ def _first_pattern(corner: dict[str, Any]) -> str:
     return str(patterns[0]) if patterns else ""
 
 
-def _fallback_title(moment: dict[str, Any]) -> str:
+def _fallback_title(moment: dict[str, Any], language: str = "en") -> str:
     number = _corner_number(moment["corner"], moment["corner_id"])
     gain = float(moment["net_gain"])
-    prefix = f"第 {number} 弯" if number else str(moment["corner"])
-    return f"{prefix}：可改进 {gain:.2f} 秒"
+    if language == "zh":
+        prefix = f"第 {number} 弯" if number else str(moment["corner"])
+        return f"{prefix}：可改进 {gain:.2f} 秒"
+    prefix = f"Corner {number}" if number else str(moment["corner"])
+    return f"{prefix}: improve {gain:.2f}s"
 
 
-def _fallback_insight(moment: dict[str, Any]) -> str:
-    pattern = moment.get("pattern") or ""
+def _fallback_insight(moment: dict[str, Any], language: str = "en") -> str:
+    pattern = localize_pattern(moment.get("pattern") or "", language)
     laps = ", ".join(str(lap) for lap in moment["supporting_laps"][:3])
-    base = f"基于真实圈 {laps} 的净收益 {moment['net_gain']:.2f} 秒"
-    return f"{base}。{pattern}。" if pattern else f"{base}。"
+    corner = moment.get("corner") or ""
+    entry = float(moment["entry_distance_m"])
+    exit_m = float(moment["exit_distance_m"])
+    if language == "zh":
+        base = (
+            f"真实圈 {laps} 在 {corner}（{entry:.0f}-{exit_m:.0f} m）"
+            f"净收益 {moment['net_gain']:.2f} 秒"
+        )
+        return f"{base}。{pattern}。" if pattern else f"{base}。"
+    base = (
+        f"Real laps {laps} show a net gain of {moment['net_gain']:.2f}s "
+        f"at {corner} ({entry:.0f}-{exit_m:.0f} m)"
+    )
+    return f"{base}. {pattern}." if pattern else f"{base}."
 
 
-def _fallback_drill(moment: dict[str, Any]) -> str:
+def _fallback_drill(moment: dict[str, Any], language: str = "en") -> str:
+    zh = language == "zh"
+    entry = float(moment["entry_distance_m"])
+    exit_m = float(moment["exit_distance_m"])
     existing = str(moment.get("training_drill") or moment.get("what_to_test") or "").strip()
-    if existing:
-        return existing
+    stop = str(moment.get("stop_condition") or "").strip()
     number = _corner_number(moment.get("corner") or "", moment.get("corner_id") or "")
-    label = f"第 {number} 弯" if number else str(moment.get("corner") or "该区域")
-    return f"在下一节练习中专注 {label}，验证 {moment['net_gain']:.2f}s 净收益是否可重复。"
-
-
-def _fallback_event_title(moment: dict[str, Any]) -> str:
-    label = moment["event_type"].replace("_", " ").title()
-    return f"{label}：真实圈 Lap {moment['lap']} 行为事件"
-
-
-def _fallback_event_insight(moment: dict[str, Any]) -> str:
+    label = (
+        (f"第 {number} 弯" if number else str(moment.get("corner") or "该区域"))
+        if zh
+        else (f"Corner {number}" if number else str(moment.get("corner") or "the area"))
+    )
+    if existing:
+        if zh:
+            return (
+                f"练习：{existing}（{label} {entry:.0f}-{exit_m:.0f} m）。"
+                f"停止条件：{stop or '若出现二次 RPM 下降、轨迹不稳定或下游时间损失，停止实验。'}"
+            )
+        return (
+            f"Drill: {existing} ({label} {entry:.0f}-{exit_m:.0f} m). "
+            f"Stop if: {stop or 'a secondary RPM drop, instability, or downstream time loss appears.'}"
+        )
+    if zh:
+        return (
+            f"练习：下一节专注 {label}（{entry:.0f}-{exit_m:.0f} m），"
+            f"验证 {moment['net_gain']:.2f}s 净收益是否可重复。"
+            "停止条件：若出弯速度下降或下游时间损失，停止实验。"
+        )
     return (
-        f"真实圈 Lap {moment['lap']} 在 {moment['start_distance_m']:.1f}-"
-        f"{moment['end_distance_m']:.1f} 米出现 {moment['event_type']} 事件，"
-        f"置信度 {moment['confidence']}。"
+        f"Drill: next session focus on {label} ({entry:.0f}-{exit_m:.0f} m) "
+        f"and verify the {moment['net_gain']:.2f}s net gain repeats. "
+        "Stop if exit speed drops or downstream time is lost."
     )
 
 
-def _fallback_event_drill(moment: dict[str, Any]) -> str:
-    existing = str(moment.get("training_drill") or moment.get("what_to_test") or "").strip()
-    if existing:
-        return existing
+def _fallback_event_title(moment: dict[str, Any], language: str = "en") -> str:
+    label = moment["event_type"].replace("_", " ").title()
+    if language == "zh":
+        return f"{label}：真实圈第 {moment['lap']} 圈行为事件"
+    return f"{label}: real-lap behavior on Lap {moment['lap']}"
+
+
+def _fallback_event_insight(moment: dict[str, Any], language: str = "en") -> str:
+    if language == "zh":
+        return (
+            f"真实圈第 {moment['lap']} 圈在 {moment['start_distance_m']:.1f}-"
+            f"{moment['end_distance_m']:.1f} m 出现 {moment['event_type']} 事件，"
+            f"置信度 {moment['confidence']}。"
+        )
     return (
-        f"在下一节练习中观察 Lap {moment['lap']} 的 {moment['event_type']} "
-        "行为是否可重复，并与最快圈对比。"
+        f"Real lap {moment['lap']} shows a {moment['event_type']} event between "
+        f"{moment['start_distance_m']:.1f} and {moment['end_distance_m']:.1f} m "
+        f"with {moment['confidence']} confidence."
+    )
+
+
+def _fallback_event_drill(moment: dict[str, Any], language: str = "en") -> str:
+    existing = str(moment.get("training_drill") or moment.get("what_to_test") or "").strip()
+    stop = str(moment.get("stop_condition") or "").strip()
+    if existing:
+        if language == "zh":
+            return (
+                f"练习：{existing}。"
+                f"停止条件：{stop or '若行为不重复或带来时间损失，停止实验。'}"
+            )
+        return (
+            f"Drill: {existing}. "
+            f"Stop if: {stop or 'the behavior does not repeat or costs time.'}"
+        )
+    if language == "zh":
+        return (
+            f"练习：下一节观察第 {moment['lap']} 圈的 {moment['event_type']} "
+            "是否可重复，并与最快圈对比。停止条件：若行为不重复或带来时间损失，停止实验。"
+        )
+    return (
+        f"Drill: next session observe whether the {moment['event_type']} on "
+        f"Lap {moment['lap']} repeats and compare with the fastest lap. "
+        "Stop if it does not repeat or costs time."
     )
 
 
@@ -659,6 +756,7 @@ async def _generate_node_copy(
     analysis: dict[str, Any],
     *,
     client: httpx.AsyncClient | None = None,
+    language: str = "en",
 ) -> list[dict[str, Any]] | None:
     """Ask the configured LLM for per-node title/insight/drill with grounding."""
     base_url, api_key, model = _llm_config()
@@ -675,15 +773,9 @@ async def _generate_node_copy(
             {
                 "role": "system",
                 "content": (
-                    "你是一名谨慎的卡丁车数据复盘教练，负责把一次 session 的关键洞察"
-                    "组织成 60-90 秒的复盘内容。对每个教学时刻输出三项，全部使用中文：\n"
-                    "title：一句短视频标题，可含证据中的数字；\n"
-                    "insight：1-2 句教练建议，只复述证据中已有的数字；\n"
-                    "drill：1 条可执行练习建议。\n"
-                    "只返回 JSON 数组：[{\"id\":\"...\",\"title\":\"...\","
-                    "\"insight\":\"...\",\"drill\":\"...\"}]。"
-                    "禁止编造证据之外的数字、合成圈或理论圈；证据不足时用"
-                    "“证据不足，暂不建议改变现有操作”明确说明。"
+                    STORYBOARD_SYSTEM_PROMPT.format(
+                        language="中文" if language == "zh" else "English"
+                    )
                 ),
             },
             {"role": "user", "content": prompt},
@@ -742,6 +834,14 @@ async def _generate_node_copy(
                 narrative_stats["failures"] += 1
                 logger.warning(
                     "storyboard_narrative failure reason=ungrounded node=%s",
+                    node.get("id"),
+                )
+                result.append({})
+                continue
+            if not is_specific_text(combined, language):
+                narrative_stats["failures"] += 1
+                logger.warning(
+                    "storyboard_narrative failure reason=unspecific node=%s",
                     node.get("id"),
                 )
                 result.append({})
