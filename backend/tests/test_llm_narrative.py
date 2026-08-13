@@ -163,15 +163,18 @@ def test_llm_success_uses_summary_evidence_only(
                     {
                         "message": {
                             "content": (
-                                "训练重点一：复现 Zone 4 的恢复节奏\n"
+                                "训练重点一：Zone 4（512.4-590.0 m）保持 RPM 恢复\n"
                                 "对应证据：Lap 13 为 40.326s，净收益为 0.24s。\n"
-                                "练习建议：使用同一参考点复现持续 RPM 恢复。\n"
-                                "训练重点二：保持下游表现\n"
-                                "对应证据：下游代价为 0.0s。\n"
-                                "练习建议：每圈检查出弯后速度是否保持。\n"
-                                "训练重点三：暂不确认制动\n"
-                                "对应证据：没有直接制动通道。\n"
-                                "练习建议：请结合教练观察验证。"
+                                "练习建议：在 512.4 m 只测试持续 RPM 恢复并核对 0.24s。\n"
+                                "停止条件：若下游代价高于 0.0s，停止实验。\n"
+                                "训练重点二：Zone 4（512.4-590.0 m）保持最低 RPM\n"
+                                "对应证据：参考圈为 8740 rpm，目标圈为 8420 rpm。\n"
+                                "练习建议：在 512.4 m 保持 RPM，并核对 8420 rpm。\n"
+                                "停止条件：若 RPM 低于 8420 rpm，停止实验。\n"
+                                "训练重点三：Zone 4（512.4-590.0 m）核对收油动作\n"
+                                "对应证据：Lap 10 在 24.1s 出现 LIFTING。\n"
+                                "练习建议：在 512.4 m 只调整收油动作并核对 24.1s。\n"
+                                "停止条件：若净收益低于 0.24s，停止实验。"
                             )
                         }
                     }
@@ -182,12 +185,13 @@ def test_llm_success_uses_summary_evidence_only(
     evidence = build_xrk_narrative_evidence(analysis_result())
     async def run() -> str | None:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            return await generate_llm_narrative(evidence, client=client)
+            return await generate_llm_narrative(evidence, client=client, language="zh")
 
     narrative = asyncio.run(run())
     assert narrative is not None
     assert "40.326s" in narrative
     prompt = captured["messages"][1]["content"]
+    assert "数字白名单" in prompt
     assert '"comparison"' not in prompt
     assert '"track"' not in prompt
     assert '"channels"' not in prompt
@@ -197,6 +201,14 @@ def test_llm_success_uses_summary_evidence_only(
     assert "12223" not in prompt
     assert "raw_window" not in prompt
     assert "raw_trace" not in prompt
+
+
+def test_llm_evidence_rounds_display_precision_without_touching_raw_result() -> None:
+    result = analysis_result()
+    result["zones"]["comparisons"][0]["findings"][0]["reference"] = 8740.123456
+    evidence = build_xrk_narrative_evidence(result)
+    assert evidence["zone_comparisons"][0]["findings"][0]["reference"] == 8740.123
+    assert result["zones"]["comparisons"][0]["findings"][0]["reference"] == 8740.123456
 
 
 def test_llm_missing_configuration_returns_none(

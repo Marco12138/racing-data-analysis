@@ -256,18 +256,36 @@ def test_llm_narrative_rejects_vague_output_and_forwards_language(
     assert vague is None
 
     specific = _run_with_transport(
-        "训练重点一：Zone 4（512.4-590.0 m）更早恢复油门，净收益 0.24s。\n"
+        "训练重点一：Zone 4（512.4-590.0 m）保持油门恢复。\n"
         "对应证据：真实圈 13、8，净收益 0.24s。\n"
-        "练习建议：连续练习，在 512.4 m 对比弯心出口速度。",
+        "练习建议：在 512.4 m 只测试油门恢复并核对 0.24s。\n"
+        "停止条件：若损失高于 0.24s，停止实验。\n"
+        "训练重点二：Zone 4（512.4-590.0 m）保持速度。\n"
+        "对应证据：最快圈为 40.326s，净收益 0.24s。\n"
+        "练习建议：在 590.0 m 核对速度对应的 0.24s。\n"
+        "停止条件：若损失高于 0.24s，停止实验。\n"
+        "训练重点三：Zone 4（512.4-590.0 m）保持 RPM 恢复。\n"
+        "对应证据：真实圈 13、8，净收益 0.24s。\n"
+        "练习建议：在 512.4 m 只测试 RPM 恢复并核对 0.24s。\n"
+        "停止条件：若损失高于 0.24s，停止实验。",
         "zh",
     )
     assert specific is not None
     assert "0.24s" in specific
 
     english = _run_with_transport(
-        "Priority: earlier throttle recovery at Zone 4 (512.4-590.0 m).\n"
+        "Training focus one: hold throttle recovery at Zone 4 (512.4-590.0 m).\n"
         "Evidence: real laps 13 and 8, net gain 0.24s.\n"
-        "Drill: practice and compare corner-exit speed at 512.4 m.",
+        "Drill: hold the recovery action at 512.4 m and verify 0.24s.\n"
+        "Stop condition: stop when loss exceeds 0.24s.\n"
+        "Training focus two: maintain speed at Zone 4 (512.4-590.0 m).\n"
+        "Evidence: fastest lap is 40.326s and net gain is 0.24s.\n"
+        "Drill: hold speed at 590.0 m and verify 0.24s.\n"
+        "Stop condition: stop when loss exceeds 0.24s.\n"
+        "Training focus three: maintain RPM at Zone 4 (512.4-590.0 m).\n"
+        "Evidence: real laps 13 and 8, net gain 0.24s.\n"
+        "Drill: hold RPM recovery at 512.4 m and verify 0.24s.\n"
+        "Stop condition: stop when loss exceeds 0.24s.",
         "en",
     )
     assert english is not None

@@ -75,6 +75,9 @@ class StoryboardAnalysisSummary(DemoModel):
     reference_lap: int | None = None
     target_lap: int | None = None
     fastest_lap: dict | None = None
+    driver: str | None = None
+    vehicle: str | None = None
+    track: str | None = None
 
 
 class StoryboardAlignmentInfo(DemoModel):

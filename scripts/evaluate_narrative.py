@@ -37,6 +37,7 @@ from backend.app.analysis.llm_narrative import (  # noqa: E402
 )
 from backend.app.analysis.xrk_session_analysis import generate_xrk_report  # noqa: E402
 from verify_llm_config import VerifyError, verify_from_env  # noqa: E402
+from analyze_eval_report import analyze_evaluation_directory  # noqa: E402
 
 DEMO_ARTIFACT = REPOSITORY_ROOT / "public/demo/reviewed-real-session.json"
 SAMPLES_DIR = REPOSITORY_ROOT / "tmp/narrative_eval/samples"
@@ -68,7 +69,7 @@ def language_ok(text: str | None, language: str) -> bool:
         return False
     cjk = len(re.findall(r"[\u4e00-\u9fff]", text))
     ratio = cjk / max(1, len(text))
-    return ratio >= 0.3 if language == "zh" else ratio < 0.3
+    return ratio >= 0.3 if language == "zh" else cjk == 0
 
 
 def is_executable(text: str | None) -> bool:
@@ -434,7 +435,9 @@ def main() -> int:
         encoding="utf-8",
     )
     write_report(out_dir, summary, all_rows)
+    refinement_report = analyze_evaluation_directory(out_dir)
     print(f"Evaluated {len(samples)} sessions x {len(languages)} languages -> {out_dir}")
+    print(f"Prompt refinement report: {refinement_report}")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 

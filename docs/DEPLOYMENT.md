@@ -189,6 +189,36 @@ evidence, the API omits `narrative` and keeps the existing template report.
 Cloud mode accepts only an HTTPS LLM endpoint. Never expose `LLM_API_KEY` to
 the frontend or give it a `NEXT_PUBLIC_` prefix.
 
+### LLM 质量迭代与反馈闭环
+
+每次调整 Prompt 后，按同一组真实 session 重复以下流程：
+
+```bash
+python scripts/evaluate_narrative.py --limit 10 --languages zh,en
+python scripts/analyze_eval_report.py
+python scripts/render_feedback_stats.py
+```
+
+- `evaluate_narrative.py` 会在评估目录中自动生成
+  `prompt_refinement_report.md`；独立运行 `analyze_eval_report.py` 可重新分析
+  最新结果，归类缺少弯角锚点、练习不具体、语言混用、未落地数字和禁词。
+- `render_feedback_stats.py` 以只读方式统计 SQLite 的
+  `narrative_feedback`，按 source、locale、node_id 聚合赞踩，并列出被点踩最多
+  的节点和模式。部署环境使用持久卷时，应在能读取该卷的后端环境中运行；也可用
+  `--database /path/to/sessions.sqlite3` 指定副本。脚本不会修改数据库。
+- Prompt 或后处理改动只有在真实样本五个维度均优于结构化基线时才可发布。
+  命中禁词、没有证据数字或缺少“位置 + 动作 + 练习 + 停止条件”时继续回退。
+
+### 微信分享长图
+
+打开一个已生成的复盘短片，在操作区选择“导出朋友圈长图”。浏览器会在本地生成
+1080×1920 PNG，包含车手、车辆、赛道、最快真实有效圈、前三个教学点、分享页
+二维码和 AI 核实水印。二维码和图片均在浏览器中生成，视频不会上传服务器。
+
+公开分享页会从后端读取 storyboard 摘要生成动态 Open Graph 标题，并使用
+`public/og.png` 作为静态品牌图。部署前确认 Vercel 的 `API_URL` 能由服务端访问，
+否则分享页本身仍可打开，但爬虫无法取得最快圈标题。
+
 Railway sends deployment health checks with `healthcheck.railway.app` as the
 Host header. Keep that hostname in `ALLOWED_HOSTS` so Trusted Host validation
 accepts the platform health check.

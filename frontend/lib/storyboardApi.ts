@@ -34,6 +34,9 @@ export type StoryboardResponse = {
     reference_lap: number | null;
     target_lap: number | null;
     fastest_lap: { lap: number; lap_time: number } | null;
+    driver: string | null;
+    vehicle: string | null;
+    track: string | null;
   };
   video: { duration_s: number; required: boolean; uploaded: boolean };
   alignment: StoryboardAlignmentInfo | null;
@@ -143,6 +146,9 @@ export function parseStoryboardResponse(value: unknown): StoryboardResponse | nu
       fastest_lap: isRecord(value.analysis.fastest_lap)
         ? { lap: value.analysis.fastest_lap.lap, lap_time: value.analysis.fastest_lap.lap_time }
         : null,
+      driver: textOrNull(value.analysis.driver),
+      vehicle: textOrNull(value.analysis.vehicle),
+      track: textOrNull(value.analysis.track),
     },
     video: {
       duration_s: value.video.duration_s,
@@ -334,6 +340,10 @@ function allFinite(value: unknown): boolean {
 
 function finiteOrNull(value: unknown): number | null {
   return isFiniteNumber(value) ? value : null;
+}
+
+function textOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function isFiniteNumber(value: unknown): value is number {

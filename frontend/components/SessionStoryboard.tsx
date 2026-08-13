@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { toPng } from "html-to-image";
+import QRCode from "qrcode";
 import {
   ChevronLeft,
   ChevronRight,
@@ -11,6 +12,7 @@ import {
   Link2,
   Play,
   Sparkles,
+  Smartphone,
   Target,
   ThumbsDown,
   ThumbsUp,
@@ -29,6 +31,7 @@ import { useI18n } from "../lib/i18n";
 import { resolveApiConfig } from "../lib/config";
 import { submitNarrativeFeedback } from "../lib/feedbackApi";
 import type { StoryboardNode, StoryboardResponse } from "../lib/storyboardApi";
+import { StoryboardWechatCard } from "./StoryboardWechatCard";
 
 export function SessionStoryboard({
   storyboard,
@@ -46,10 +49,13 @@ export function SessionStoryboard({
   const [copiedLink, setCopiedLink] = useState(false);
   const [exportAllOpen, setExportAllOpen] = useState(false);
   const [exportAllBusy, setExportAllBusy] = useState(false);
-  const [feedbackSent, setFeedbackSent] = useState<string | null>(null);
+  const [wechatExportBusy, setWechatExportBusy] = useState(false);
+  const [wechatQrDataUrl, setWechatQrDataUrl] = useState("");
+  const [feedbackSent, setFeedbackSent] = useState<{ nodeId: string; thumbsUp: boolean } | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const exportAllRef = useRef<HTMLDivElement>(null);
+  const wechatExportRef = useRef<HTMLElement>(null);
   const node = storyboard.nodes[Math.min(page, storyboard.nodes.length - 1)];
   const [renderedToken, setRenderedToken] = useState(storyboard.token);
   if (renderedToken !== storyboard.token) {
@@ -63,6 +69,22 @@ export function SessionStoryboard({
     video.pause();
     video.currentTime = node.time_range[0];
   }, [page, node, videoUrl]);
+
+  useEffect(() => {
+    let active = true;
+    if (!shareUrl) return () => { active = false; };
+    void QRCode.toDataURL(shareUrl, {
+      width: 220,
+      margin: 1,
+      errorCorrectionLevel: "M",
+      color: { dark: "#091018", light: "#ffffff" },
+    }).then((dataUrl) => {
+      if (active) setWechatQrDataUrl(dataUrl);
+    }).catch(() => {
+      if (active) setWechatQrDataUrl("");
+    });
+    return () => { active = false; };
+  }, [shareUrl]);
 
   const togglePlayback = useCallback(() => {
     const video = videoRef.current;
@@ -155,6 +177,26 @@ export function SessionStoryboard({
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, [storyboard]);
 
+  const exportWechatImage = useCallback(async () => {
+    if (!wechatExportRef.current || !wechatQrDataUrl) return;
+    setWechatExportBusy(true);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    try {
+      const dataUrl = await toPng(wechatExportRef.current, {
+        width: 1080,
+        height: 1920,
+        pixelRatio: 1,
+        backgroundColor: "#091018",
+      });
+      const anchor = document.createElement("a");
+      anchor.href = dataUrl;
+      anchor.download = `ai-review-${storyboard.token}-wechat-1080x1920.png`;
+      anchor.click();
+    } finally {
+      setWechatExportBusy(false);
+    }
+  }, [storyboard.token, wechatQrDataUrl]);
+
   const sendFeedback = useCallback(async (nodeId: string, thumbsUp: boolean) => {
     try {
       const config = await resolveApiConfig();
@@ -164,16 +206,16 @@ export function SessionStoryboard({
         {
           node_id: nodeId,
           token: storyboard.token,
-          source: "storyboard",
+          source: node.source,
           locale: locale === "zh" ? "zh" : "en",
           thumbs_up: thumbsUp,
         },
       );
-      if (ok) setFeedbackSent(nodeId);
+      if (ok) setFeedbackSent({ nodeId, thumbsUp });
     } catch {
       // Feedback is optional; failures should not block the review.
     }
-  }, [storyboard.token, locale]);
+  }, [storyboard.token, node.source, locale]);
 
   if (storyboard.nodes.length === 0) return null;
 
@@ -191,6 +233,14 @@ export function SessionStoryboard({
           </button>
           <button type="button" className="story-button" onClick={() => setExportAllOpen(true)}>
             <ImageIcon size={16} /> {t("story.exportAll")}
+          </button>
+          <button
+            type="button"
+            className="story-button"
+            onClick={exportWechatImage}
+            disabled={wechatExportBusy || !wechatQrDataUrl}
+          >
+            <Smartphone size={16} /> {wechatExportBusy ? t("story.exporting") : t("story.exportWechat")}
           </button>
           <button type="button" className="story-button" onClick={exportJson}>
             <Download size={16} /> {t("story.exportJson")}
@@ -233,7 +283,8 @@ export function SessionStoryboard({
           onTogglePlayback={togglePlayback}
           onTimeUpdate={onTimeUpdate}
           onFeedback={(thumbsUp) => void sendFeedback(node.id, thumbsUp)}
-          feedbackSent={feedbackSent === node.id}
+          feedbackSent={feedbackSent?.nodeId === node.id}
+          feedbackWasHelpful={feedbackSent?.nodeId === node.id ? feedbackSent.thumbsUp : null}
         />
         {exporting ? <span className="storyboard__big-watermark">{storyboard.watermark}</span> : null}
       </div>
@@ -267,6 +318,15 @@ export function SessionStoryboard({
           </div>
         </div>
       ) : null}
+      {wechatQrDataUrl ? (
+        <div className="storyboard-wechat-export-stage" aria-hidden="true">
+          <StoryboardWechatCard
+            storyboard={storyboard}
+            qrDataUrl={wechatQrDataUrl}
+            cardRef={wechatExportRef}
+          />
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -281,6 +341,7 @@ function StoryCard({
   onTimeUpdate,
   onFeedback,
   feedbackSent = false,
+  feedbackWasHelpful = null,
 }: {
   node: StoryboardNode;
   videoUrl: string | null;
@@ -291,6 +352,7 @@ function StoryCard({
   onTimeUpdate: () => void;
   onFeedback?: (thumbsUp: boolean) => void;
   feedbackSent?: boolean;
+  feedbackWasHelpful?: boolean | null;
 }) {
   const { t } = useI18n();
   return (
@@ -351,7 +413,12 @@ function StoryCard({
             >
               <ThumbsDown size={14} />
             </button>
-            {feedbackSent ? <span>{t("story.feedbackThanks")}</span> : null}
+            {feedbackSent ? (
+              <span>
+                {t("story.feedbackThanks")}
+                {feedbackWasHelpful === false ? ` ${t("story.feedbackDownHint")}` : ""}
+              </span>
+            ) : null}
           </div>
         ) : null}
         <small className="story-card__watermark">{watermark}</small>

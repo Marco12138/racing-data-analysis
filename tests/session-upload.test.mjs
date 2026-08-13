@@ -6,6 +6,7 @@ import {
   commitPendingVideo,
   isXrkFileName,
 } from "../frontend/lib/sessionUpload.ts";
+import { consumeSelectedFile } from "../frontend/lib/fileUpload.ts";
 
 function file(name) {
   return new File(["x"], name);
@@ -32,4 +33,25 @@ test("commitPendingVideo carries the pending video into the active slot", () => 
   assert.equal(commitPendingVideo(pending, active), pending);
   assert.equal(commitPendingVideo(null, active), active);
   assert.equal(commitPendingVideo(null, null), null);
+});
+
+test("selected file remains available until an async upload settles", async () => {
+  const selected = file("safari-session.xrk");
+  let releaseUpload;
+  let reset = false;
+  const upload = consumeSelectedFile(
+    selected,
+    async (received) => {
+      assert.equal(received, selected);
+      await new Promise((resolve) => { releaseUpload = resolve; });
+      assert.equal(reset, false);
+    },
+    () => { reset = true; },
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(reset, false);
+  releaseUpload();
+  await upload;
+  assert.equal(reset, true);
 });

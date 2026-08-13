@@ -160,19 +160,26 @@ def test_storyboard_llm_must_restate_evidence_numbers_only(
 
     analysis = demo_analysis()
     clear_narrative_cache()
+    structured = build_storyboard(analysis, None, alignment=alignment())
     monkeypatch.setattr(
         session_storyboard,
         "_llm_config",
         lambda: ("https://llm.example", "test-key", "test-model"),
     )
-    structured = build_storyboard(analysis, None, alignment=alignment())
     grounded_content = json.dumps(
         [
             {
                 "id": node["id"],
-                "title": f"第 {_node_number(node['id'])} 弯：可改进 {node['net_gain_s']:.3f} 秒",
-                "insight": "基于真实圈，该模式可重复。",
-                "drill": "连续三圈只改变这一处操作。",
+                "title": f"第 {_node_number(node['id'])} 弯：净收益 {node['net_gain_s']:.3f} 秒",
+                "insight": (
+                    f"在 {node['distance_range_m'][0]:.1f} m 保持 RPM 恢复，"
+                    f"真实圈净收益 {node['net_gain_s']:.3f} 秒。"
+                ),
+                "drill": (
+                    f"练习：只改变恢复动作，在 {node['distance_range_m'][0]:.1f} m "
+                    f"核对 {node['net_gain_s']:.3f}s。停止条件：若净收益低于 "
+                    f"{node['net_gain_s']:.3f}s，停止实验。"
+                ),
             }
             for node in structured["nodes"]
         ],
@@ -183,6 +190,7 @@ def test_storyboard_llm_must_restate_evidence_numbers_only(
         None,
         alignment=alignment(),
         llm_client=_FakeChatClient(grounded_content),
+        language="zh",
     )
     assert all(node["source"] == "llm" for node in grounded["nodes"])
 
@@ -191,9 +199,12 @@ def test_storyboard_llm_must_restate_evidence_numbers_only(
         [
             {
                 "id": node["id"],
-                "title": f"第 {_node_number(node['id'])} 弯：可改进 {node['net_gain_s']:.3f} 秒",
+                "title": f"第 {_node_number(node['id'])} 弯：净收益 {node['net_gain_s']:.3f} 秒",
                 "insight": "理论上最多可提升 99.99 秒。",
-                "drill": "连续三圈只改变这一处操作。",
+                "drill": (
+                    f"练习：在 {node['distance_range_m'][0]:.1f} m 保持 RPM。"
+                    f"停止条件：若净收益低于 {node['net_gain_s']:.3f}s，停止实验。"
+                ),
             }
             for node in structured["nodes"]
         ],
@@ -204,6 +215,7 @@ def test_storyboard_llm_must_restate_evidence_numbers_only(
         None,
         alignment=alignment(),
         llm_client=_FakeChatClient(ungrounded_content),
+        language="zh",
     )
     assert all(node["source"] == "structured" for node in ungrounded["nodes"])
     assert all("99.99" not in node["insight"] for node in ungrounded["nodes"])
@@ -230,9 +242,16 @@ def test_storyboard_narrative_is_cached_per_evidence_fingerprint(
         [
             {
                 "id": node["id"],
-                "title": f"第 {_node_number(node['id'])} 弯：可改进 {node['net_gain_s']:.3f} 秒",
-                "insight": "基于真实圈，该模式可重复。",
-                "drill": "连续三圈只改变这一处操作。",
+                "title": f"第 {_node_number(node['id'])} 弯：净收益 {node['net_gain_s']:.3f} 秒",
+                "insight": (
+                    f"在 {node['distance_range_m'][0]:.1f} m 保持 RPM 恢复，"
+                    f"真实圈净收益 {node['net_gain_s']:.3f} 秒。"
+                ),
+                "drill": (
+                    f"练习：只改变恢复动作，在 {node['distance_range_m'][0]:.1f} m "
+                    f"核对 {node['net_gain_s']:.3f}s。停止条件：若净收益低于 "
+                    f"{node['net_gain_s']:.3f}s，停止实验。"
+                ),
             }
             for node in structured["nodes"]
         ],
@@ -249,8 +268,12 @@ def test_storyboard_narrative_is_cached_per_evidence_fingerprint(
             return await super().post(*args, **kwargs)
 
     client = CountingClient()
-    first = build_storyboard(analysis, None, alignment=alignment(), llm_client=client)
-    second = build_storyboard(analysis, None, alignment=alignment(), llm_client=client)
+    first = build_storyboard(
+        analysis, None, alignment=alignment(), llm_client=client, language="zh"
+    )
+    second = build_storyboard(
+        analysis, None, alignment=alignment(), llm_client=client, language="zh"
+    )
     assert client.post_count == 1
     assert all(node["source"] == "llm" for node in first["nodes"])
     assert all(node["source"] == "llm" for node in second["nodes"])

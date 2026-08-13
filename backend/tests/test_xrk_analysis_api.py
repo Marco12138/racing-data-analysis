@@ -69,6 +69,35 @@ def write_inspection(output_dir: Path) -> None:
     (output_dir / "inspection.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
+def test_missing_xrk_file_returns_traceable_public_error(tmp_path: Path) -> None:
+    """An empty Safari multipart upload should not expose Pydantic internals."""
+    settings = Settings(
+        app_env="test",
+        app_mode="cloud",
+        database_url=f"sqlite:///{tmp_path / 'sessions.sqlite3'}",
+        allowed_hosts="testserver",
+        cors_origins="https://frontend.example",
+        xrk_inspection_cache_dir=str(tmp_path / "cache"),
+    )
+    with TestClient(create_app(settings)) as client:
+        response = client.post(
+            "/api/v1/xrk/inspect",
+            headers={"X-Request-ID": "missing-file-test"},
+        )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "status": "error",
+        "error_code": "XRK_UPLOAD_MISSING_FILE",
+        "message": (
+            "The XRK file was not attached to the upload request. "
+            "Please select the file again."
+        ),
+        "request_id": "missing-file-test",
+    }
+    assert response.headers["X-Request-ID"] == "missing-file-test"
+
+
 def test_inspect_analyze_delete_contract(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

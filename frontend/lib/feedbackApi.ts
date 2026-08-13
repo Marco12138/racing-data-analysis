@@ -1,7 +1,7 @@
 export type NarrativeFeedbackInput = {
   node_id: string;
   token: string | null;
-  source: "storyboard" | "coach";
+  source: "llm" | "structured" | "storyboard" | "coach";
   locale: "zh" | "en";
   thumbs_up: boolean;
 };

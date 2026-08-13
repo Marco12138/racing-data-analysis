@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -32,6 +36,8 @@ from .importers.service import ImportRateLimiter
 from .importers.xrk_registry import XrkParserRegistry
 from .utils.storage import init_db
 from .utils.video_library import cleanup_video_cache
+
+logger = logging.getLogger("racing.api")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -106,6 +112,53 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "message": exc.message,
                 "request_id": request_id,
             },
+            headers={"X-Request-ID": request_id},
+        )
+
+    @application.exception_handler(RequestValidationError)
+    async def request_validation_error_handler(
+        request: Request,
+        exc: RequestValidationError,
+    ) -> JSONResponse:
+        request_id = getattr(request.state, "request_id", uuid.uuid4().hex)
+        missing_xrk_file = (
+            request.url.path.endswith("/xrk/inspect")
+            and any(
+                tuple(error.get("loc", ())) == ("body", "file")
+                and error.get("type") == "missing"
+                for error in exc.errors()
+            )
+        )
+        error_code = "XRK_UPLOAD_MISSING_FILE" if missing_xrk_file else "REQUEST_VALIDATION_FAILED"
+        message = (
+            "The XRK file was not attached to the upload request. Please select the file again."
+            if missing_xrk_file
+            else "The request contains missing or invalid fields."
+        )
+        logger.warning(
+            json.dumps(
+                {
+                    "event": "request_validation_failed",
+                    "request_id": request_id,
+                    "path": request.url.path,
+                    "error_code": error_code,
+                    "fields": [".".join(map(str, error.get("loc", ()))) for error in exc.errors()],
+                },
+                separators=(",", ":"),
+            )
+        )
+        if missing_xrk_file:
+            content = {
+                "status": "error",
+                "error_code": error_code,
+                "message": message,
+                "request_id": request_id,
+            }
+        else:
+            content = jsonable_encoder({"detail": exc.errors()})
+        return JSONResponse(
+            status_code=422,
+            content=content,
             headers={"X-Request-ID": request_id},
         )
 
