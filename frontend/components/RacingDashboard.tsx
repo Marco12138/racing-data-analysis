@@ -60,6 +60,7 @@ import {
   type XrkInspection,
   XrkApiError,
 } from "../lib/xrkAnalysisApi";
+import { consumeSelectedFile } from "../lib/fileUpload";
 import {
   MAX_TEMPORARY_SESSIONS,
   SESSION_STORAGE_KEY,
@@ -1315,7 +1316,7 @@ function FileInput({
   accept: string;
   disabled?: boolean;
   icon?: React.ReactNode;
-  onFile: (file: File) => void;
+  onFile: (file: File) => void | Promise<unknown>;
 }) {
   return (
     <label className={`file-input mt-3 flex items-center justify-between gap-3 rounded-md px-3 py-3 text-sm text-slate-300 ${disabled ? "cursor-wait opacity-70" : "cursor-pointer"}`}>
@@ -1326,9 +1327,12 @@ function FileInput({
         accept={accept}
         disabled={disabled}
         onChange={(event) => {
+          const input = event.currentTarget;
           const file = event.target.files?.[0];
-          if (file) onFile(file);
-          event.target.value = "";
+          if (!file) return;
+          void consumeSelectedFile(file, onFile, () => {
+            input.value = "";
+          });
         }}
       />
       {icon ?? <Upload size={16} className="shrink-0 text-[#f6c945]" />}

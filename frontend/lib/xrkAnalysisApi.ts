@@ -454,11 +454,12 @@ export async function inspectXrkFile(
   file: File,
   signal?: AbortSignal
 ): Promise<XrkInspection> {
-  const form = new FormData();
-  form.append("file", file);
   let response: Response;
   try {
-    response = await fetch(await resolveApiUrl("/xrk/inspect"), {
+    const url = await resolveApiUrl("/xrk/inspect");
+    const form = new FormData();
+    form.append("file", file, file.name);
+    response = await fetch(url, {
       method: "POST",
       body: form,
       signal,
