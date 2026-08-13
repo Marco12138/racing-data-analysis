@@ -47,6 +47,19 @@ def test_success_returns_verdict_without_key() -> None:
     assert "super-secret-key-123" not in repr(result)
 
 
+def test_verify_from_env_runs_the_probe() -> None:
+    env = {
+        "LLM_BASE_URL": "https://api.example/v1",
+        "LLM_API_KEY": "super-secret-key-456",
+        "LLM_MODEL": "model-a",
+    }
+    with client_with(ok_handler) as client:
+        result = verify.verify_from_env(env, client=client)
+    assert result.ok is True
+    assert result.model == "model-a"
+    assert "super-secret-key-456" not in repr(result)
+
+
 @pytest.mark.parametrize("status_code", [401, 500])
 def test_http_failures_are_reported(status_code: int) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
@@ -73,6 +86,21 @@ def test_malformed_response_is_rejected() -> None:
             "https://api.deepseek.com/v1",
             "secret",
             "deepseek-chat",
+            client=client,
+        )
+    assert result.ok is False
+    assert "格式错误" in result.message
+
+
+def test_non_json_response_is_rejected_without_traceback() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="not-json")
+
+    with client_with(handler) as client:
+        result = verify.verify_connectivity(
+            "https://api.example/v1",
+            "secret",
+            "model-a",
             client=client,
         )
     assert result.ok is False

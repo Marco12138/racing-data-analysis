@@ -160,7 +160,10 @@ LLM_MODEL=deepseek-chat
      python scripts/verify_llm_config.py
    ```
    也可以只设置变量后在 Railway 后端环境里执行同一命令。
-3. 生成评估样本（只读，默认最多 20 次 LLM 调用）：
+3. 生成评估样本。脚本会先执行与第 2 步相同的最小连通性验证；验证失败时
+   不创建评估结果。随后优先读取 `tmp/narrative_eval/samples/*.json` 中的真实
+   analyze 响应，并为每个 session 生成中文和英文叙事。如果没有真实样本，
+   会明确标记为 `demo-artifact`，该结果只能用于流程冒烟：
    ```bash
    python scripts/evaluate_narrative.py --limit 10 --languages zh,en
    # 快速冒烟（不调用 LLM）：
@@ -171,10 +174,14 @@ LLM_MODEL=deepseek-chat
    python scripts/print_evaluation_verdict.py
    # 或指定目录：python scripts/print_evaluation_verdict.py --path tmp/narrative_eval/<timestamp>/summary.json
    ```
-   同时阅读 `tmp/narrative_eval/<timestamp>/report.md`。
-5. **决策标准**：5 个维度（具体性/准确性/语言/可执行性/安全性）LLM 全面优于
-   结构化回退才建议 `ENABLE_LLM`；任一维度未达标则为 `KEEP_STRUCTURED`，
-   把 `report.md` 发给 Codex 继续调 prompt。
+   同时阅读 `tmp/narrative_eval/<timestamp>/report.md`。`summary.json` 包含五个
+   维度的胜负计数、胜率和 `overall_recommendation`；`report.md` 包含中英文
+   LLM 叙事与结构化基线全文，供人工逐项复核。
+5. **决策标准**：人工按具体性、准确性、语言、可执行性和安全性五个维度复核。
+   只有真实 session 中的 LLM 输出在五个维度都全面优于结构化回退，才建议
+   `ENABLE_LLM`；任一维度持平、落后，或只有 demo 工件，都保持
+   `KEEP_STRUCTURED`。脚本 verdict 是保守预筛，最终仍由人工阅读 `report.md`
+   后决定是否全量点亮。
 
 All three values are required. If any value is missing, the request fails, or
 the generated text contains a number absent from the compact structured

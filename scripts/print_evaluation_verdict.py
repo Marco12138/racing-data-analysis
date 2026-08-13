@@ -71,10 +71,25 @@ def main() -> int:
         print(f"{YELLOW}本次为 dry-run，未调用 LLM。{RESET}")
     print()
     print(f"{CYAN}各维度胜率（LLM vs 结构化）{RESET}")
-    print(f"{'维度':<22}{'LLM 胜':>8}{'结构化胜':>10}{'平局':>8}")
-    print("-" * 50)
+    print(f"{'维度':<22}{'LLM 胜':>8}{'结构化胜':>10}{'平局':>8}{'LLM 胜率':>12}")
+    print("-" * 62)
     for dim, counts in summary.get("win_rate", {}).items():
-        print(f"{dim:<22}{counts['llm_win']:>8}{counts['structured_win']:>10}{counts['tie']:>8}")
+        total = counts.get("total") or sum(
+            counts.get(key, 0) for key in ("llm_win", "structured_win", "tie")
+        )
+        rate = counts.get("llm_win_rate")
+        if rate is None:
+            rate = counts.get("llm_win", 0) / max(1, total)
+        print(
+            f"{dim:<22}{counts['llm_win']:>8}{counts['structured_win']:>10}"
+            f"{counts['tie']:>8}{rate:>11.0%}"
+        )
+
+    sources = summary.get("sample_sources", [])
+    if sources:
+        print(f"数据来源：{', '.join(sources)}")
+    if summary.get("uses_demo_fallback"):
+        print(f"{YELLOW}本次包含 demo 工件，只能作为流程冒烟，不能单独支持生产启用。{RESET}")
 
     issues = collect_issues(directory)
     if issues:
@@ -86,12 +101,12 @@ def main() -> int:
     weak_dims = summary.get("weak_dims", [])
     print()
     if recommendation == "ENABLE_LLM":
-        print(f"{GREEN}最终建议：启用 LLM 叙事（5 个维度全面优于结构化）。{RESET}")
+        print(f"{GREEN}最终建议：启用 LLM 叙事（5 个维度全面优于结构化基线）。{RESET}")
         return 0
     print(f"{RED}最终建议：KEEP_STRUCTURED —— 继续调 prompt 后再评估。{RESET}")
     if weak_dims:
         print(f"{YELLOW}待改进维度：{', '.join(weak_dims)}{RESET}")
-    print("把 report.md 发给 Codex 作为下一轮 prompt 调整依据。")
+    print("请人工阅读 report.md；如需继续调优，可将去敏后的报告交给开发者。")
     return 1
 
 

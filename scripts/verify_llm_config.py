@@ -101,8 +101,14 @@ def verify_connectivity(
                 warnings=warnings,
                 status_code=response.status_code,
             )
-        data = response.json()
-        content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
+        try:
+            data = response.json()
+            choices = data.get("choices") if isinstance(data, dict) else None
+            first_choice = choices[0] if isinstance(choices, list) and choices else None
+            message = first_choice.get("message") if isinstance(first_choice, dict) else None
+            content = message.get("content") if isinstance(message, dict) else None
+        except ValueError:
+            content = None
         if not isinstance(content, str) or not content.strip():
             return VerifyResult(
                 ok=False,
@@ -146,13 +152,21 @@ def verify_connectivity(
             active_client.close()
 
 
+def verify_from_env(
+    env: dict[str, str] | None = None,
+    client: httpx.Client | None = None,
+) -> VerifyResult:
+    """Load configuration and perform the same connectivity probe as the CLI."""
+    base_url, api_key, model = config_from_env(env)
+    return verify_connectivity(base_url, api_key, model, client=client)
+
+
 def main() -> int:
     try:
-        base_url, api_key, model = config_from_env()
+        result = verify_from_env()
     except VerifyError as exc:
         print(f"错误：{exc}")
         return 2
-    result = verify_connectivity(base_url, api_key, model)
     print("=== LLM 配置验证 ===")
     print(f"状态：{'通过' if result.ok else '失败'}")
     print(f"model：{result.model}")
