@@ -105,3 +105,16 @@ def test_network_error_is_reported_without_key() -> None:
     assert result.ok is False
     assert "super-secret-key" not in repr(result)
     assert "请求失败" in result.message
+
+
+def test_non_ascii_key_is_reported_without_traceback() -> None:
+    with client_with(ok_handler) as client:
+        result = verify.verify_connectivity(
+            "https://api.deepseek.com/v1",
+            "密钥-非-ascii",
+            "deepseek-chat",
+            client=client,
+        )
+    assert result.ok is False
+    assert "非 ASCII" in result.message
+    assert "密钥-非-ascii" not in repr(result)
