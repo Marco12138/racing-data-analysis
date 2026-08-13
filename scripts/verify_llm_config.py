@@ -122,6 +122,17 @@ def verify_connectivity(
             warnings=warnings,
             status_code=response.status_code,
         )
+    except UnicodeEncodeError:
+        return VerifyResult(
+            ok=False,
+            model=model,
+            base_url=base_url,
+            message=(
+                "API key 或 base_url 包含非 ASCII 字符。"
+                "请确认 LLM_API_KEY 是有效的 ASCII 字符串（例如 sk- 开头的真实 key）。"
+            ),
+            warnings=warnings,
+        )
     except httpx.HTTPError as exc:
         return VerifyResult(
             ok=False,
