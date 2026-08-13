@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from decimal import Decimal, InvalidOperation
@@ -15,37 +16,66 @@ from .text_locale import is_specific_text
 
 LLM_TIMEOUT_SECONDS = 30.0
 _NUMBER_PATTERN = re.compile(r"(?<![\w.])[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?")
+_FORBIDDEN_FILLER = (
+    "注意",
+    "改善",
+    "提高",
+    "更好",
+    "尝试优化",
+    "overall",
+    "generally",
+    "try to improve",
+    "better",
+    "theoretical best",
+    "synthetic target lap",
+    "synthetic rpm",
+)
 
 SYSTEM_PROMPT = """你是一名谨慎的卡丁车数据复盘教练。
 你只能使用用户提供的 JSON 证据，不得补充、推算、换算或编造任何数字。
 测量值、计算值和推断必须保持原有证据边界；不能把疑似制动写成确认制动。
 所有参考圈都是真实完成且通过质量门的圈，不得生成理论圈、合成圈或目标 RPM 曲线。
-每个训练重点必须包含具体证据数字（弯角/距离、时间或转速），禁止使用
-“注意”“改善”“提高”“overall”“generally”“try to improve”等没有数字的宽泛措辞。
-请使用 {language} 输出，每个重点严格使用以下结构，不使用阿拉伯数字编号：
+每个训练重点必须同时包含：弯角/Zone 编号与距离、时间或 RPM 数字、具体驾驶动作、
+可验证练习、停止条件。禁止使用“注意”“改善”“提高”“更好”“尝试优化”
+“overall”“generally”“try to improve”“better”等宽泛措辞。
+请使用 {language} 输出恰好三个训练重点。中文使用以下四行结构：
 训练重点一/二/三：简短结论
 对应证据：只复述 JSON 中已有的事实和数字
-练习建议：一句可执行、可在下一节练习验证的建议
-如果证据不足，用“证据不足，暂不建议改变现有操作”明确说明，不得补造依据。
+练习建议：具体动作及验证指标
+停止条件：何时停止本项实验
+英文使用 Training focus one/two/three、Evidence、Drill、Stop condition 四行结构。
+如果证据不足，中文用“证据不足，暂不建议改变现有操作”，英文用
+“Evidence is insufficient; do not change the existing operation.”，不得补造依据。
 
-好示例（含弯角、距离、时间与练习）：
-训练重点一：Zone 4（512.4-590.0 m）更早恢复油门，净收益 0.24s。
-对应证据：真实圈 10、13，出弯后下游代价 0.00s。
-练习建议：连续 3 圈只改恢复点，在 540 m 处对比弯心出口速度。
+好示例（方括号是字段占位符，输出时只能替换为 JSON 中已有值）：
+训练重点一：[corner]（[entry_distance_m]-[exit_distance_m] m）保持 RPM 恢复。
+对应证据：真实圈 [supporting_laps]，净收益 [net_gain]s，下游代价 [downstream_cost]s。
+练习建议：只改变恢复动作，在 [entry_distance_m] m 核对 [net_gain]s。
+停止条件：若下游代价高于 [downstream_cost]s，停止本项实验。
 
-训练重点二：Zone 1（110.0-171.0 m）抬油门位置稳定，净收益 0.05s。
-对应证据：Lap 8、13 的抬油门位置均为 110 m。
-练习建议：连续 3 圈保持抬油门点不变，对比 Sector 1 用时。
+训练重点二：[corner]（[entry_distance_m]-[exit_distance_m] m）保持最低 RPM。
+对应证据：参考圈 [reference] rpm，目标圈 [target] rpm，差值 [difference] rpm。
+练习建议：只改变证据支持的动作，在 [entry_distance_m] m 核对 [target] rpm。
+停止条件：若 RPM 低于 [target] rpm，停止本项实验。
 
-差示例（宽泛、无数字，禁止模仿）：
+Bad case 1（缺少弯角/距离，禁止模仿）：
 训练重点：注意改善整体节奏。
 对应证据：车手表现一般。
 练习建议：try to improve 综合表现。
+修正：首句必须写 Zone 编号和距离，证据只引用 JSON 数字，并补停止条件。
 
-差示例二（宽泛、无数字，禁止模仿）：
-训练重点：整体更稳定，尝试优化出弯。
-对应证据：数据大致一致。
-练习建议：better 综合表现。
+Bad case 2（练习不可验证，禁止模仿）：“保持节奏，多练习几圈。”
+修正：写明只改变哪个动作、在哪个距离核对何种时间/RPM 数字、何时停止。
+
+Bad case 3（语言混杂，禁止模仿）：“训练重点：improve exit，保持 overall consistency。”
+修正：除 RPM、GPS、Zone、Sector、Lap 与单位外，必须完全使用目标语言。
+"""
+
+ENGLISH_OUTPUT_RULE = """MANDATORY OUTPUT LANGUAGE: English only.
+The policy below is written in Chinese, but your entire answer must use English.
+Use exactly these labels for all three blocks: Training focus one/two/three,
+Evidence, Drill, Stop condition. Do not output Chinese characters.
+
 """
 
 
@@ -56,7 +86,7 @@ def build_xrk_narrative_evidence(result: dict[str, Any]) -> dict[str, Any]:
     coach = result.get("ai_coach_summary") or {}
     zones = (result.get("zones") or {}).get("comparisons", [])
     events = result.get("events") or []
-    return {
+    return _round_evidence_numbers({
         "reference_policy": consensus.get("reference_policy"),
         "capabilities": result.get("capabilities", {}),
         "evidence_catalog": result.get("evidence_catalog", {}),
@@ -165,7 +195,7 @@ def build_xrk_narrative_evidence(result: dict[str, Any]) -> dict[str, Any]:
             ],
             "limitations": coach.get("limitations", []),
         },
-    }
+    })
 
 
 async def generate_llm_narrative(
@@ -179,21 +209,45 @@ async def generate_llm_narrative(
     if config is None:
         return None
     base_url, api_key, model = config
+    evidence_json = json.dumps(
+        evidence,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    numeric_whitelist = list(dict.fromkeys(_NUMBER_PATTERN.findall(evidence_json)))
+    english_only = language == "en"
     payload = {
         "model": model,
-        "temperature": 0.2,
-        "max_tokens": 900,
+        "temperature": 0.0,
+        "max_tokens": 1400,
         "messages": [
             {
                 "role": "system",
-                "content": SYSTEM_PROMPT.format(
-                    language="中文" if language == "zh" else "English"
+                "content": (
+                    (ENGLISH_OUTPUT_RULE if english_only else "")
+                    + SYSTEM_PROMPT.format(
+                        language="中文" if language == "zh" else "English"
+                    )
                 ),
             },
             {
                 "role": "user",
-                "content": "以下是唯一允许使用的结构化证据：\n"
-                + json.dumps(evidence, ensure_ascii=False, separators=(",", ":")),
+                "content": (
+                    (
+                        "Numeric whitelist (copy every output number verbatim from "
+                        "this list; do not change precision or add repetition counts):\n"
+                        if english_only
+                        else "数字白名单（输出中的每个阿拉伯数字必须从此列表逐字复制，"
+                        "不得改变精度或添加练习次数）：\n"
+                    )
+                    + json.dumps(numeric_whitelist, ensure_ascii=False)
+                    + (
+                        "\nThis JSON is the only permitted evidence:\n"
+                        if english_only
+                        else "\n以下是唯一允许使用的结构化证据：\n"
+                    )
+                    + evidence_json
+                ),
             },
         ],
     }
@@ -216,6 +270,8 @@ async def generate_llm_narrative(
         if not _numbers_are_grounded(narrative, evidence):
             return None
         if not is_specific_text(narrative, language):
+            return None
+        if not _passes_narrative_policy(narrative, language):
             return None
         return narrative
     except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError):
@@ -272,6 +328,21 @@ def _pick(source: dict[str, Any], *keys: str) -> dict[str, Any]:
     return {key: source[key] for key in keys if key in source}
 
 
+def _round_evidence_numbers(value: Any) -> Any:
+    """Bound LLM evidence precision without changing the analysis result."""
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, float):
+        return round(value, 3) if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _round_evidence_numbers(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_round_evidence_numbers(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_round_evidence_numbers(item) for item in value)
+    return value
+
+
 def _numbers_are_grounded(text: str, evidence: dict[str, Any]) -> bool:
     allowed = _evidence_numbers(evidence)
     for match in _NUMBER_PATTERN.findall(text):
@@ -279,6 +350,43 @@ def _numbers_are_grounded(text: str, evidence: dict[str, Any]) -> bool:
             if Decimal(match.lstrip("+")) not in allowed:
                 return False
         except InvalidOperation:
+            return False
+    return True
+
+
+def _contains_forbidden_filler(text: str) -> bool:
+    """Reject broad coaching filler and synthetic-reference language."""
+    lowered = text.lower()
+    return any(phrase in lowered for phrase in _FORBIDDEN_FILLER)
+
+
+def _passes_narrative_policy(text: str, language: str) -> bool:
+    """Require three evidence-anchored, testable coaching blocks."""
+    if _contains_forbidden_filler(text):
+        return False
+    if language == "en" and re.search(r"[\u4e00-\u9fff]", text):
+        return False
+    if language == "zh":
+        blocks = re.split(r"(?=训练重点[一二三])", text)
+        blocks = [block for block in blocks if block.startswith("训练重点")]
+        labels = ("对应证据", "练习建议", "停止条件")
+        action_pattern = r"恢复|收油|制动|刹车|油门|转速|RPM|速度|保持"
+    else:
+        blocks = re.split(r"(?=Training focus (?:one|two|three))", text, flags=re.IGNORECASE)
+        blocks = [block for block in blocks if re.match(r"Training focus", block, re.IGNORECASE)]
+        labels = ("evidence", "drill", "stop condition")
+        action_pattern = r"recover|lift|brak|throttle|rpm|speed|hold|maintain"
+    if len(blocks) != 3:
+        return False
+    for block in blocks:
+        lowered = block.lower()
+        if not all(label.lower() in lowered for label in labels):
+            return False
+        if not re.search(r"(?:zone|corner|sector|弯)\s*\d+|\d+(?:\.\d+)?\s*m\b", block, re.IGNORECASE):
+            return False
+        if not re.search(r"\d+(?:\.\d+)?\s*(?:s|秒|rpm|km/h)\b", block, re.IGNORECASE):
+            return False
+        if not re.search(action_pattern, block, re.IGNORECASE):
             return False
     return True
 

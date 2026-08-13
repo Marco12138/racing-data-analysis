@@ -14,6 +14,6 @@ class NarrativeFeedbackRequest(DemoModel):
 
     node_id: str = Field(min_length=1, max_length=200)
     token: str | None = Field(default=None, max_length=200)
-    source: Literal["storyboard", "coach"]
+    source: Literal["llm", "structured", "storyboard", "coach"]
     locale: Literal["zh", "en"]
     thumbs_up: bool

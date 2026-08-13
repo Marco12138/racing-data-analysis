@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 
 import { StorySharePage } from "@/frontend/components/StorySharePage";
 import {
@@ -7,14 +8,27 @@ import {
   parseStoryboardResponse,
   type StoryboardResponse,
 } from "@/frontend/lib/storyboardApi";
+import { buildStoryboardMetadata } from "@/frontend/lib/storyboardMetadata";
+import { localeFromRequestPreference } from "@/frontend/lib/i18nCore";
 
 export const dynamic = "force-dynamic";
 
-export async function generateMetadata() {
-  return {
-    title: "AI 驾驶复盘短片",
-    description: "只读 AI 驾驶复盘短片，基于真实质量门圈速与视频对齐证据。",
-  };
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ token: string }>;
+}): Promise<Metadata> {
+  const { token } = await params;
+  const requestHeaders = await headers();
+  const storyboard = await loadStoryboard(token, requestHeaders.get("x-racing-storyboard"));
+  const origin = requestOrigin(requestHeaders);
+  const locale = localeFromRequestPreference(null, requestHeaders.get("accept-language"));
+  return buildStoryboardMetadata(
+    storyboard,
+    locale,
+    `${origin}/og.png`,
+    `${origin}/story/${token}`,
+  );
 }
 
 export default async function StoryPage({
@@ -24,7 +38,21 @@ export default async function StoryPage({
 }) {
   const { token } = await params;
   const requestHeaders = await headers();
-  const injected = requestHeaders.get("x-racing-storyboard");
+  const storyboard = await loadStoryboard(
+    token,
+    requestHeaders.get("x-racing-storyboard"),
+  );
+  if (!storyboard) notFound();
+
+  const shareUrl = `${requestOrigin(requestHeaders)}/story/${token}`;
+
+  return <StorySharePage storyboard={storyboard} shareUrl={shareUrl} />;
+}
+
+async function loadStoryboard(
+  token: string,
+  injected: string | null,
+): Promise<StoryboardResponse | null> {
   let storyboard: StoryboardResponse | null = null;
   if (injected) {
     try {
@@ -39,18 +67,13 @@ export default async function StoryPage({
       storyboard = await fetchStoryboardPayload(apiOrigin, "/api/v1", token);
     }
   }
-  if (!storyboard) {
-    notFound();
-  }
+  return storyboard;
+}
 
-  const proto = requestHeaders.get("x-forwarded-proto") ?? "https";
-  const host =
-    requestHeaders.get("x-forwarded-host")
-    ?? requestHeaders.get("host")
-    ?? "localhost:3000";
-  const shareUrl = `${proto}://${host}/story/${token}`;
-
-  return <StorySharePage storyboard={storyboard} shareUrl={shareUrl} />;
+function requestOrigin(requestHeaders: Awaited<ReturnType<typeof headers>>): string {
+  const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
+  const proto = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+  return `${proto}://${host}`;
 }
 
 function productionApiOrigin(): string {

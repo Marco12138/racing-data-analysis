@@ -20,7 +20,11 @@ import httpx
 import numpy as np
 import pandas as pd
 
-from .llm_narrative import _llm_config, _numbers_are_grounded
+from .llm_narrative import (
+    _contains_forbidden_filler,
+    _llm_config,
+    _numbers_are_grounded,
+)
 from .text_locale import is_specific_text, localize_pattern
 
 STORYBOARD_SCHEMA_VERSION = 1
@@ -284,6 +288,7 @@ def build_storyboard(
             "reference_lap": analysis.get("reference_lap"),
             "target_lap": analysis.get("target_lap"),
             "fastest_lap": analysis.get("fastest_lap"),
+            **_storyboard_display_metadata(analysis),
         },
         "video": {
             "duration_s": round(alignment.video_duration_s, 3),
@@ -291,6 +296,26 @@ def build_storyboard(
             "uploaded": False,
         },
         "nodes": nodes,
+    }
+
+
+def _storyboard_display_metadata(analysis: dict[str, Any]) -> dict[str, str | None]:
+    """Select non-sensitive display labels already present in session metadata."""
+    metadata = analysis.get("metadata") if isinstance(analysis.get("metadata"), dict) else {}
+    normalized = {
+        re.sub(r"[^a-z0-9]", "", str(key).lower()): str(value).strip()
+        for key, value in metadata.items()
+        if value is not None and str(value).strip()
+    }
+
+    def first(*keys: str) -> str | None:
+        return next((normalized[key] for key in keys if normalized.get(key)), None)
+
+    track = analysis.get("track") if isinstance(analysis.get("track"), dict) else {}
+    return {
+        "driver": first("driver", "racer", "pilot"),
+        "vehicle": first("vehicle", "kart", "car"),
+        "track": first("venue", "track", "circuit") or str(track.get("track_id") or "").strip() or None,
     }
 
 
@@ -846,6 +871,17 @@ async def _generate_node_copy(
                 )
                 result.append({})
                 continue
+            if _contains_forbidden_filler(combined) or not _valid_storyboard_copy(
+                candidate,
+                language,
+            ):
+                narrative_stats["failures"] += 1
+                logger.warning(
+                    "storyboard_narrative failure reason=policy node=%s",
+                    node.get("id"),
+                )
+                result.append({})
+                continue
             result.append(candidate)
         return result
     except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
@@ -881,6 +917,19 @@ def _node_llm_evidence(node: dict[str, Any], analysis: dict[str, Any]) -> dict[s
         }
         evidence["net_gain_s"] = node.get("net_gain_s")
     return evidence
+
+
+def _valid_storyboard_copy(candidate: dict[str, str], language: str) -> bool:
+    """Require a location, performance number, action, drill, and stop condition."""
+    combined = " ".join(candidate.values())
+    if not re.search(r"(?:zone|corner|sector|弯)\s*\d+|\d+(?:\.\d+)?\s*m\b", combined, re.IGNORECASE):
+        return False
+    if not re.search(r"\d+(?:\.\d+)?\s*(?:s|秒|rpm|km/h)\b", combined, re.IGNORECASE):
+        return False
+    drill = candidate["drill"].lower()
+    if language == "zh":
+        return "练习" in candidate["drill"] and "停止条件" in candidate["drill"]
+    return "drill" in drill and "stop" in drill
 
 
 def _parse_json_array(content: str) -> list[dict[str, Any]] | None:

@@ -25,6 +25,7 @@ execFileSync(join(root, "node_modules/.bin/esbuild"), [
   "--external:recharts",
   "--external:lucide-react",
   "--external:html-to-image",
+  "--external:qrcode",
   `--outfile=${outFile}`,
 ], { stdio: "pipe" });
 const { VideoPanelTest } = await import(pathToFileURL(outFile).href);

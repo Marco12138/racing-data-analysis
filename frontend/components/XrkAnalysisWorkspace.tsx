@@ -1200,7 +1200,7 @@ function CoachSummaryPanel({
   llmNarrative?: { available: boolean; model: string | null };
 }) {
   const { t, locale } = useI18n();
-  const [feedbackSent, setFeedbackSent] = useState<string | null>(null);
+  const [feedbackSent, setFeedbackSent] = useState<{ corner: string; thumbsUp: boolean } | null>(null);
   const summary = analysis.ai_coach_summary;
   const improvement = analysis.achievable_improvement_range;
   const rangeAvailable = improvement.maximum_improvement_s > 0;
@@ -1214,12 +1214,12 @@ function CoachSummaryPanel({
         {
           node_id: `priority-${index + 1}`,
           token: analysis.inspection_id,
-          source: "coach",
+          source: analysis.narrative ? "llm" : "structured",
           locale: locale === "zh" ? "zh" : "en",
           thumbs_up: thumbsUp,
         },
       );
-      if (ok) setFeedbackSent(corner);
+      if (ok) setFeedbackSent({ corner, thumbsUp });
     } catch {
       // Feedback is optional.
     }
@@ -1289,7 +1289,7 @@ function CoachSummaryPanel({
                       <button
                         type="button"
                         aria-label={t("xrk.coach.feedbackHelpful")}
-                        disabled={feedbackSent === priority.corner}
+                        disabled={feedbackSent?.corner === priority.corner}
                         onClick={() => void sendFeedback(priority.corner, index, true)}
                         className="rounded-md border border-slate-700 px-2.5 py-2 text-slate-200 hover:border-[#66e38f] disabled:opacity-50"
                       >
@@ -1298,14 +1298,17 @@ function CoachSummaryPanel({
                       <button
                         type="button"
                         aria-label={t("xrk.coach.feedbackNotHelpful")}
-                        disabled={feedbackSent === priority.corner}
+                        disabled={feedbackSent?.corner === priority.corner}
                         onClick={() => void sendFeedback(priority.corner, index, false)}
                         className="rounded-md border border-slate-700 px-2.5 py-2 text-slate-200 hover:border-[#ff5964] disabled:opacity-50"
                       >
                         <ThumbsDown size={14} />
                       </button>
-                      {feedbackSent === priority.corner ? (
-                        <span className="text-xs text-emerald-300">{t("xrk.coach.feedbackThanks")}</span>
+                      {feedbackSent?.corner === priority.corner ? (
+                        <span className="text-xs text-emerald-300">
+                          {t("xrk.coach.feedbackThanks")}
+                          {feedbackSent.thumbsUp ? "" : ` ${t("xrk.coach.feedbackDownHint")}`}
+                        </span>
                       ) : null}
                     </div>
                   </div>
