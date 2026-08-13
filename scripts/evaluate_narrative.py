@@ -36,11 +36,12 @@ from backend.app.analysis.llm_narrative import (  # noqa: E402
     generate_llm_narrative,
 )
 from backend.app.analysis.xrk_session_analysis import generate_xrk_report  # noqa: E402
-from verify_llm_config import VerifyError, config_from_env  # noqa: E402
+from verify_llm_config import VerifyError, verify_from_env  # noqa: E402
 
 DEMO_ARTIFACT = REPOSITORY_ROOT / "public/demo/reviewed-real-session.json"
 SAMPLES_DIR = REPOSITORY_ROOT / "tmp/narrative_eval/samples"
 FORBIDDEN_SAFETY = ("理论圈", "合成圈", "synthetic target lap", "synthetic rpm")
+SAFETY_NEGATIONS = ("不", "无", "没有", "不得", "禁止", "拒绝", "no ", "not ", "never ", "without ")
 
 COST_PER_1M_TOKENS: dict[str, dict[str, float]] = {
     "deepseek-chat": {"input": 0.27, "output": 1.10},
@@ -81,8 +82,12 @@ def is_executable(text: str | None) -> bool:
 def is_safe(text: str | None) -> bool:
     if not text:
         return False
-    lowered = text.lower()
-    return not any(word in lowered for word in FORBIDDEN_SAFETY)
+    for sentence in re.split(r"[。！？.!?\n]+", text.lower()):
+        if any(word in sentence for word in FORBIDDEN_SAFETY) and not any(
+            negation in sentence for negation in SAFETY_NEGATIONS
+        ):
+            return False
+    return True
 
 
 def grounding_ok(text: str | None, analysis: dict[str, Any]) -> bool:
@@ -248,24 +253,46 @@ def compare_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
     return tally
 
 
+def add_win_rates(
+    tally: dict[str, dict[str, int]],
+) -> dict[str, dict[str, int | float]]:
+    """Add explicit rates while retaining counts for backwards compatibility."""
+    results: dict[str, dict[str, int | float]] = {}
+    for dimension, counts in tally.items():
+        total = sum(counts.values())
+        denominator = max(1, total)
+        results[dimension] = {
+            **counts,
+            "total": total,
+            "llm_win_rate": round(counts["llm_win"] / denominator, 4),
+            "structured_win_rate": round(counts["structured_win"] / denominator, 4),
+            "tie_rate": round(counts["tie"] / denominator, 4),
+        }
+    return results
+
+
 def decide_recommendation(
     rows: list[dict[str, Any]],
     tally: dict[str, dict[str, int]],
 ) -> tuple[str, list[str]]:
-    """Return (overall_recommendation, weak_dims)."""
+    """Recommend only when the LLM wins every dimension on real samples."""
     llm_generated = sum(1 for row in rows if row["llm_narrative"] is not None)
-    if llm_generated == 0:
+    if llm_generated != len(rows):
         return (
             "KEEP_STRUCTURED",
-            ["llm 未生成任何叙事（未配置或全部回退）"],
+            [f"llm 仅成功生成 {llm_generated}/{len(rows)} 份叙事"],
         )
-    weak_dims: list[str] = []
-    for dim, counts in tally.items():
-        if counts["llm_win"] <= counts["structured_win"]:
-            weak_dims.append(dim)
-    if not weak_dims:
-        return "ENABLE_LLM", []
-    return "KEEP_STRUCTURED", weak_dims
+    if any(row["source"] == "demo-artifact" for row in rows):
+        return "KEEP_STRUCTURED", ["仅有 demo 工件，缺少真实 session 评估"]
+
+    weak_dims = [
+        dimension
+        for dimension, counts in tally.items()
+        if counts["llm_win"] <= counts["structured_win"]
+    ]
+    if weak_dims:
+        return "KEEP_STRUCTURED", weak_dims
+    return "ENABLE_LLM", []
 
 
 def write_report(out_dir: Path, summary: dict[str, Any], rows: list[dict[str, Any]]) -> None:
@@ -275,19 +302,49 @@ def write_report(out_dir: Path, summary: dict[str, Any], rows: list[dict[str, An
         f"- 生成时间：{summary['generated_at']}",
         f"- 样本 session 数：{summary['sessions']}",
         f"- 评估调用数：{summary['calls']}",
+        f"- 数据来源：{', '.join(summary['sample_sources'])}",
         f"- 结论：**{summary['overall_recommendation']}**",
+        "- 决策门槛：必须使用真实样本，并且 LLM 在具体性、准确性、语言、可执行性和安全性五个维度均全面优于结构化基线。",
     ]
     if summary.get("weak_dims"):
         lines.append(f"- 待改进维度：{', '.join(summary['weak_dims'])}")
-    lines.extend(["", "## 各维度胜率（LLM vs 结构化）", "", "| 维度 | LLM 胜 | 结构化胜 | 平局 |", "| --- | --- | --- | --- |"])
+    lines.extend(["", "## 各维度胜率（LLM vs 结构化）", "", "| 维度 | LLM 胜 | 结构化胜 | 平局 | LLM 胜率 |", "| --- | ---: | ---: | ---: | ---: |"])
     for dim, counts in summary["win_rate"].items():
-        lines.append(f"| {dim} | {counts['llm_win']} | {counts['structured_win']} | {counts['tie']} |")
-    lines.extend(["", "## 样本明细", ""])
-    for row in rows:
         lines.append(
-            f"- {row['inspection_id']} ({row['language']})："
-            f"具体性 LLM={row['specificity_score']['llm']} / 结构化={row['specificity_score']['structured']}；"
-            f"issues：{'; '.join(row['issues']) if row['issues'] else '无'}"
+            f"| {dim} | {counts['llm_win']} | {counts['structured_win']} | "
+            f"{counts['tie']} | {counts['llm_win_rate']:.0%} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## 人工审阅说明",
+            "",
+            "以下内容按 session 和语言列出。请人工核对所有数字是否来自结构化证据，",
+            "并判断训练建议是否可执行。`demo-artifact` 只能作为流程冒烟，不足以支持生产启用决策。",
+            "",
+            "## 样本明细",
+            "",
+        ]
+    )
+    for row in rows:
+        lines.extend(
+            [
+                f"### {row['inspection_id']} · {row['language']}",
+                "",
+                f"- 来源：`{row['source']}`",
+                f"- 模型：`{row['model'] or 'not-available'}`",
+                f"- 具体性：LLM {row['specificity_score']['llm']} / 结构化 {row['specificity_score']['structured']}",
+                f"- Issues：{'; '.join(row['issues']) if row['issues'] else '无'}",
+                "",
+                "#### LLM Narrative",
+                "",
+                row["llm_narrative"] or "_未生成，使用结构化回退。_",
+                "",
+                "#### Structured Baseline",
+                "",
+                row["structured_fallback"],
+                "",
+            ]
         )
     lines.append("")
     (out_dir / "report.md").write_text("\n".join(lines), encoding="utf-8")
@@ -306,11 +363,21 @@ def main() -> int:
         return 2
     if not args.dry_run:
         try:
-            config_from_env()
+            verify_result = verify_from_env()
         except VerifyError as exc:
             print(f"错误：{exc}", file=sys.stderr)
             print("使用 --dry-run 可跳过 LLM，仅生成结构化样本。", file=sys.stderr)
             return 2
+        if not verify_result.ok:
+            print(f"LLM 配置验证失败：{verify_result.message}", file=sys.stderr)
+            for warning in verify_result.warnings:
+                print(f"警告：{warning}", file=sys.stderr)
+            print("未开始评估，也未写入任何 API key。", file=sys.stderr)
+            return 1
+        print(
+            f"LLM 配置验证通过：model={verify_result.model}，"
+            f"latency_ms={verify_result.latency_ms}"
+        )
 
     samples = load_samples(max(1, min(args.limit, 10)))
     if not samples:
@@ -326,7 +393,8 @@ def main() -> int:
         rows = asyncio.run(evaluate_session(session, languages, dry_run=args.dry_run))
         all_rows.extend(rows)
         for row in rows:
-            target = out_dir / f"{row['inspection_id']}_{row['language']}.json"
+            safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", row["inspection_id"]).strip("._") or "sample"
+            target = out_dir / f"{safe_id}_{row['language']}.json"
             payload = {
                 key: row[key]
                 for key in (
@@ -348,13 +416,16 @@ def main() -> int:
             )
 
     tally = compare_rows(all_rows)
+    win_rates = add_win_rates(tally)
     recommendation, weak_dims = decide_recommendation(all_rows, tally)
     summary = {
         "generated_at": datetime.now(UTC).isoformat(),
         "sessions": len(samples),
         "calls": len(all_rows),
         "dry_run": args.dry_run,
-        "win_rate": tally,
+        "sample_sources": sorted({sample["source"] for sample in samples}),
+        "uses_demo_fallback": any(sample["source"] == "demo-artifact" for sample in samples),
+        "win_rate": win_rates,
         "overall_recommendation": recommendation,
         "weak_dims": weak_dims,
     }
