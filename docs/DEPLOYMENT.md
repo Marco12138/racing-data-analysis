@@ -238,12 +238,51 @@ python -m pytest backend/tests -q
 pnpm run lint
 pnpm run build
 pnpm run build:vercel
+pnpm run test:api-proxy
+pnpm run build:api-proxy
 docker compose config
 ```
 
 Check CORS with the real frontend domain and confirm cloud mode returns
 `local_video_library: false` and `xrk_server_import.available: true` before
 exposing the API publicly.
+
+## Cloudflare API proxy
+
+The optional Worker in `cloudflare/api-proxy` provides a fixed-origin streaming
+proxy between the public frontend and FastAPI:
+
+```text
+Vercel -> Cloudflare Worker -> Railway FastAPI
+```
+
+It accepts only `/api/v1/*`, checks the browser origin, streams XRK/XRZ request
+bodies without buffering them, and preserves FastAPI status codes and response
+bodies. Python, OpenCV, PyArrow, and `libxrk` remain on Railway; the Worker is
+not an XRK parser or file store.
+
+Deploy it from the repository root:
+
+```bash
+pnpm exec wrangler whoami
+pnpm run test:api-proxy
+pnpm run build:api-proxy
+pnpm exec wrangler deploy --config cloudflare/api-proxy/wrangler.jsonc
+```
+
+Set the Vercel Production and Preview variables to the resulting Worker origin:
+
+```text
+NEXT_PUBLIC_API_URL=https://racing-telemetry-api-proxy.<account>.workers.dev
+API_URL=https://racing-telemetry-api-proxy.<account>.workers.dev
+NEXT_PUBLIC_API_PREFIX=/api/v1
+```
+
+Keep `UPSTREAM_ORIGIN` and `ALLOWED_ORIGINS` in `wrangler.jsonc` limited to the
+actual Railway service and approved frontend origins. Cloudflare's request body
+limit and the backend's `MAX_XRK_UPLOAD_BYTES` must both accommodate the chosen
+XRK limit. The current proxy rejects declared request bodies above 50 MB, and
+FastAPI remains responsible for validating chunked uploads.
 
 ## Provider references
 

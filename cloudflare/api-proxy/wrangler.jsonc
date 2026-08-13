@@ -1,0 +1,16 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "racing-telemetry-api-proxy",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "UPSTREAM_ORIGIN": "https://racing-ai-platform-api-production.up.railway.app",
+    "ALLOWED_ORIGINS": "https://ai-racing-telemetry-platform.vercel.app,https://ai-racing-telemetry-platform.marcosebastian1144.chatgpt.site",
+    "MAX_REQUEST_BYTES": "52428800"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}
