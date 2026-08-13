@@ -429,13 +429,13 @@ export class XrkApiError extends Error {
 async function responseError(response: Response, fallback: string): Promise<XrkApiError> {
   try {
     const body = (await response.json()) as {
-      detail?: string;
-      message?: string;
+      detail?: unknown;
+      message?: unknown;
       error_code?: string;
       request_id?: string;
     };
     return new XrkApiError(
-      body.message ?? body.detail ?? fallback,
+      readableApiErrorMessage(body.message, body.detail, fallback),
       body.error_code ?? "XRK_REQUEST_FAILED",
       body.request_id ?? response.headers.get("X-Request-ID"),
       response.status
@@ -448,6 +448,33 @@ async function responseError(response: Response, fallback: string): Promise<XrkA
       response.status
     );
   }
+}
+
+/**
+ * FastAPI validation errors return `detail` as an array of objects; backend
+ * PublicApiError responses use a plain `message` string. Always render a
+ * readable string so the UI never shows "[object Object]".
+ */
+function readableApiErrorMessage(
+  message: unknown,
+  detail: unknown,
+  fallback: string,
+): string {
+  if (typeof message === "string" && message.trim()) return message;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => {
+        if (item && typeof item === "object" && "msg" in item) {
+          return String((item as { msg: unknown }).msg);
+        }
+        return "";
+      })
+      .filter((part) => part.trim());
+    if (parts.length) return parts.join("；");
+  } else if (typeof detail === "string" && detail.trim()) {
+    return detail;
+  }
+  return fallback;
 }
 
 export async function inspectXrkFile(
