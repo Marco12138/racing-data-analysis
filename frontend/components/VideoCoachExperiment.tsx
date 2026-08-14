@@ -167,7 +167,7 @@ export function VideoCoachExperiment() {
     }
   }
 
-  function markPhase(phase: "entry" | "apex" | "exit") {
+  const markPhase = useCallback((phase: "entry" | "apex" | "exit") => {
     const video = videoRef.current;
     if (!video || !videoReady) return;
     const time = video.currentTime;
@@ -188,13 +188,13 @@ export function VideoCoachExperiment() {
       setError(t("videoCoach.markOrder"));
       setDraft({ entry: null, apex: null, exit: null });
     }
-  }
+  }, [draft, videoReady, t]);
 
-  function markNext() {
+  const markNext = useCallback(() => {
     if (draft.entry == null) markPhase("entry");
     else if (draft.apex == null) markPhase("apex");
     else markPhase("exit");
-  }
+  }, [draft, markPhase]);
 
   function onTimelineClick(event: React.MouseEvent<HTMLDivElement>) {
     const bar = timelineRef.current;
@@ -233,7 +233,7 @@ export function VideoCoachExperiment() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [videoReady, draft, markNext]);
+  }, [videoReady, markNext]);
 
   function toggleCornerLoop(index: number) {
     const video = videoRef.current;
