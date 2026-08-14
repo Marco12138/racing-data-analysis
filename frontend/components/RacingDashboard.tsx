@@ -133,19 +133,27 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
 
   useEffect(() => {
     let active = true;
-    getDeploymentCapabilities()
-      .then((capabilities) => {
+    let attempt = 0;
+    const maxAttempts = 3;
+    async function loadCapabilities() {
+      try {
+        const capabilities = await getDeploymentCapabilities();
         if (!active) return;
         setDeploymentCapabilities(capabilities);
         setCapabilityError("");
-      })
-      .catch((error: Error) => {
+      } catch (error) {
         if (!active) return;
-        setCapabilityError(formatXrkClientError(error));
-      })
-      .finally(() => {
+        attempt += 1;
+        if (attempt < maxAttempts) {
+          window.setTimeout(loadCapabilities, attempt * 1500);
+          return;
+        }
+        setCapabilityError(formatXrkClientError(error as Error));
+      } finally {
         if (active) setCapabilityLoading(false);
-      });
+      }
+    }
+    void loadCapabilities();
     return () => {
       active = false;
     };
