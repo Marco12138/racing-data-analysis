@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildManualCorner,
   lateralPositionFromRgba,
   sampleTimes,
   segmentCorners,
@@ -79,4 +80,15 @@ test("sampleTimes spans the lap at the requested rate", () => {
   assert.equal(times.length, 320);
   assert.equal(times[0], 10);
   assert.ok(Math.abs(times[times.length - 1] - 50) < 1e-9);
+});
+
+test("buildManualCorner validates and names marked points", () => {
+  const corner = buildManualCorner(3.2, 4.1, 5.4, 3);
+  assert.equal(corner.name, "T3");
+  assert.equal(corner.start, 3.2);
+  assert.equal(corner.apex, 4.1);
+  assert.equal(corner.end, 5.4);
+  assert.throws(() => buildManualCorner(5, 4, 6, 1));
+  assert.throws(() => buildManualCorner(3, 3, 5, 1));
+  assert.throws(() => buildManualCorner(Number.NaN, 4, 5, 1));
 });

@@ -1459,6 +1459,58 @@ select {
   gap: 12px;
 }
 
+.video-coach__mark {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.video-coach__mark .story-button.is-active {
+  border-color: rgba(53, 214, 208, 0.8);
+  background: rgba(53, 214, 208, 0.14);
+}
+
+.video-coach__mark-hint {
+  width: 100%;
+  color: #94a3b8;
+  font-size: 0.8rem;
+}
+
+.video-coach__corner-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.video-coach__corner-top input {
+  width: 96px;
+}
+
+.video-coach__corner-times {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.video-coach__corner-notes {
+  width: 100%;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  background: #0b111c;
+  color: #e2e8f0;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+}
+
+.video-coach__corner-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .video-coach__corner-list {
   margin: 0;
   padding: 0;
@@ -1521,6 +1573,10 @@ select {
   margin: 0;
   color: #fca5a5;
   font-size: 0.85rem;
+}
+
+.video-coach__large {
+  color: #e6cf83;
 }
 
 .llm-narrative-badge {

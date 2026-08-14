@@ -8,6 +8,8 @@ export type CornerSegment = {
   end: number;
   apex: number;
   direction: 1 | -1;
+  name?: string;
+  notes?: string;
 };
 
 const BAND_TOP = 0.35;
@@ -154,4 +156,29 @@ export function sampleTimes(startS: number, endS: number, fps: number): number[]
     { length: count },
     (_, index) => startS + ((endS - startS) * index) / (count - 1)
   );
+}
+
+/**
+ * Build one manually-marked corner from entry/apex/exit timestamps.
+ * Throws when the three points are not strictly increasing.
+ */
+export function buildManualCorner(
+  entry: number,
+  apex: number,
+  exit: number,
+  index: number,
+): CornerSegment {
+  if (![entry, apex, exit].every(Number.isFinite)) {
+    throw new Error("入弯/弯心/出弯时间必须是有限数字。");
+  }
+  if (!(entry < apex && apex < exit)) {
+    throw new Error("入弯、弯心、出弯时间必须依次递增。");
+  }
+  return {
+    start: Number(entry.toFixed(3)),
+    apex: Number(apex.toFixed(3)),
+    end: Number(exit.toFixed(3)),
+    direction: 1,
+    name: `T${index}`,
+  };
 }
