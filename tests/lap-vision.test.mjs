@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  autoLinkCornerWindows,
   buildManualCorner,
   findCornerIssues,
   lateralPositionFromRgba,
+  resolveOverlapIssues,
   sampleTimes,
   segmentCorners,
   smooth,
+  straightGaps,
 } from "../frontend/lib/lapVision.ts";
 
 function solidRgba(width, height, color) {
@@ -95,25 +96,29 @@ test("buildManualCorner validates and names marked points", () => {
   assert.throws(() => buildManualCorner(Number.NaN, 4, 5, 1));
 });
 
-test("findCornerIssues detects overlaps and gaps", () => {
+test("findCornerIssues detects overlaps but treats gaps as normal", () => {
   const corners = [
     buildManualCorner(10, 12, 20, 1),
     buildManualCorner(18, 22, 28, 2), // overlaps T1 (18 < 20)
     buildManualCorner(50, 54, 60, 3), // large gap after T2
   ];
   const issues = findCornerIssues(corners);
-  assert.equal(issues.length, 2);
+  assert.equal(issues.length, 1);
   assert.equal(issues[0].type, "overlap");
-  assert.equal(issues[1].type, "gap");
+  const gaps = straightGaps(corners);
+  assert.equal(gaps.length, 1);
+  assert.equal(gaps[0].gapS, 22);
 });
 
-test("autoLinkCornerWindows joins consecutive windows", () => {
+test("resolveOverlapIssues clips overlaps and preserves straights", () => {
   const corners = [
     buildManualCorner(10, 12, 20, 1),
-    buildManualCorner(25, 28, 34, 2),
+    buildManualCorner(18, 22, 28, 2),
+    buildManualCorner(50, 54, 60, 3),
   ];
-  const linked = autoLinkCornerWindows(corners);
-  assert.equal(linked[0].end, 25);
-  assert.equal(linked[1].end, 34);
-  assert.equal(findCornerIssues(linked).length, 0);
+  const resolved = resolveOverlapIssues(corners);
+  assert.equal(resolved[0].end, 18); // clipped to next entry
+  assert.equal(resolved[1].end, 28); // gap to T3 preserved
+  assert.equal(findCornerIssues(resolved).length, 0);
+  assert.equal(straightGaps(resolved).length, 1);
 });

@@ -13,7 +13,14 @@ export type CornerSegment = {
 };
 
 export type CornerIssue = {
-  type: "overlap" | "gap";
+  type: "overlap";
+  index: number;
+  prev: CornerSegment;
+  next: CornerSegment;
+  overlapS: number;
+};
+
+export type StraightGap = {
   index: number;
   prev: CornerSegment;
   next: CornerSegment;
@@ -191,33 +198,44 @@ export function buildManualCorner(
   };
 }
 
-/** Detect overlapping or gapped corner windows along the lap timeline. */
+/** Detect overlapping corner windows. Gaps between corners are normal (straights). */
 export function findCornerIssues(
   corners: CornerSegment[],
-  gapToleranceS = 0.5,
 ): CornerIssue[] {
   const issues: CornerIssue[] = [];
   for (let i = 1; i < corners.length; i += 1) {
     const prev = corners[i - 1];
     const next = corners[i];
     if (next.start < prev.end) {
-      issues.push({ type: "overlap", index: i, prev, next, gapS: next.start - prev.end });
-    } else if (next.start - prev.end > gapToleranceS) {
-      issues.push({ type: "gap", index: i, prev, next, gapS: next.start - prev.end });
+      issues.push({ type: "overlap", index: i, prev, next, overlapS: prev.end - next.start });
     }
   }
   return issues;
 }
 
-/** Join consecutive windows: each corner ends where the next one starts. */
-export function autoLinkCornerWindows(corners: CornerSegment[]): CornerSegment[] {
-  const linked = corners.map((corner) => ({ ...corner }));
-  for (let i = 1; i < linked.length; i += 1) {
-    const prev = linked[i - 1];
-    const next = linked[i];
-    if (next.start > prev.start && next.start - prev.start > 0.01) {
-      linked[i - 1] = { ...prev, end: Number(next.start.toFixed(3)) };
+/** Straight sections between consecutive corners (positive gaps only). */
+export function straightGaps(corners: CornerSegment[]): StraightGap[] {
+  const gaps: StraightGap[] = [];
+  for (let i = 1; i < corners.length; i += 1) {
+    const prev = corners[i - 1];
+    const next = corners[i];
+    const gapS = next.start - prev.end;
+    if (gapS > 0.05) {
+      gaps.push({ index: i, prev, next, gapS: Number(gapS.toFixed(3)) });
     }
   }
-  return linked;
+  return gaps;
+}
+
+/** Fix overlaps by clipping the previous corner's exit; straights are preserved. */
+export function resolveOverlapIssues(corners: CornerSegment[]): CornerSegment[] {
+  const resolved = corners.map((corner) => ({ ...corner }));
+  for (let i = 1; i < resolved.length; i += 1) {
+    const prev = resolved[i - 1];
+    const next = resolved[i];
+    if (next.start < prev.end && next.start > prev.start) {
+      resolved[i - 1] = { ...prev, end: Number(next.start.toFixed(3)) };
+    }
+  }
+  return resolved;
 }

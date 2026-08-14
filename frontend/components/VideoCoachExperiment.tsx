@@ -15,12 +15,13 @@ import {
 
 import { useI18n } from "../lib/i18n";
 import {
-  autoLinkCornerWindows,
   buildManualCorner,
   findCornerIssues,
   lateralPositionFromRgba,
+  resolveOverlapIssues,
   sampleTimes,
   segmentCorners,
+  straightGaps,
   type CornerSegment,
   type LapSample,
 } from "../lib/lapVision";
@@ -63,6 +64,7 @@ export function VideoCoachExperiment() {
   const [loopCorner, setLoopCorner] = useState<number | null>(null);
   const videoReady = durationS > 0 && !videoError;
   const issues = useMemo(() => findCornerIssues(corners), [corners]);
+  const straights = useMemo(() => straightGaps(corners), [corners]);
 
   useEffect(() => {
     if (!videoUrl) return;
@@ -176,12 +178,10 @@ export function VideoCoachExperiment() {
     if (phase !== "exit") return;
     if (next.entry == null || next.apex == null || next.exit == null) return;
     try {
-      setCorners((current) =>
-        autoLinkCornerWindows([
-          ...current,
-          buildManualCorner(next.entry as number, next.apex as number, next.exit as number, current.length + 1),
-        ])
-      );
+      setCorners((current) => [
+        ...current,
+        buildManualCorner(next.entry as number, next.apex as number, next.exit as number, current.length + 1),
+      ]);
       setDraft({ entry: null, apex: null, exit: null });
       setError("");
     } catch {
@@ -205,8 +205,8 @@ export function VideoCoachExperiment() {
     video.currentTime = ratio * durationS;
   }
 
-  function autoLink() {
-    setCorners((current) => autoLinkCornerWindows(current));
+  function resolveOverlaps() {
+    setCorners((current) => resolveOverlapIssues(current));
     setError("");
   }
 
@@ -535,13 +535,21 @@ export function VideoCoachExperiment() {
 
             {issues.length ? (
               <p className="video-coach__error">
-                {t("videoCoach.issuesFound", { count: issues.length })}{" "}
-                <button type="button" className="story-button" onClick={autoLink}>
-                  {t("videoCoach.autoLink")}
+                {t("videoCoach.overlapsFound", { count: issues.length })}{" "}
+                <button type="button" className="story-button" onClick={resolveOverlaps}>
+                  {t("videoCoach.fixOverlap")}
                 </button>
               </p>
-            ) : corners.length > 1 ? (
-              <p className="video-coach__ok">{t("videoCoach.issuesOk")}</p>
+            ) : straights.length ? (
+              <p className="video-coach__ok">
+                {straights.map((gap) =>
+                  t("videoCoach.straightGap", {
+                    from: gap.prev.name || t("videoCoach.corner", { index: gap.index }),
+                    to: gap.next.name || t("videoCoach.corner", { index: gap.index + 1 }),
+                    value: gap.gapS.toFixed(1),
+                  })
+                ).join(" · ")}
+              </p>
             ) : null}
 
             {corners.length ? (
