@@ -484,7 +484,19 @@ export async function inspectXrkFile(
 ): Promise<XrkInspection> {
   let response: Response;
   try {
+    if (!file || file.size <= 0) {
+      throw new XrkApiError(
+        "所选文件大小为 0，请重新选择 XRK 文件。",
+        "XRK_UPLOAD_EMPTY_FILE"
+      );
+    }
     const blob = await materializeUploadBlob(file);
+    if (blob.size !== file.size) {
+      throw new XrkApiError(
+        "文件读取不完整，请重新选择 XRK 文件。",
+        "XRK_UPLOAD_EMPTY_FILE"
+      );
+    }
     const url = await resolveApiUrl("/xrk/inspect");
     const form = new FormData();
     form.append("file", blob, file.name);
@@ -496,6 +508,7 @@ export async function inspectXrkFile(
   } catch (error) {
     if ((error as Error).name === "AbortError") throw error;
     if (error instanceof FrontendApiConfigError) throw error;
+    if (error instanceof XrkApiError) throw error;
     throw new XrkApiError(
       "The XRK inspection service could not be reached. CSV and Demo remain available.",
       "XRK_SERVICE_UNREACHABLE"
