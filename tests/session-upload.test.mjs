@@ -6,6 +6,7 @@ import {
   commitPendingVideo,
   isXrkFileName,
 } from "../frontend/lib/sessionUpload.ts";
+import { materializeUploadBlob } from "../frontend/lib/fileUpload.ts";
 import { consumeSelectedFile } from "../frontend/lib/fileUpload.ts";
 
 function file(name) {
@@ -33,6 +34,13 @@ test("commitPendingVideo carries the pending video into the active slot", () => 
   assert.equal(commitPendingVideo(pending, active), pending);
   assert.equal(commitPendingVideo(null, active), active);
   assert.equal(commitPendingVideo(null, null), null);
+});
+
+test("materializeUploadBlob copies file bytes into a detached Blob", async () => {
+  const file = new File(["<hCNFsample"], "sample.xrk", { type: "application/octet-stream" });
+  const blob = await materializeUploadBlob(file);
+  assert.equal(blob.size, file.size);
+  assert.equal(await blob.text(), "<hCNFsample");
 });
 
 test("selected file remains available until an async upload settles", async () => {

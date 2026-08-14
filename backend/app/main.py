@@ -135,6 +135,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if missing_xrk_file
             else "The request contains missing or invalid fields."
         )
+        transport: dict[str, object] = {}
+        if missing_xrk_file:
+            content_type = request.headers.get("content-type") or ""
+            content_length = request.headers.get("content-length")
+            transport = {
+                "content_type": content_type[:160],
+                "content_length": content_length,
+                "has_multipart_boundary": "boundary=" in content_type.lower(),
+            }
         logger.warning(
             json.dumps(
                 {
@@ -143,6 +152,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "path": request.url.path,
                     "error_code": error_code,
                     "fields": [".".join(map(str, error.get("loc", ()))) for error in exc.errors()],
+                    **transport,
                 },
                 separators=(",", ":"),
             )

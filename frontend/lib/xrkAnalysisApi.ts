@@ -1,5 +1,6 @@
 import type { CsvRow } from "./analysis";
 import { FrontendApiConfigError, resolveApiUrl } from "./config";
+import { materializeUploadBlob } from "./fileUpload";
 import type { VideoSyncFeature } from "./videoFeatureExtraction";
 
 export type XrkChannel = {
@@ -483,9 +484,10 @@ export async function inspectXrkFile(
 ): Promise<XrkInspection> {
   let response: Response;
   try {
+    const blob = await materializeUploadBlob(file);
     const url = await resolveApiUrl("/xrk/inspect");
     const form = new FormData();
-    form.append("file", file, file.name);
+    form.append("file", blob, file.name);
     response = await fetch(url, {
       method: "POST",
       body: form,
