@@ -1478,6 +1478,33 @@ select {
   font-size: 0.8rem;
 }
 
+.video-coach__mark .story-button.is-primary {
+  border-color: rgba(246, 201, 69, 0.6);
+  background: rgba(246, 201, 69, 0.12);
+  color: #f6c945;
+}
+
+.video-coach__timeline {
+  position: relative;
+  height: 18px;
+  border: 1px solid #1e293b;
+  border-radius: 9px;
+  background: #0b111c;
+  cursor: pointer;
+}
+
+.video-coach__timeline-fill {
+  height: 100%;
+  border-radius: 9px;
+  background: rgba(53, 214, 208, 0.55);
+}
+
+.video-coach__ok {
+  margin: 0 0 10px;
+  color: #66e38f;
+  font-size: 0.82rem;
+}
+
 .video-coach__corner-top {
   display: flex;
   align-items: center;

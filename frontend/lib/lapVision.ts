@@ -12,6 +12,14 @@ export type CornerSegment = {
   notes?: string;
 };
 
+export type CornerIssue = {
+  type: "overlap" | "gap";
+  index: number;
+  prev: CornerSegment;
+  next: CornerSegment;
+  gapS: number;
+};
+
 const BAND_TOP = 0.35;
 const BAND_BOTTOM = 0.65;
 const MIN_MASK_RATIO = 0.05;
@@ -181,4 +189,35 @@ export function buildManualCorner(
     direction: 1,
     name: `T${index}`,
   };
+}
+
+/** Detect overlapping or gapped corner windows along the lap timeline. */
+export function findCornerIssues(
+  corners: CornerSegment[],
+  gapToleranceS = 0.5,
+): CornerIssue[] {
+  const issues: CornerIssue[] = [];
+  for (let i = 1; i < corners.length; i += 1) {
+    const prev = corners[i - 1];
+    const next = corners[i];
+    if (next.start < prev.end) {
+      issues.push({ type: "overlap", index: i, prev, next, gapS: next.start - prev.end });
+    } else if (next.start - prev.end > gapToleranceS) {
+      issues.push({ type: "gap", index: i, prev, next, gapS: next.start - prev.end });
+    }
+  }
+  return issues;
+}
+
+/** Join consecutive windows: each corner ends where the next one starts. */
+export function autoLinkCornerWindows(corners: CornerSegment[]): CornerSegment[] {
+  const linked = corners.map((corner) => ({ ...corner }));
+  for (let i = 1; i < linked.length; i += 1) {
+    const prev = linked[i - 1];
+    const next = linked[i];
+    if (next.start > prev.start && next.start - prev.start > 0.01) {
+      linked[i - 1] = { ...prev, end: Number(next.start.toFixed(3)) };
+    }
+  }
+  return linked;
 }

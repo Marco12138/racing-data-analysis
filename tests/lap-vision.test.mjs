@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  autoLinkCornerWindows,
   buildManualCorner,
+  findCornerIssues,
   lateralPositionFromRgba,
   sampleTimes,
   segmentCorners,
@@ -91,4 +93,27 @@ test("buildManualCorner validates and names marked points", () => {
   assert.throws(() => buildManualCorner(5, 4, 6, 1));
   assert.throws(() => buildManualCorner(3, 3, 5, 1));
   assert.throws(() => buildManualCorner(Number.NaN, 4, 5, 1));
+});
+
+test("findCornerIssues detects overlaps and gaps", () => {
+  const corners = [
+    buildManualCorner(10, 12, 20, 1),
+    buildManualCorner(18, 22, 28, 2), // overlaps T1 (18 < 20)
+    buildManualCorner(50, 54, 60, 3), // large gap after T2
+  ];
+  const issues = findCornerIssues(corners);
+  assert.equal(issues.length, 2);
+  assert.equal(issues[0].type, "overlap");
+  assert.equal(issues[1].type, "gap");
+});
+
+test("autoLinkCornerWindows joins consecutive windows", () => {
+  const corners = [
+    buildManualCorner(10, 12, 20, 1),
+    buildManualCorner(25, 28, 34, 2),
+  ];
+  const linked = autoLinkCornerWindows(corners);
+  assert.equal(linked[0].end, 25);
+  assert.equal(linked[1].end, 34);
+  assert.equal(findCornerIssues(linked).length, 0);
 });

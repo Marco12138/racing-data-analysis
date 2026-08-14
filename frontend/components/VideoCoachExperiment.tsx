@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, Play, Scissors, Upload } from "lucide-react";
 import {
   CartesianGrid,
@@ -15,7 +15,9 @@ import {
 
 import { useI18n } from "../lib/i18n";
 import {
+  autoLinkCornerWindows,
   buildManualCorner,
+  findCornerIssues,
   lateralPositionFromRgba,
   sampleTimes,
   segmentCorners,
@@ -33,6 +35,7 @@ export function VideoCoachExperiment() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const sampleRef = useRef<HTMLCanvasElement>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
 
   const [videoUrl, setVideoUrl] = useState("");
   const [videoName, setVideoName] = useState("");
@@ -58,6 +61,8 @@ export function VideoCoachExperiment() {
     exit: null,
   });
   const [loopCorner, setLoopCorner] = useState<number | null>(null);
+  const videoReady = durationS > 0 && !videoError;
+  const issues = useMemo(() => findCornerIssues(corners), [corners]);
 
   useEffect(() => {
     if (!videoUrl) return;
@@ -171,10 +176,12 @@ export function VideoCoachExperiment() {
     if (phase !== "exit") return;
     if (next.entry == null || next.apex == null || next.exit == null) return;
     try {
-      setCorners((current) => [
-        ...current,
-        buildManualCorner(next.entry as number, next.apex as number, next.exit as number, current.length + 1),
-      ]);
+      setCorners((current) =>
+        autoLinkCornerWindows([
+          ...current,
+          buildManualCorner(next.entry as number, next.apex as number, next.exit as number, current.length + 1),
+        ])
+      );
       setDraft({ entry: null, apex: null, exit: null });
       setError("");
     } catch {
@@ -182,6 +189,51 @@ export function VideoCoachExperiment() {
       setDraft({ entry: null, apex: null, exit: null });
     }
   }
+
+  function markNext() {
+    if (draft.entry == null) markPhase("entry");
+    else if (draft.apex == null) markPhase("apex");
+    else markPhase("exit");
+  }
+
+  function onTimelineClick(event: React.MouseEvent<HTMLDivElement>) {
+    const bar = timelineRef.current;
+    const video = videoRef.current;
+    if (!bar || !video || durationS <= 0) return;
+    const rect = bar.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    video.currentTime = ratio * durationS;
+  }
+
+  function autoLink() {
+    setCorners((current) => autoLinkCornerWindows(current));
+    setError("");
+  }
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      const video = videoRef.current;
+      if (!video || !videoReady) return;
+      if (event.code === "Space") {
+        event.preventDefault();
+        if (video.paused) void video.play();
+        else video.pause();
+      } else if (event.key === "m" || event.key === "M") {
+        event.preventDefault();
+        markNext();
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        video.currentTime = Math.max(0, video.currentTime - (event.shiftKey ? 0.1 : 1 / 30));
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        video.currentTime = Math.min(video.duration, video.currentTime + (event.shiftKey ? 0.1 : 1 / 30));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [videoReady, draft, markNext]);
 
   function toggleCornerLoop(index: number) {
     const video = videoRef.current;
@@ -329,7 +381,12 @@ export function VideoCoachExperiment() {
     time_s: sample.time_s,
     lateral: sample.lateral,
   }));
-  const videoReady = durationS > 0 && !videoError;
+  const nextPhaseLabel =
+    draft.entry == null
+      ? t("videoCoach.markEntry")
+      : draft.apex == null
+        ? t("videoCoach.markApex")
+        : t("videoCoach.markExit");
 
   return (
     <main className="video-coach">
@@ -370,6 +427,20 @@ export function VideoCoachExperiment() {
             onTimeUpdate={onTimeUpdate}
             onError={onVideoError}
           />
+
+          <div
+            ref={timelineRef}
+            className="video-coach__timeline"
+            onClick={onTimelineClick}
+            role="slider"
+            aria-label={t("videoCoach.timeline")}
+            aria-valuemin={0}
+            aria-valuemax={Math.round(durationS)}
+            aria-valuenow={Math.round(currentTime)}
+          >
+            <div className="video-coach__timeline-fill" style={{ width: `${durationS > 0 ? (currentTime / durationS) * 100 : 0}%` }} />
+          </div>
+          <p className="video-coach__mark-hint">{t("videoCoach.keyHint")}</p>
 
           <div className="video-coach__lap">
             <button type="button" className="story-button" onClick={() => setLapStart(videoRef.current?.currentTime ?? 0)}>
@@ -430,6 +501,9 @@ export function VideoCoachExperiment() {
               <span className="video-coach__mark-hint">
                 {t("videoCoach.markHint")} · {t("videoCoach.currentTime")} {currentTime.toFixed(2)}s
               </span>
+              <button type="button" className="story-button is-primary" onClick={markNext} disabled={!videoReady}>
+                {t("videoCoach.markNext", { phase: nextPhaseLabel })}
+              </button>
               <button
                 type="button"
                 className={`story-button ${draft.entry != null ? "is-active" : ""}`}
@@ -458,6 +532,17 @@ export function VideoCoachExperiment() {
                 {t("videoCoach.markCancel")}
               </button>
             </div>
+
+            {issues.length ? (
+              <p className="video-coach__error">
+                {t("videoCoach.issuesFound", { count: issues.length })}{" "}
+                <button type="button" className="story-button" onClick={autoLink}>
+                  {t("videoCoach.autoLink")}
+                </button>
+              </p>
+            ) : corners.length > 1 ? (
+              <p className="video-coach__ok">{t("videoCoach.issuesOk")}</p>
+            ) : null}
 
             {corners.length ? (
               <ul className="video-coach__corner-list">
