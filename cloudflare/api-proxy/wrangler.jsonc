@@ -7,6 +7,7 @@
   "vars": {
     "UPSTREAM_ORIGIN": "https://racing-ai-platform-api-production.up.railway.app",
     "ALLOWED_ORIGINS": "https://ai-racing-telemetry-platform.vercel.app,https://ai-racing-telemetry-platform.marcosebastian1144.chatgpt.site",
+    "ALLOWED_ORIGIN_HOST_PATTERNS": "ai-racing-telemetry-platform-*.vercel.app",
     "MAX_REQUEST_BYTES": "52428800"
   },
   "observability": {

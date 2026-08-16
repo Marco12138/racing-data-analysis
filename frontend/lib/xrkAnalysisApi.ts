@@ -1,6 +1,6 @@
 import type { CsvRow } from "./analysis";
-import { FrontendApiConfigError, resolveApiUrl } from "./config";
-import { materializeUploadBlob } from "./fileUpload";
+import { resolveApiUrl } from "./config";
+import { exceedsUploadLimit, materializeUploadBlob } from "./fileUpload";
 import type { VideoSyncFeature } from "./videoFeatureExtraction";
 
 export type XrkChannel = {
@@ -480,24 +480,44 @@ function readableApiErrorMessage(
 
 export async function inspectXrkFile(
   file: File,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  maxUploadBytes?: number | null,
 ): Promise<XrkInspection> {
-  let response: Response;
+  if (!file || file.size <= 0) {
+    throw new XrkApiError(
+      "所选文件大小为 0，请重新选择 XRK 文件。",
+      "XRK_UPLOAD_EMPTY_FILE"
+    );
+  }
+  if (exceedsUploadLimit(file, maxUploadBytes)) {
+    throw new XrkApiError(
+      `XRK 文件为 ${formatUploadBytes(file.size)}，超过当前服务的 ${formatUploadBytes(maxUploadBytes!)} 上传上限。`,
+      "XRK_FILE_TOO_LARGE",
+      null,
+      413,
+    );
+  }
+
+  let blob: Blob;
   try {
-    if (!file || file.size <= 0) {
-      throw new XrkApiError(
-        "所选文件大小为 0，请重新选择 XRK 文件。",
-        "XRK_UPLOAD_EMPTY_FILE"
-      );
-    }
-    const blob = await materializeUploadBlob(file);
+    blob = await materializeUploadBlob(file);
     if (blob.size !== file.size) {
       throw new XrkApiError(
         "文件读取不完整，请重新选择 XRK 文件。",
         "XRK_UPLOAD_EMPTY_FILE"
       );
     }
-    const url = await resolveApiUrl("/xrk/inspect");
+  } catch (error) {
+    if (error instanceof XrkApiError) throw error;
+    throw new XrkApiError(
+      "浏览器无法读取所选 XRK 文件。请重新选择文件，或确认文件未被移动和占用。",
+      "XRK_FILE_READ_FAILED",
+    );
+  }
+
+  const url = await resolveApiUrl("/xrk/inspect");
+  let response: Response;
+  try {
     const form = new FormData();
     form.append("file", blob, file.name);
     response = await fetch(url, {
@@ -507,17 +527,21 @@ export async function inspectXrkFile(
     });
   } catch (error) {
     if ((error as Error).name === "AbortError") throw error;
-    if (error instanceof FrontendApiConfigError) throw error;
     if (error instanceof XrkApiError) throw error;
     throw new XrkApiError(
-      "The XRK inspection service could not be reached. CSV and Demo remain available.",
-      "XRK_SERVICE_UNREACHABLE"
+      "浏览器未能把 XRK 发送到分析服务。请检查网络连接；若能力检查正常，请检查 Cloudflare 代理来源和上传限制。CSV 与 Demo 仍可使用。",
+      "XRK_UPLOAD_TRANSPORT_FAILED"
     );
   }
   if (!response.ok) {
     throw await responseError(response, `XRK inspection failed (${response.status}).`);
   }
   return response.json() as Promise<XrkInspection>;
+}
+
+function formatUploadBytes(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  return `${mb.toFixed(mb >= 10 ? 1 : 2)} MB`;
 }
 
 export async function getXrkInspection(inspectionId: string): Promise<XrkInspection> {

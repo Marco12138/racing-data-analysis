@@ -273,7 +273,11 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     setAimImportStatus("inspecting");
     setDataError("");
     try {
-      const inspected = await inspectXrkFile(file, controller.signal);
+      const inspected = await inspectXrkFile(
+        file,
+        controller.signal,
+        serverImport.max_upload_bytes,
+      );
       setLapRows(normalizeLapRows([]));
       setTelemetryRows(normalizeTelemetryRows([]));
       setAimImport(null);

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildUpstreamUrl, handleRequest, isApiPath } from "../src/proxy.ts";
+import { buildUpstreamUrl, handleRequest, isAllowedOrigin, isApiPath } from "../src/proxy.ts";
 
 const env = {
   UPSTREAM_ORIGIN: "https://railway.example",
   ALLOWED_ORIGINS: "https://frontend.example",
+  ALLOWED_ORIGIN_HOST_PATTERNS: "ai-racing-telemetry-platform-*.vercel.app",
   MAX_REQUEST_BYTES: "52428800",
 } as Env;
 
@@ -18,6 +19,33 @@ test("only the fixed API prefix is accepted", () => {
 test("upstream origin is fixed while path and query are preserved", () => {
   const url = buildUpstreamUrl("https://proxy.example/api/v1/health?detail=1", env.UPSTREAM_ORIGIN);
   assert.equal(url.toString(), "https://railway.example/api/v1/health?detail=1");
+});
+
+test("only project-scoped HTTPS Vercel preview origins match the wildcard", () => {
+  const exact = new Set(["https://frontend.example"]);
+  const patterns = ["ai-racing-telemetry-platform-*.vercel.app"];
+  assert.equal(isAllowedOrigin("https://frontend.example", exact, patterns), true);
+  assert.equal(
+    isAllowedOrigin(
+      "https://ai-racing-telemetry-platform-git-fix-marco12138s-projects.vercel.app",
+      exact,
+      patterns,
+    ),
+    true,
+  );
+  assert.equal(isAllowedOrigin("https://attacker.vercel.app", exact, patterns), false);
+  assert.equal(
+    isAllowedOrigin("https://ai-racing-telemetry-platform-.vercel.app", exact, patterns),
+    false,
+  );
+  assert.equal(
+    isAllowedOrigin("https://ai-racing-telemetry-platform-test.vercel.app/path", exact, patterns),
+    false,
+  );
+  assert.equal(
+    isAllowedOrigin("http://ai-racing-telemetry-platform-test.vercel.app", exact, patterns),
+    false,
+  );
 });
 
 test("allowed requests stream their body and receive exact-origin CORS", async () => {

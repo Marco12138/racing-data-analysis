@@ -6,7 +6,7 @@ import {
   commitPendingVideo,
   isXrkFileName,
 } from "../frontend/lib/sessionUpload.ts";
-import { materializeUploadBlob } from "../frontend/lib/fileUpload.ts";
+import { exceedsUploadLimit, materializeUploadBlob } from "../frontend/lib/fileUpload.ts";
 import { consumeSelectedFile } from "../frontend/lib/fileUpload.ts";
 
 function file(name) {
@@ -36,11 +36,19 @@ test("commitPendingVideo carries the pending video into the active slot", () => 
   assert.equal(commitPendingVideo(null, null), null);
 });
 
-test("materializeUploadBlob copies file bytes into a detached Blob", async () => {
+test("materializeUploadBlob creates a byte-preserving view without arrayBuffer", async () => {
   const file = new File(["<hCNFsample"], "sample.xrk", { type: "application/octet-stream" });
+  file.arrayBuffer = () => { throw new Error("must not copy the whole file"); };
   const blob = await materializeUploadBlob(file);
   assert.equal(blob.size, file.size);
   assert.equal(await blob.text(), "<hCNFsample");
+});
+
+test("upload limit is enforced before the network request", () => {
+  const selected = new File(["12345"], "large.xrk");
+  assert.equal(exceedsUploadLimit(selected, 4), true);
+  assert.equal(exceedsUploadLimit(selected, 5), false);
+  assert.equal(exceedsUploadLimit(selected, null), false);
 });
 
 test("selected file remains available until an async upload settles", async () => {

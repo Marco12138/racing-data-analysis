@@ -14,6 +14,49 @@ function parseOrigins(value: string): Set<string> {
   );
 }
 
+function parseOriginHostPatterns(value = ""): string[] {
+  return value
+    .split(",")
+    .map((pattern) => pattern.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+export function isAllowedOrigin(
+  origin: string,
+  exactOrigins: Set<string>,
+  hostPatterns: string[],
+): boolean {
+  if (exactOrigins.has(origin)) return true;
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (
+    parsed.protocol !== "https:"
+    || parsed.username
+    || parsed.password
+    || parsed.port
+    || parsed.pathname !== "/"
+    || parsed.search
+    || parsed.hash
+  ) {
+    return false;
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  return hostPatterns.some((pattern) => {
+    const wildcard = pattern.indexOf("*");
+    if (wildcard < 0) return hostname === pattern;
+    if (pattern.indexOf("*", wildcard + 1) >= 0) return false;
+    const prefix = pattern.slice(0, wildcard);
+    const suffix = pattern.slice(wildcard + 1);
+    return hostname.length > prefix.length + suffix.length
+      && hostname.startsWith(prefix)
+      && hostname.endsWith(suffix);
+  });
+}
+
 export function isApiPath(pathname: string): boolean {
   return pathname === API_PREFIX || pathname.startsWith(`${API_PREFIX}/`);
 }
@@ -71,6 +114,7 @@ export async function handleRequest(
   const url = new URL(request.url);
   const origin = request.headers.get("Origin");
   const allowedOrigins = parseOrigins(env.ALLOWED_ORIGINS);
+  const allowedHostPatterns = parseOriginHostPatterns(env.ALLOWED_ORIGIN_HOST_PATTERNS);
 
   if (!isApiPath(url.pathname)) {
     return jsonError(404, "PROXY_ROUTE_NOT_FOUND", "The requested proxy route does not exist.", requestId, null);
@@ -78,7 +122,7 @@ export async function handleRequest(
   if (!ALLOWED_METHODS.has(request.method)) {
     return jsonError(405, "PROXY_METHOD_NOT_ALLOWED", "The request method is not allowed.", requestId, null);
   }
-  if (origin && !allowedOrigins.has(origin)) {
+  if (origin && !isAllowedOrigin(origin, allowedOrigins, allowedHostPatterns)) {
     return jsonError(403, "PROXY_ORIGIN_NOT_ALLOWED", "The request origin is not allowed.", requestId, null);
   }
 
