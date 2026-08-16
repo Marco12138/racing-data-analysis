@@ -316,10 +316,39 @@ NEXT_PUBLIC_API_PREFIX=/api/v1
 ```
 
 Keep `UPSTREAM_ORIGIN` and `ALLOWED_ORIGINS` in `wrangler.jsonc` limited to the
-actual Railway service and approved frontend origins. Cloudflare's request body
+actual Railway service and approved frontend origins. The optional
+`ALLOWED_ORIGIN_HOST_PATTERNS` is hostname-only and currently admits this
+project's HTTPS Vercel Preview domains; do not replace it with a broad
+`*.vercel.app` pattern. Cloudflare's request body
 limit and the backend's `MAX_XRK_UPLOAD_BYTES` must both accommodate the chosen
 XRK limit. The current proxy rejects declared request bodies above 50 MB, and
 FastAPI remains responsible for validating chunked uploads.
+
+### XRK upload transport troubleshooting
+
+When the UI reports an XRK transport error, verify the chain in this order:
+
+```text
+GET  <worker>/api/v1/health
+GET  <worker>/api/v1/capabilities
+POST <worker>/api/v1/xrk/inspect
+```
+
+- `XRK_FILE_TOO_LARGE`: the browser blocked a file above the capability's
+  advertised limit before sending it. Align Worker and Railway limits rather
+  than hiding the error.
+- `XRK_FILE_READ_FAILED`: the browser could not retain/read the selected local
+  file. Re-select it and confirm it has not moved.
+- `XRK_UPLOAD_TRANSPORT_FAILED`: the file was readable but the browser did not
+  receive an HTTP response. Check that the Worker is deployed, its exact/pattern
+  origin allowlist includes the active frontend domain, and its Railway upstream
+  is current.
+- `PROXY_UPSTREAM_UNAVAILABLE`: the Worker answered but could not reach Railway;
+  inspect Worker logs and Railway health before changing the frontend.
+
+After changing `wrangler.jsonc`, run the proxy tests and deploy the Worker. A
+Vercel redeploy is needed only when `NEXT_PUBLIC_API_URL` or another build-time
+frontend variable changes.
 
 ## Provider references
 
