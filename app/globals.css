@@ -1430,6 +1430,41 @@ select {
   align-items: center;
 }
 
+.video-coach__strokes {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: #94a3b8;
+  font-size: 0.8rem;
+}
+
+.video-coach__strokes select {
+  background: #0b111c;
+  color: #e2e8f0;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 0.8rem;
+}
+
+.video-coach__confirm {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  color: #f6c945;
+  font-size: 0.82rem;
+  border: 1px solid rgba(246, 201, 69, 0.35);
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: rgba(246, 201, 69, 0.06);
+}
+
+.video-coach__confirm .story-button {
+  font-size: 0.78rem;
+  padding: 4px 12px;
+}
+
 .video-coach__overlay {
   width: 100%;
   border: 1px solid rgba(53, 214, 208, 0.35);

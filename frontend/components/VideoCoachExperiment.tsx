@@ -15,6 +15,10 @@ import {
 
 import { useI18n } from "../lib/i18n";
 import {
+  analyzeLapAudio,
+  type LapAudioAnalysis,
+} from "../lib/audioRpm";
+import {
   buildManualCorner,
   findCornerIssues,
   lateralPositionFromRgba,
@@ -39,6 +43,7 @@ export function VideoCoachExperiment() {
   const timelineRef = useRef<HTMLDivElement>(null);
 
   const [videoUrl, setVideoUrl] = useState("");
+  const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoName, setVideoName] = useState("");
   const [durationS, setDurationS] = useState(0);
   const [videoWidth, setVideoWidth] = useState(0);
@@ -61,10 +66,27 @@ export function VideoCoachExperiment() {
     apex: null,
     exit: null,
   });
+  const [rpmResult, setRpmResult] = useState<LapAudioAnalysis | null>(null);
+  const [rpmAnalyzing, setRpmAnalyzing] = useState(false);
+  const [rpmProgress, setRpmProgress] = useState(0);
+  const [rpmError, setRpmError] = useState("");
+  const [rpmHint, setRpmHint] = useState("");
+  const [rpmStrokes, setRpmStrokes] = useState<2 | 4>(2);
+  const [rpmReplacePending, setRpmReplacePending] = useState(false);
   const [loopCorner, setLoopCorner] = useState<number | null>(null);
   const videoReady = durationS > 0 && !videoError;
   const issues = useMemo(() => findCornerIssues(corners), [corners]);
   const straights = useMemo(() => straightGaps(corners), [corners]);
+  const rpmChartData = useMemo(
+    () =>
+      rpmResult
+        ? rpmResult.times.map((time_s, index) => ({
+            time_s,
+            rpm: rpmResult.rpm[index],
+          }))
+        : [],
+    [rpmResult],
+  );
 
   useEffect(() => {
     if (!videoUrl) return;
@@ -118,9 +140,15 @@ export function VideoCoachExperiment() {
     }
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoUrl(URL.createObjectURL(file));
+    setVideoFile(file);
     setVideoName(file.name);
     setSamples([]);
     setCorners([]);
+    setRpmResult(null);
+    setRpmError("");
+    setRpmHint("");
+    setRpmReplacePending(false);
+    setRpmProgress(0);
     setError("");
     setVideoError("");
     setMediaErrorDetail("");
@@ -338,6 +366,66 @@ export function VideoCoachExperiment() {
     video.currentTime = lapStart;
   }
 
+  function audioErrorText(code: string): string {
+    if (code === "NO_AUDIO_TRACK") return t("videoCoach.audioNoTrack");
+    if (code === "VIDEO_TOO_LONG") return t("videoCoach.audioTooLong");
+    if (code === "AUDIO_UNSUPPORTED") return t("videoCoach.audioUnsupported");
+    return t("videoCoach.audioFailed");
+  }
+
+  async function runAudioMark() {
+    if (!videoFile || !videoReady) {
+      setRpmError(t("videoCoach.notReady"));
+      return;
+    }
+    if (lapEnd - lapStart < 3) {
+      setRpmError(t("videoCoach.needLap"));
+      return;
+    }
+    setRpmAnalyzing(true);
+    setRpmProgress(0);
+    setRpmError("");
+    setRpmHint("");
+    try {
+      const result = await analyzeLapAudio(videoFile, {
+        startS: lapStart,
+        endS: lapEnd,
+        strokes: rpmStrokes,
+        onProgress: (fraction) => setRpmProgress(fraction),
+      });
+      setRpmResult(result);
+      const candidates = result.events
+        .map((event, index) => {
+          try {
+            return buildManualCorner(event.entry_s, event.apex_s, event.exit_s, index + 1);
+          } catch {
+            return null;
+          }
+        })
+        .filter((corner): corner is CornerSegment => corner !== null);
+      setCorners(candidates);
+      setRpmReplacePending(false);
+      setRpmHint(t("videoCoach.audioResult", { count: candidates.length }));
+      const first = candidates[0];
+      if (first && videoRef.current) {
+        videoRef.current.currentTime = first.start;
+      }
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "";
+      setRpmError(audioErrorText(code));
+    } finally {
+      setRpmAnalyzing(false);
+    }
+  }
+
+  function onAudioMarkClick() {
+    if (corners.length > 0 && !rpmReplacePending) {
+      setRpmReplacePending(true);
+      return;
+    }
+    void runAudioMark();
+  }
+
   function updateCorner(index: number, patch: Partial<CornerSegment>) {
     setCorners((current) =>
       current.map((corner, i) => (i === index ? { ...corner, ...patch } : corner))
@@ -465,8 +553,49 @@ export function VideoCoachExperiment() {
                 <Download size={15} /> {t("videoCoach.downloadTrace")}
               </button>
             ) : null}
+            <label className="video-coach__strokes">
+              {t("videoCoach.strokes")}
+              <select
+                value={rpmStrokes}
+                onChange={(event) => setRpmStrokes(event.target.value === "4" ? 4 : 2)}
+                disabled={rpmAnalyzing}
+              >
+                <option value={2}>{t("videoCoach.strokes2")}</option>
+                <option value={4}>{t("videoCoach.strokes4")}</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              className="story-button is-primary"
+              onClick={onAudioMarkClick}
+              disabled={rpmAnalyzing || !videoReady}
+            >
+              {rpmAnalyzing
+                ? `${t("videoCoach.audioAnalyzing")} ${Math.round(rpmProgress * 100)}%`
+                : t("videoCoach.audioMark")}
+            </button>
           </div>
           {error ? <p className="video-coach__error">{error}</p> : null}
+          {rpmError ? <p className="video-coach__error">{rpmError}</p> : null}
+          {rpmHint ? <p className="video-coach__ok">{rpmHint}</p> : null}
+          {rpmReplacePending ? (
+            <div className="video-coach__confirm">
+              <span>{t("videoCoach.audioReplace", { count: corners.length })}</span>
+              <button type="button" className="story-button" onClick={() => void runAudioMark()}>
+                {t("videoCoach.confirm")}
+              </button>
+              <button
+                type="button"
+                className="story-button"
+                onClick={() => setRpmReplacePending(false)}
+              >
+                {t("videoCoach.cancel")}
+              </button>
+            </div>
+          ) : null}
+          {!rpmAnalyzing && !rpmResult ? (
+            <p className="video-coach__mark-hint">{t("videoCoach.audioMarkHint")}</p>
+          ) : null}
 
           <canvas ref={overlayRef} width={OVERLAY_W} height={OVERLAY_H} className="video-coach__overlay" />
 
@@ -484,6 +613,53 @@ export function VideoCoachExperiment() {
                     <ReferenceLine key={`s${corner.start}`} x={corner.start} stroke="#ff5964" strokeDasharray="3 3" />
                   ))}
                   <Line type="monotone" dataKey="lateral" name={t("videoCoach.lateralLabel")} stroke="#35d6d0" dot={false} strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            </section>
+          ) : null}
+
+          {rpmResult && rpmResult.times.length > 1 ? (
+            <section className="video-coach__chart">
+              <h2>{t("videoCoach.rpmChart")}</h2>
+              <ResponsiveContainer width="100%" height={190}>
+                <LineChart
+                  data={rpmChartData}
+                  margin={{ top: 8, right: 16, bottom: 0, left: -10 }}
+                >
+                  <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="time_s"
+                    type="number"
+                    domain={["dataMin", "dataMax"]}
+                    tick={{ fontSize: 10, fill: "#64748b" }}
+                    tickFormatter={(value: number) => `${value.toFixed(0)}s`}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: "#64748b" }}
+                    domain={["auto", "auto"]}
+                    tickFormatter={(value: number) => `${Math.round(value / 1000)}k`}
+                  />
+                  <Tooltip
+                    contentStyle={{ background: "#0f172a", border: "1px solid #334155", fontSize: 12 }}
+                  />
+                  <ReferenceLine x={currentTime} stroke="#f6c945" strokeDasharray="4 4" />
+                  {corners.map((corner) => (
+                    <ReferenceLine
+                      key={`rpm-${corner.start}`}
+                      x={corner.start}
+                      stroke="#f6c945"
+                      strokeDasharray="3 3"
+                      opacity={0.5}
+                    />
+                  ))}
+                  <Line
+                    type="monotone"
+                    dataKey="rpm"
+                    name={t("videoCoach.rpmLabel")}
+                    stroke="#ff5964"
+                    dot={false}
+                    strokeWidth={1.6}
+                  />
                 </LineChart>
               </ResponsiveContainer>
             </section>

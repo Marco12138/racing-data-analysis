@@ -158,7 +158,7 @@ test("initialVideoState builds the player state from an initial file", () => {
   assert.equal(empty.videoFile, null);
 });
 
-test("VideoSyncPanel shows the player and hides the upload area when a video is loaded", () => {
+test("SingleLapAnalysisPanel shows the player and hides the upload area when a video is loaded", () => {
   const html = render();
   assert.match(html, /<video/);
   assert.doesNotMatch(html, /accept="video\/\*"/);
@@ -166,9 +166,18 @@ test("VideoSyncPanel shows the player and hides the upload area when a video is 
   assert.match(html, /onboard\.MOV/);
 });
 
-test("VideoSyncPanel shows the upload area when no video is loaded", () => {
+test("SingleLapAnalysisPanel shows the upload area when no video is loaded", () => {
   const html = render({ videoUrl: "", videoName: "", videoFile: null });
   assert.doesNotMatch(html, /<video/);
   assert.match(html, /accept="video\/\*"/);
   assert.doesNotMatch(html, /更换视频/);
+});
+
+test("SingleLapAnalysisPanel shows lap-range and audio auto-mark controls for a loaded video", () => {
+  const html = render();
+  assert.match(html, /设圈起点/);
+  assert.match(html, /设圈终点/);
+  assert.match(html, /听声自动标注/);
+  assert.match(html, /入弯点/);
+  assert.match(html, /单圈分析/);
 });
