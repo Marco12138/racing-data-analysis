@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -11,6 +11,7 @@ import {
   Gauge,
   Link2,
   Map,
+  Play,
   ShieldCheck,
   SlidersHorizontal,
   Target,
@@ -30,6 +31,17 @@ import {
   YAxis,
 } from "recharts";
 
+import {
+  analyzeLapAudio,
+  type LapAudioAnalysis,
+} from "../lib/audioRpm";
+import {
+  buildManualCorner,
+  findCornerIssues,
+  resolveOverlapIssues,
+  straightGaps,
+  type CornerSegment,
+} from "../lib/lapVision";
 import type {
   XrkAnalysis,
   XrkAnalyzeOptions,
@@ -72,7 +84,7 @@ const tabs = [
   ["comparison", "xrk.tab.comparison", BarChart3],
   ["actions", "xrk.tab.actions", Activity],
   ["sectors", "xrk.tab.sectors", Flag],
-  ["video", "xrk.tab.video", Video],
+  ["video", "xrk.tab.lap", Video],
   ["storyboard", "xrk.tab.storyboard", Clapperboard],
   ["coach", "xrk.tab.coach", Target],
   ["report", "xrk.tab.report", FileText],
@@ -311,7 +323,7 @@ export function XrkAnalysisWorkspace({
       )}
 
       {activeTab === "video" && (
-        <VideoSyncPanel
+        <SingleLapAnalysisPanel
           analysis={analysis}
           cursorDistance={cursorDistance}
           seekRequest={seekRequest}
@@ -847,7 +859,7 @@ function SectorZonePanel({
   );
 }
 
-export function VideoSyncPanel({
+export function SingleLapAnalysisPanel({
   analysis,
   cursorDistance,
   seekRequest,
@@ -884,6 +896,7 @@ export function VideoSyncPanel({
 }) {
   const { t } = useI18n();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
   const [syncMessage, setSyncMessage] = useState("");
   const [syncError, setSyncError] = useState("");
   const [autoSyncing, setAutoSyncing] = useState(false);
@@ -892,6 +905,222 @@ export function VideoSyncPanel({
   const storageKey = `racing-video-sync:${analysis.track?.track_id ?? "unknown"}:${analysis.file_fingerprint}`;
   const targetPoints = analysis.track?.target ?? [];
   const cursorPoint = nearestPointByDistance(targetPoints, cursorDistance);
+
+  const [currentTime, setCurrentTime] = useState(0);
+  const [lapStart, setLapStart] = useState(0);
+  const [lapEnd, setLapEnd] = useState(videoDurationS);
+  const [corners, setCorners] = useState<CornerSegment[]>([]);
+  const [draft, setDraft] = useState<{ entry: number | null; apex: number | null; exit: number | null }>({
+    entry: null,
+    apex: null,
+    exit: null,
+  });
+  const [loopCorner, setLoopCorner] = useState<number | null>(null);
+  const [rpmResult, setRpmResult] = useState<LapAudioAnalysis | null>(null);
+  const [rpmAnalyzing, setRpmAnalyzing] = useState(false);
+  const [rpmProgress, setRpmProgress] = useState(0);
+  const [rpmError, setRpmError] = useState("");
+  const [rpmHint, setRpmHint] = useState("");
+  const [rpmStrokes, setRpmStrokes] = useState<2 | 4>(2);
+  const [rpmReplacePending, setRpmReplacePending] = useState(false);
+
+  const issues = useMemo(() => findCornerIssues(corners), [corners]);
+  const straights = useMemo(() => straightGaps(corners), [corners]);
+  const rpmChartData = useMemo(
+    () =>
+      rpmResult
+        ? rpmResult.times.map((time_s, index) => ({
+            time_s,
+            rpm: rpmResult.rpm[index],
+          }))
+        : [],
+    [rpmResult],
+  );
+  const nextPhaseLabel =
+    draft.entry == null
+      ? t("videoCoach.markEntry")
+      : draft.apex == null
+        ? t("videoCoach.markApex")
+        : t("videoCoach.markExit");
+
+  function onTimeUpdate() {
+    const video = videoRef.current;
+    if (!video) return;
+    setCurrentTime(video.currentTime);
+    if (loopCorner != null) {
+      const corner = corners[loopCorner];
+      if (corner && video.currentTime > corner.end) {
+        video.pause();
+        video.currentTime = corner.start;
+      }
+    }
+    followVideo();
+  }
+
+  function onTimelineClick(event: React.MouseEvent<HTMLDivElement>) {
+    const bar = timelineRef.current;
+    const video = videoRef.current;
+    if (!bar || !video || videoDurationS <= 0) return;
+    const rect = bar.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    video.currentTime = ratio * videoDurationS;
+  }
+
+  const markPhase = useCallback((phase: "entry" | "apex" | "exit") => {
+    const video = videoRef.current;
+    if (!video || !videoUrl || videoDurationS <= 0) return;
+    const time = video.currentTime;
+    const next = { ...draft, [phase]: time };
+    setDraft(next);
+    if (phase !== "exit") return;
+    if (next.entry == null || next.apex == null || next.exit == null) return;
+    try {
+      setCorners((current) => [
+        ...current,
+        buildManualCorner(next.entry as number, next.apex as number, next.exit as number, current.length + 1),
+      ]);
+      setDraft({ entry: null, apex: null, exit: null });
+      setSyncError("");
+    } catch {
+      setSyncError(t("videoCoach.markOrder"));
+      setDraft({ entry: null, apex: null, exit: null });
+    }
+  }, [draft, videoUrl, videoDurationS, t]);
+
+  const markNext = useCallback(() => {
+    if (draft.entry == null) markPhase("entry");
+    else if (draft.apex == null) markPhase("apex");
+    else markPhase("exit");
+  }, [draft, markPhase]);
+
+  function resetDraft() {
+    setDraft({ entry: null, apex: null, exit: null });
+  }
+
+  function updateCorner(index: number, patch: Partial<CornerSegment>) {
+    setCorners((current) =>
+      current.map((corner, i) => (i === index ? { ...corner, ...patch } : corner))
+    );
+  }
+
+  function addCorner() {
+    setCorners((current) => {
+      const last = current[current.length - 1];
+      const start = last ? last.end : lapStart;
+      const end = Math.min(videoDurationS || start + 5, start + 5);
+      return [
+        ...current,
+        buildManualCorner(
+          Number(start.toFixed(2)),
+          Number(((start + end) / 2).toFixed(2)),
+          Number(end.toFixed(2)),
+          current.length + 1,
+        ),
+      ];
+    });
+  }
+
+  function toggleCornerLoop(index: number) {
+    const video = videoRef.current;
+    const corner = corners[index];
+    if (!video || !corner) return;
+    setLoopCorner((current) => {
+      if (current === index) return null;
+      video.currentTime = corner.start;
+      void video.play();
+      return index;
+    });
+  }
+
+  function deleteCorner(index: number) {
+    setCorners((current) => current.filter((_, i) => i !== index));
+    setLoopCorner(null);
+  }
+
+  function audioErrorText(code: string): string {
+    if (code === "NO_AUDIO_TRACK") return t("videoCoach.audioNoTrack");
+    if (code === "VIDEO_TOO_LONG") return t("videoCoach.audioTooLong");
+    if (code === "AUDIO_UNSUPPORTED") return t("videoCoach.audioUnsupported");
+    return t("videoCoach.audioFailed");
+  }
+
+  async function runAudioMark() {
+    if (!videoFile || !videoUrl || videoDurationS <= 0) {
+      setRpmError(t("videoCoach.notReady"));
+      return;
+    }
+    if (lapEnd - lapStart < 3) {
+      setRpmError(t("videoCoach.needLap"));
+      return;
+    }
+    setRpmAnalyzing(true);
+    setRpmProgress(0);
+    setRpmError("");
+    setRpmHint("");
+    try {
+      const result = await analyzeLapAudio(videoFile, {
+        startS: lapStart,
+        endS: lapEnd,
+        strokes: rpmStrokes,
+        onProgress: (fraction) => setRpmProgress(fraction),
+      });
+      setRpmResult(result);
+      const candidates = result.events
+        .map((event, index) => {
+          try {
+            return buildManualCorner(event.entry_s, event.apex_s, event.exit_s, index + 1);
+          } catch {
+            return null;
+          }
+        })
+        .filter((corner): corner is CornerSegment => corner !== null);
+      setCorners(candidates);
+      setRpmReplacePending(false);
+      setRpmHint(t("videoCoach.audioResult", { count: candidates.length }));
+      const first = candidates[0];
+      if (first && videoRef.current) {
+        videoRef.current.currentTime = first.start;
+      }
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "";
+      setRpmError(audioErrorText(code));
+    } finally {
+      setRpmAnalyzing(false);
+    }
+  }
+
+  function onAudioMarkClick() {
+    if (corners.length > 0 && !rpmReplacePending) {
+      setRpmReplacePending(true);
+      return;
+    }
+    void runAudioMark();
+  }
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT")) return;
+      const video = videoRef.current;
+      if (!video || !videoUrl || videoDurationS <= 0) return;
+      if (event.code === "Space") {
+        event.preventDefault();
+        if (video.paused) void video.play();
+        else video.pause();
+      } else if (event.key === "m" || event.key === "M") {
+        event.preventDefault();
+        markNext();
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        video.currentTime = Math.max(0, video.currentTime - (event.shiftKey ? 0.1 : 1 / 30));
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        video.currentTime = Math.min(video.duration, video.currentTime + (event.shiftKey ? 0.1 : 1 / 30));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [videoUrl, videoDurationS, markNext]);
 
   useEffect(() => () => {
     autoSyncAbortRef.current?.abort();
@@ -929,6 +1158,9 @@ export function VideoSyncPanel({
       return;
     }
     setVideoDurationS(video.duration);
+    setLapEnd((current) =>
+      current <= 0 || current > video.duration ? video.duration : current
+    );
     if (calibration && calibrationMatchesVideo(calibration, videoFile, video.duration)) {
       setOffsetMs(calibration.offset_ms);
       setSyncMessage(t("xrk.video.restore", { offset: signedMilliseconds(calibration.offset_ms) }));
@@ -1053,6 +1285,7 @@ export function VideoSyncPanel({
     setVideoFile(null);
     setVideoName("");
     setVideoDurationS(0);
+    resetLapAnalysis();
     setCalibration(null);
     setOffsetMs(0);
     setSyncMessage("");
@@ -1060,9 +1293,22 @@ export function VideoSyncPanel({
     setAutoConfidence(null);
   }
 
+  function resetLapAnalysis() {
+    setLapStart(0);
+    setLapEnd(0);
+    setCorners([]);
+    setDraft({ entry: null, apex: null, exit: null });
+    setLoopCorner(null);
+    setRpmResult(null);
+    setRpmError("");
+    setRpmHint("");
+    setRpmReplacePending(false);
+    setRpmProgress(0);
+  }
+
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
-      <Panel title={t("xrk.video.title")} subtitle={t("xrk.video.subtitle")}>
+      <Panel title={t("xrk.lap.title")} subtitle={t("xrk.lap.subtitle")}>
         {videoUrl ? (
           <>
             <video
@@ -1070,8 +1316,9 @@ export function VideoSyncPanel({
               src={videoUrl}
               controls
               className="aspect-video w-full bg-black"
-              onTimeUpdate={followVideo}
+              onTimeUpdate={onTimeUpdate}
               onLoadedMetadata={loadVideoMetadata}
+              onError={() => setSyncError(t("videoCoach.loadFailed"))}
             />
             <button
               type="button"
@@ -1093,6 +1340,7 @@ export function VideoSyncPanel({
               setVideoName(file.name);
               setVideoFile(file);
               setVideoDurationS(0);
+              resetLapAnalysis();
               setSyncMessage("");
               setSyncError("");
               setAutoConfidence(null);
@@ -1100,74 +1348,369 @@ export function VideoSyncPanel({
           </label>
         )}
         {videoName && <p className="mt-2 truncate text-xs text-slate-400">{videoName}</p>}
-      </Panel>
-      <Panel title={t("xrk.video.syncTitle")} subtitle={t("xrk.video.syncSubtitle")}>
-        <label className="block text-xs text-slate-400">
-          {t("xrk.video.offset")}
-          <input
-            type="number"
-            step={50}
-            value={offsetMs}
-            onChange={(event) => updateManualOffset(Number(event.target.value) || 0)}
-            className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white"
+
+        <div
+          ref={timelineRef}
+          onClick={onTimelineClick}
+          role="slider"
+          aria-label={t("videoCoach.timeline")}
+          aria-valuemin={0}
+          aria-valuemax={Math.round(videoDurationS)}
+          aria-valuenow={Math.round(currentTime)}
+          className="mt-4 h-4 cursor-pointer rounded-full border border-slate-700 bg-slate-950"
+        >
+          <div
+            className="h-full rounded-full bg-cyan-500/60"
+            style={{ width: `${videoDurationS > 0 ? (currentTime / videoDurationS) * 100 : 0}%` }}
           />
-        </label>
-        <p className="mt-2 text-xs leading-5 text-slate-500">
-          {t("xrk.video.signConvention")}
-        </p>
-        <div className="mt-4 rounded-md border border-slate-800 bg-slate-950/60 p-3">
-          <p className="text-xs text-slate-500">{t("xrk.video.sharedCursor")}</p>
-          <p className="mt-1 text-lg font-semibold text-white">{cursorDistance.toFixed(1)} m</p>
-          <p className="mt-1 text-xs text-slate-500">
-            {t("xrk.video.selectedTime", {
-              lap: analysis.target_lap,
-              value: cursorPoint?.session_time_s == null ? t("xrk.video.unavailableTime") : `${cursorPoint.session_time_s.toFixed(3)} s`,
-            })}
-          </p>
         </div>
-        <button
-          type="button"
-          onClick={runAutomaticAlignment}
-          disabled={autoSyncing || !videoUrl || videoDurationS <= 0 || !analysis.inspection_id || analysis.inspection_id.startsWith("public-demo")}
-          className="mt-4 flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-cyan-500/60 bg-cyan-500/10 px-4 text-sm font-semibold text-cyan-100 disabled:cursor-not-allowed disabled:opacity-45"
-        >
-          <WandSparkles size={16} /> {autoSyncing ? t("xrk.video.autoRunning") : t("xrk.video.auto")}
-        </button>
-        <p className="mt-2 text-xs leading-5 text-slate-500">
-          {t("xrk.video.privacy")}
-        </p>
-        {autoConfidence != null && (
-          <p className="mt-2 text-xs text-slate-400">{t("xrk.video.autoConfidence", { value: formatConfidence(autoConfidence) })}</p>
-        )}
-        <button
-          type="button"
-          onClick={calibrateCurrentMoment}
-          disabled={!videoUrl || videoDurationS <= 0 || cursorPoint?.session_time_s == null}
-          className="mt-4 flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[#f6c945] px-4 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-45"
-        >
-          <Link2 size={16} /> {t("xrk.video.calibrate")}
-        </button>
-        {videoDurationS > 0 && (
-          <p className="mt-2 text-xs text-slate-500">{t("xrk.video.duration", { value: videoDurationS.toFixed(3) })}</p>
-        )}
-        {calibration && (
-          <p className="mt-2 text-xs leading-5 text-emerald-300">
-            {t("xrk.video.savedAnchor", {
-              video: calibration.video_time_s.toFixed(3),
-              distance: calibration.telemetry_distance_m.toFixed(1),
-              offset: signedMilliseconds(calibration.offset_ms),
-            })}
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setLapStart(videoRef.current?.currentTime ?? lapStart)}
+            disabled={!videoUrl || videoDurationS <= 0}
+            className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:opacity-45 hover:border-[#35d6d0]"
+          >
+            {t("videoCoach.setStart")} {lapStart.toFixed(2)}s
+          </button>
+          <button
+            type="button"
+            onClick={() => setLapEnd(videoRef.current?.currentTime ?? lapEnd)}
+            disabled={!videoUrl || videoDurationS <= 0}
+            className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:opacity-45 hover:border-[#35d6d0]"
+          >
+            {t("videoCoach.setEnd")} {lapEnd.toFixed(2)}s
+          </button>
+          <select
+            value={rpmStrokes}
+            onChange={(event) => setRpmStrokes(event.target.value === "4" ? 4 : 2)}
+            disabled={rpmAnalyzing}
+            aria-label={t("videoCoach.strokes")}
+            className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
+          >
+            <option value={2}>{t("videoCoach.strokes2")}</option>
+            <option value={4}>{t("videoCoach.strokes4")}</option>
+          </select>
+          <button
+            type="button"
+            onClick={onAudioMarkClick}
+            disabled={rpmAnalyzing || !videoUrl || videoDurationS <= 0}
+            className="flex min-h-10 items-center gap-2 rounded-md border border-cyan-500/60 bg-cyan-500/10 px-4 text-sm font-semibold text-cyan-100 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <Play size={15} />
+            {rpmAnalyzing
+              ? `${t("videoCoach.audioAnalyzing")} ${Math.round(rpmProgress * 100)}%`
+              : t("videoCoach.audioMark")}
+          </button>
+        </div>
+        {rpmError ? <p role="alert" className="mt-2 text-xs leading-5 text-red-300">{rpmError}</p> : null}
+        {rpmHint ? <p className="mt-2 text-xs leading-5 text-emerald-300">{rpmHint}</p> : null}
+        {rpmReplacePending ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+            <span className="text-xs text-amber-200">{t("videoCoach.audioReplace", { count: corners.length })}</span>
+            <button
+              type="button"
+              onClick={() => void runAudioMark()}
+              className="rounded-md border border-amber-500/50 px-3 py-1 text-xs font-semibold text-amber-200 hover:bg-amber-500/10"
+            >
+              {t("videoCoach.confirm")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setRpmReplacePending(false)}
+              className="rounded-md border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800"
+            >
+              {t("videoCoach.cancel")}
+            </button>
+          </div>
+        ) : null}
+
+        <div className="mt-4 rounded-md border border-slate-800 bg-slate-950/60 p-3">
+          <p className="text-xs text-slate-400">
+            {t("videoCoach.markHint")} · {t("videoCoach.currentTime")} {currentTime.toFixed(2)}s
           </p>
-        )}
-        {syncMessage && <p className="mt-2 text-xs leading-5 text-cyan-200">{syncMessage}</p>}
-        {syncError && <p role="alert" className="mt-2 text-xs leading-5 text-red-300">{syncError}</p>}
-        <p className="mt-4 text-xs leading-5 text-slate-500">
-          {t("xrk.video.followBoundary", { lap: analysis.target_lap })}
-        </p>
-        <p className="mt-2 text-xs leading-5 text-slate-600">
-          {t("xrk.video.savedPrivacy")}
-        </p>
+          <p className="mt-1 text-[11px] text-slate-500">{t("videoCoach.keyHint")}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={markNext}
+              disabled={!videoUrl || videoDurationS <= 0}
+              className="rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-200 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {t("videoCoach.markNext", { phase: nextPhaseLabel })}
+            </button>
+            <button
+              type="button"
+              onClick={() => markPhase("entry")}
+              disabled={!videoUrl || draft.entry != null}
+              className={`rounded-md border px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45 ${
+                draft.entry != null
+                  ? "border-[#35d6d0]/80 bg-[#35d6d0]/10 text-cyan-100"
+                  : "border-slate-700 bg-slate-950 text-slate-200 hover:border-[#35d6d0]"
+              }`}
+            >
+              {t("videoCoach.markEntry")}{draft.entry != null ? ` ${draft.entry.toFixed(2)}s` : ""}
+            </button>
+            <button
+              type="button"
+              onClick={() => markPhase("apex")}
+              disabled={!videoUrl || draft.entry == null || draft.apex != null}
+              className={`rounded-md border px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45 ${
+                draft.apex != null
+                  ? "border-[#35d6d0]/80 bg-[#35d6d0]/10 text-cyan-100"
+                  : "border-slate-700 bg-slate-950 text-slate-200 hover:border-[#35d6d0]"
+              }`}
+            >
+              {t("videoCoach.markApex")}{draft.apex != null ? ` ${draft.apex.toFixed(2)}s` : ""}
+            </button>
+            <button
+              type="button"
+              onClick={() => markPhase("exit")}
+              disabled={!videoUrl || draft.apex == null}
+              className={`rounded-md border px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-45 ${
+                draft.exit != null
+                  ? "border-[#35d6d0]/80 bg-[#35d6d0]/10 text-cyan-100"
+                  : "border-slate-700 bg-slate-950 text-slate-200 hover:border-[#35d6d0]"
+              }`}
+            >
+              {t("videoCoach.markExit")}{draft.exit != null ? ` ${draft.exit.toFixed(2)}s` : ""}
+            </button>
+            <button
+              type="button"
+              onClick={resetDraft}
+              disabled={draft.entry == null && draft.apex == null && draft.exit == null}
+              className="rounded-md border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {t("videoCoach.markCancel")}
+            </button>
+          </div>
+        </div>
+
+        {issues.length ? (
+          <p className="mt-3 text-xs leading-5 text-red-300">
+            {t("videoCoach.overlapsFound", { count: issues.length })}{" "}
+            <button
+              type="button"
+              onClick={() => {
+                setCorners((current) => resolveOverlapIssues(current));
+                setSyncError("");
+              }}
+              className="underline underline-offset-2 hover:text-red-100"
+            >
+              {t("videoCoach.fixOverlap")}
+            </button>
+          </p>
+        ) : straights.length ? (
+          <p className="mt-3 text-xs leading-5 text-emerald-300">
+            {straights.map((gap) =>
+              t("videoCoach.straightGap", {
+                from: gap.prev.name || t("videoCoach.corner", { index: gap.index }),
+                to: gap.next.name || t("videoCoach.corner", { index: gap.index + 1 }),
+                value: gap.gapS.toFixed(1),
+              })
+            ).join(" · ")}
+          </p>
+        ) : null}
+
+        <div className="mt-5">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-white">{t("videoCoach.corners")}</h3>
+            <button
+              type="button"
+              onClick={addCorner}
+              disabled={!videoUrl || videoDurationS <= 0}
+              className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:border-[#35d6d0] disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {t("videoCoach.addCorner")}
+            </button>
+          </div>
+          {corners.length ? (
+            <ul className="mt-3 space-y-3">
+              {corners.map((corner, index) => (
+                <li key={`${corner.start}-${index}`} className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <strong className="text-sm text-white">{corner.name || t("videoCoach.corner", { index: index + 1 })}</strong>
+                    <input
+                      aria-label={t("videoCoach.cornerName")}
+                      value={corner.name ?? ""}
+                      onChange={(event) => updateCorner(index, { name: event.target.value })}
+                      placeholder={t("videoCoach.cornerName")}
+                      className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-white"
+                    />
+                    <span className="text-xs text-slate-500">{corner.direction === 1 ? "→" : "←"}</span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    <label className="text-[11px] text-slate-500">
+                      {t("videoCoach.start")}
+                      <input
+                        type="number"
+                        step={0.1}
+                        value={Number(corner.start.toFixed(2))}
+                        onChange={(event) => updateCorner(index, { start: Number(event.target.value) })}
+                        className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-white"
+                      />
+                    </label>
+                    <label className="text-[11px] text-slate-500">
+                      {t("videoCoach.apex")}
+                      <input
+                        type="number"
+                        step={0.1}
+                        value={Number(corner.apex.toFixed(2))}
+                        onChange={(event) => updateCorner(index, { apex: Number(event.target.value) })}
+                        className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-white"
+                      />
+                    </label>
+                    <label className="text-[11px] text-slate-500">
+                      {t("videoCoach.end")}
+                      <input
+                        type="number"
+                        step={0.1}
+                        value={Number(corner.end.toFixed(2))}
+                        onChange={(event) => updateCorner(index, { end: Number(event.target.value) })}
+                        className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-white"
+                      />
+                    </label>
+                  </div>
+                  <input
+                    value={corner.notes ?? ""}
+                    onChange={(event) => updateCorner(index, { notes: event.target.value })}
+                    placeholder={t("videoCoach.cornerNotes")}
+                    className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-white"
+                  />
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleCornerLoop(index)}
+                      className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:border-[#35d6d0]"
+                    >
+                      {loopCorner === index ? t("videoCoach.cornerStop") : t("videoCoach.cornerPlay")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteCorner(index)}
+                      className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-red-400"
+                    >
+                      {t("videoCoach.cornerDelete")}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-xs text-slate-500">{t("videoCoach.noCorners")}</p>
+          )}
+        </div>
       </Panel>
+      <div className="flex min-w-0 flex-col gap-5">
+        <Panel title={t("xrk.video.syncTitle")} subtitle={t("xrk.video.syncSubtitle")}>
+          <label className="block text-xs text-slate-400">
+            {t("xrk.video.offset")}
+            <input
+              type="number"
+              step={50}
+              value={offsetMs}
+              onChange={(event) => updateManualOffset(Number(event.target.value) || 0)}
+              className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white"
+            />
+          </label>
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            {t("xrk.video.signConvention")}
+          </p>
+          <div className="mt-4 rounded-md border border-slate-800 bg-slate-950/60 p-3">
+            <p className="text-xs text-slate-500">{t("xrk.video.sharedCursor")}</p>
+            <p className="mt-1 text-lg font-semibold text-white">{cursorDistance.toFixed(1)} m</p>
+            <p className="mt-1 text-xs text-slate-500">
+              {t("xrk.video.selectedTime", {
+                lap: analysis.target_lap,
+                value: cursorPoint?.session_time_s == null ? t("xrk.video.unavailableTime") : `${cursorPoint.session_time_s.toFixed(3)} s`,
+              })}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={runAutomaticAlignment}
+            disabled={autoSyncing || !videoUrl || videoDurationS <= 0 || !analysis.inspection_id || analysis.inspection_id.startsWith("public-demo")}
+            className="mt-4 flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-cyan-500/60 bg-cyan-500/10 px-4 text-sm font-semibold text-cyan-100 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <WandSparkles size={16} /> {autoSyncing ? t("xrk.video.autoRunning") : t("xrk.video.auto")}
+          </button>
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            {t("xrk.video.privacy")}
+          </p>
+          {autoConfidence != null && (
+            <p className="mt-2 text-xs text-slate-400">{t("xrk.video.autoConfidence", { value: formatConfidence(autoConfidence) })}</p>
+          )}
+          <button
+            type="button"
+            onClick={calibrateCurrentMoment}
+            disabled={!videoUrl || videoDurationS <= 0 || cursorPoint?.session_time_s == null}
+            className="mt-4 flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[#f6c945] px-4 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <Link2 size={16} /> {t("xrk.video.calibrate")}
+          </button>
+          {videoDurationS > 0 && (
+            <p className="mt-2 text-xs text-slate-500">{t("xrk.video.duration", { value: videoDurationS.toFixed(3) })}</p>
+          )}
+          {calibration && (
+            <p className="mt-2 text-xs leading-5 text-emerald-300">
+              {t("xrk.video.savedAnchor", {
+                video: calibration.video_time_s.toFixed(3),
+                distance: calibration.telemetry_distance_m.toFixed(1),
+                offset: signedMilliseconds(calibration.offset_ms),
+              })}
+            </p>
+          )}
+          {syncMessage && <p className="mt-2 text-xs leading-5 text-cyan-200">{syncMessage}</p>}
+          {syncError && <p role="alert" className="mt-2 text-xs leading-5 text-red-300">{syncError}</p>}
+          <p className="mt-4 text-xs leading-5 text-slate-500">
+            {t("xrk.video.followBoundary", { lap: analysis.target_lap })}
+          </p>
+          <p className="mt-2 text-xs leading-5 text-slate-600">
+            {t("xrk.video.savedPrivacy")}
+          </p>
+        </Panel>
+        {rpmResult && rpmResult.times.length > 1 ? (
+          <Panel title={t("videoCoach.rpmChart")} subtitle={t("videoCoach.privacy")}>
+            <ResponsiveContainer width="100%" height={180}>
+              <LineChart data={rpmChartData} margin={{ top: 8, right: 8, bottom: 0, left: -8 }}>
+                <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="time_s"
+                  type="number"
+                  domain={["dataMin", "dataMax"]}
+                  tick={{ fontSize: 10, fill: "#64748b" }}
+                  tickFormatter={(value: number) => `${value.toFixed(0)}s`}
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: "#64748b" }}
+                  domain={["auto", "auto"]}
+                  tickFormatter={(value: number) => `${Math.round(value / 1000)}k`}
+                />
+                <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155", fontSize: 12 }} />
+                <ReferenceLine x={currentTime} stroke="#f6c945" strokeDasharray="4 4" />
+                {corners.map((corner) => (
+                  <ReferenceLine
+                    key={`rpm-${corner.start}`}
+                    x={corner.start}
+                    stroke="#f6c945"
+                    strokeDasharray="3 3"
+                    opacity={0.5}
+                  />
+                ))}
+                <Line
+                  type="monotone"
+                  dataKey="rpm"
+                  name={t("videoCoach.rpmLabel")}
+                  stroke="#ff5964"
+                  dot={false}
+                  strokeWidth={1.6}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </Panel>
+        ) : null}
+      </div>
     </div>
   );
 }
