@@ -11,14 +11,9 @@ export async function consumeSelectedFile(
   }
 }
 
-/**
- * Create a stable Blob view without copying the entire XRK into browser memory.
- * The file input remains mounted until the async upload settles, so Safari keeps
- * the selected file alive while large logs can stream through FormData.
- */
+/** Return the original browser File without copying or slicing its file handle. */
 export async function materializeUploadBlob(file: File): Promise<Blob> {
-  if (file.size <= 0) return file;
-  return file.slice(0, file.size, file.type || "application/octet-stream");
+  return file;
 }
 
 export function exceedsUploadLimit(file: File, maxBytes?: number | null): boolean {
