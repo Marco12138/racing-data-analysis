@@ -36,10 +36,11 @@ test("commitPendingVideo carries the pending video into the active slot", () => 
   assert.equal(commitPendingVideo(null, null), null);
 });
 
-test("materializeUploadBlob creates a byte-preserving view without arrayBuffer", async () => {
+test("materializeUploadBlob preserves the original browser File handle", async () => {
   const file = new File(["<hCNFsample"], "sample.xrk", { type: "application/octet-stream" });
   file.arrayBuffer = () => { throw new Error("must not copy the whole file"); };
   const blob = await materializeUploadBlob(file);
+  assert.equal(blob, file);
   assert.equal(blob.size, file.size);
   assert.equal(await blob.text(), "<hCNFsample");
 });

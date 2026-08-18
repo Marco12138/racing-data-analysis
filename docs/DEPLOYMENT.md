@@ -284,13 +284,28 @@ Check CORS with the real frontend domain and confirm cloud mode returns
 `local_video_library: false` and `xrk_server_import.available: true` before
 exposing the API publicly.
 
-## Cloudflare API proxy
+## Production API routing
 
-The optional Worker in `cloudflare/api-proxy` provides a fixed-origin streaming
-proxy between the public frontend and FastAPI:
+The primary public deployment uses a Vercel external rewrite directly to
+Railway:
 
 ```text
-Browser -> same-origin /api/v1 -> Vercel/Sites edge -> Cloudflare or Railway
+Browser -> same-origin Vercel /api/v1 -> Railway FastAPI
+```
+
+The browser never connects to `workers.dev` or `railway.app` directly. The
+Next.js `/api/runtime-config` route returns the current Vercel origin and
+`vercel.json` streams `/api/v1/*` to Railway. Keep Railway CORS configured for
+the public Vercel origins for direct diagnostics, even though normal browser
+traffic is same-origin.
+
+## Optional Cloudflare API proxy
+
+The Worker in `cloudflare/api-proxy` is retained as an optional fallback and is
+not part of the primary Vercel production path:
+
+```text
+Browser -> Cloudflare Worker -> Railway FastAPI
 ```
 
 It accepts only `/api/v1/*`, checks the browser origin, streams XRK/XRZ request
@@ -307,11 +322,7 @@ pnpm run build:api-proxy
 pnpm exec wrangler deploy --config cloudflare/api-proxy/wrangler.jsonc
 ```
 
-Set the Vercel Production and Preview variables to the resulting Worker origin.
-The browser runtime still resolves to the current Vercel origin; `vercel.json`
-forwards `/api/v1/*` to this Worker as an external rewrite. This prevents client
-networks from having to resolve or connect to `workers.dev` directly while the
-Worker remains the controlled data proxy:
+Only configure Vercel to use this fallback when specifically testing the Worker:
 
 ```text
 NEXT_PUBLIC_API_URL=https://racing-telemetry-api-proxy.<account>.workers.dev
