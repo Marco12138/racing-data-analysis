@@ -2,5 +2,11 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "installCommand": "pnpm install --frozen-lockfile",
-  "buildCommand": "pnpm run build:vercel"
+  "buildCommand": "pnpm run build:vercel",
+  "rewrites": [
+    {
+      "source": "/api/v1/:path*",
+      "destination": "https://racing-telemetry-api-proxy.marco-football-analytics.workers.dev/api/v1/:path*"
+    }
+  ]
 }
