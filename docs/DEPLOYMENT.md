@@ -290,14 +290,17 @@ The primary public deployment uses a Vercel external rewrite directly to
 Railway:
 
 ```text
-Browser -> same-origin Vercel /api/v1 -> Railway FastAPI
+Small API calls: Browser -> same-origin Vercel /api/v1 -> Railway FastAPI
+XRK upload:      Browser -> Railway /api/v1/xrk/inspect
 ```
 
-The browser never connects to `workers.dev` or `railway.app` directly. The
-Next.js `/api/runtime-config` route returns the current Vercel origin and
-`vercel.json` streams `/api/v1/*` to Railway. Keep Railway CORS configured for
-the public Vercel origins for direct diagnostics, even though normal browser
-traffic is same-origin.
+The Next.js `/api/runtime-config` route returns the current Vercel origin for
+ordinary API calls and a dedicated `xrkUploadUrl` for the large multipart
+request. XRK bypasses Vercel's external rewrite because a browser multipart
+request without a declared content length was observed reaching Railway with a
+zero-byte body. Keep Railway CORS configured for the public Vercel and Sites
+origins. `XRK_UPLOAD_URL` may override the Railway inspection endpoint without
+changing the client bundle.
 
 ## Optional Cloudflare API proxy
 

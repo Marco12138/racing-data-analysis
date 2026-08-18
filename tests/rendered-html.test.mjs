@@ -99,6 +99,7 @@ test("serves the Sites API through the current public origin", async () => {
   assert.deepEqual(await response.json(), {
     apiOrigin: "https://frontend.example",
     apiPrefix: "/api/v1",
+    xrkUploadUrl: "https://backend.example/api/v1/xrk/inspect",
     deploymentMode: "public-demo",
   });
 });

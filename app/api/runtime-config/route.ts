@@ -6,6 +6,9 @@ export function GET(request: NextRequest) {
     {
       apiOrigin: request.nextUrl.origin,
       apiPrefix: process.env.NEXT_PUBLIC_API_PREFIX ?? "/api/v1",
+      xrkUploadUrl:
+        process.env.XRK_UPLOAD_URL
+        ?? "https://racing-ai-platform-api-production.up.railway.app/api/v1/xrk/inspect",
       deploymentMode: process.env.NEXT_PUBLIC_DEPLOYMENT_MODE ?? "public-demo",
     },
     {

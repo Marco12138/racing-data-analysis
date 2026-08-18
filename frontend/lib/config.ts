@@ -11,6 +11,7 @@ function normalizePrefix(value: string): string {
 export type ResolvedApiConfig = {
   apiOrigin: string;
   apiPrefix: string;
+  xrkUploadUrl: string;
   deploymentMode: string;
   source: "runtime" | "build" | "local";
 };
@@ -18,6 +19,7 @@ export type ResolvedApiConfig = {
 type RuntimeConfigResponse = {
   apiOrigin?: string;
   apiPrefix?: string;
+  xrkUploadUrl?: string;
   deploymentMode?: string;
 };
 
@@ -41,6 +43,7 @@ const buildApiPrefix = normalizePrefix(
 const buildDeploymentMode =
   process.env.NEXT_PUBLIC_DEPLOYMENT_MODE ??
   (process.env.NODE_ENV === "production" ? "public-demo" : "local");
+const buildXrkUploadUrl = (process.env.NEXT_PUBLIC_XRK_UPLOAD_URL ?? "").trim();
 
 export const frontendConfig = {
   apiOrigin: buildApiOrigin,
@@ -61,6 +64,10 @@ export async function resolveApiUrl(path: string): Promise<string> {
   const config = await resolveApiConfig();
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${config.apiOrigin}${config.apiPrefix}${normalizedPath}`;
+}
+
+export async function resolveXrkUploadUrl(): Promise<string> {
+  return (await resolveApiConfig()).xrkUploadUrl;
 }
 
 export function apiUrl(path: string): string {
@@ -100,9 +107,14 @@ async function resolveApiConfigUncached(): Promise<ResolvedApiConfig> {
   if (typeof window !== "undefined") {
     const runtime = await fetchRuntimeConfig();
     if (runtime?.apiOrigin) {
+      const apiOrigin = validateApiOrigin(runtime.apiOrigin);
+      const apiPrefix = normalizePrefix(runtime.apiPrefix ?? buildApiPrefix);
       return {
-        apiOrigin: validateApiOrigin(runtime.apiOrigin),
-        apiPrefix: normalizePrefix(runtime.apiPrefix ?? buildApiPrefix),
+        apiOrigin,
+        apiPrefix,
+        xrkUploadUrl: validateUploadUrl(
+          runtime.xrkUploadUrl || buildXrkUploadUrl || `${apiOrigin}${apiPrefix}/xrk/inspect`,
+        ),
         deploymentMode: runtime.deploymentMode ?? buildDeploymentMode,
         source: "runtime",
       };
@@ -110,9 +122,13 @@ async function resolveApiConfigUncached(): Promise<ResolvedApiConfig> {
   }
 
   if (buildApiOrigin) {
+    const apiOrigin = validateApiOrigin(buildApiOrigin);
     return {
-      apiOrigin: validateApiOrigin(buildApiOrigin),
+      apiOrigin,
       apiPrefix: buildApiPrefix,
+      xrkUploadUrl: validateUploadUrl(
+        buildXrkUploadUrl || `${apiOrigin}${buildApiPrefix}/xrk/inspect`,
+      ),
       deploymentMode: buildDeploymentMode,
       source: "build",
     };
@@ -123,6 +139,7 @@ async function resolveApiConfigUncached(): Promise<ResolvedApiConfig> {
     return {
       apiOrigin: validateApiOrigin(localOrigin),
       apiPrefix: buildApiPrefix,
+      xrkUploadUrl: `${validateApiOrigin(localOrigin)}${buildApiPrefix}/xrk/inspect`,
       deploymentMode: "local",
       source: "local",
     };
@@ -131,6 +148,15 @@ async function resolveApiConfigUncached(): Promise<ResolvedApiConfig> {
   throw new FrontendApiConfigError(
     "The public API address is missing. XRK uploads are disabled until deployment configuration is fixed."
   );
+}
+
+function validateUploadUrl(rawUrl: string): string {
+  const parsed = new URL(rawUrl);
+  validateApiOrigin(parsed.origin);
+  if (!parsed.pathname.endsWith("/api/v1/xrk/inspect")) {
+    throw new FrontendApiConfigError("The configured XRK upload endpoint is invalid.");
+  }
+  return parsed.toString();
 }
 
 async function fetchRuntimeConfig(): Promise<RuntimeConfigResponse | null> {
