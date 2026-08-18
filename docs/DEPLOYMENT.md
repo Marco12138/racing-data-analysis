@@ -290,7 +290,7 @@ The optional Worker in `cloudflare/api-proxy` provides a fixed-origin streaming
 proxy between the public frontend and FastAPI:
 
 ```text
-Vercel -> Cloudflare Worker -> Railway FastAPI
+Browser -> same-origin /api/v1 -> Vercel/Sites edge -> Cloudflare or Railway
 ```
 
 It accepts only `/api/v1/*`, checks the browser origin, streams XRK/XRZ request
@@ -307,13 +307,23 @@ pnpm run build:api-proxy
 pnpm exec wrangler deploy --config cloudflare/api-proxy/wrangler.jsonc
 ```
 
-Set the Vercel Production and Preview variables to the resulting Worker origin:
+Set the Vercel Production and Preview variables to the resulting Worker origin.
+The browser runtime still resolves to the current Vercel origin; `vercel.json`
+forwards `/api/v1/*` to this Worker as an external rewrite. This prevents client
+networks from having to resolve or connect to `workers.dev` directly while the
+Worker remains the controlled data proxy:
 
 ```text
 NEXT_PUBLIC_API_URL=https://racing-telemetry-api-proxy.<account>.workers.dev
 API_URL=https://racing-telemetry-api-proxy.<account>.workers.dev
 NEXT_PUBLIC_API_PREFIX=/api/v1
 ```
+
+Sites follows the same browser contract. Its Worker returns the Sites origin
+from `/api/runtime-config` and streams `/api/v1/*` to the configured Railway
+`API_URL`. Do not change runtime configuration back to a cross-origin browser
+URL; that reintroduces DNS, privacy-extension, and CORS failure modes for large
+uploads.
 
 Keep `UPSTREAM_ORIGIN` and `ALLOWED_ORIGINS` in `wrangler.jsonc` limited to the
 actual Railway service and approved frontend origins. The optional
@@ -340,9 +350,10 @@ POST <worker>/api/v1/xrk/inspect
 - `XRK_FILE_READ_FAILED`: the browser could not retain/read the selected local
   file. Re-select it and confirm it has not moved.
 - `XRK_UPLOAD_TRANSPORT_FAILED`: the file was readable but the browser did not
-  receive an HTTP response. Check that the Worker is deployed, its exact/pattern
-  origin allowlist includes the active frontend domain, and its Railway upstream
-  is current.
+  receive an HTTP response. First confirm `/api/runtime-config` returns the
+  current frontend origin, then check the same-origin `/api/v1/health` path and
+  its edge rewrite/upstream. Direct browser access to `workers.dev` or
+  `railway.app` should not be required in production.
 - `PROXY_UPSTREAM_UNAVAILABLE`: the Worker answered but could not reach Railway;
   inspect Worker logs and Railway health before changing the frontend.
 

@@ -79,7 +79,7 @@ test("server-renders verified sample metrics injected by the Sites worker", asyn
   }
 });
 
-test("serves the Sites API origin from Worker runtime configuration", async () => {
+test("serves the Sites API through the current public origin", async () => {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("runtime-test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
@@ -97,7 +97,7 @@ test("serves the Sites API origin from Worker runtime configuration", async () =
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.deepEqual(await response.json(), {
-    apiOrigin: "https://backend.example",
+    apiOrigin: "https://frontend.example",
     apiPrefix: "/api/v1",
     deploymentMode: "public-demo",
   });
@@ -142,7 +142,7 @@ test("keeps public imports, browser video preview, and runtime API routing expli
   assert.match(aimImportApi, /\/imports\/aim/);
   assert.match(aimImportApi, /FormData/);
   assert.match(xrkAnalysisApi, /resolveApiUrl/);
-  assert.match(xrkAnalysisApi, /XRK_FRONTEND_API_MISCONFIGURED|FrontendApiConfigError/);
+  assert.match(xrkAnalysisApi, /XRK_UPLOAD_TRANSPORT_FAILED/);
   assert.match(dashboard, /当前为视频独立分析模式/);
   assert.match(publicPage, /loadServerPublicDemo/);
   assert.match(publicClient, /hero\.tryDemo/);
@@ -151,12 +151,46 @@ test("keeps public imports, browser video preview, and runtime API routing expli
   assert.match(frontendConfig, /\/api\/runtime-config/);
   assert.match(frontendConfig, /XRK_FRONTEND_API_MISCONFIGURED/);
   assert.match(worker, /\/api\/runtime-config/);
+  assert.match(worker, /proxyApiRequest/);
   assert.match(worker, /API_URL/);
   assert.match(frontendConfig, /\/api\/v1/);
   assert.match(frontendConfig, /public-demo/);
   assert.match(videoApi, /\/video\/jobs/);
   assert.match(layout, /og\.png/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
+});
+
+test("Sites proxies API uploads through the same public origin", async () => {
+  const originalFetch = globalThis.fetch;
+  let upstreamRequest;
+  globalThis.fetch = async (input, init) => {
+    upstreamRequest = { url: String(input), init };
+    return Response.json({ status: "ok" }, { headers: { "X-Request-ID": "upstream-id" } });
+  };
+  try {
+    const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+    workerUrl.searchParams.set("proxy-test", `${process.pid}-${Date.now()}`);
+    const { default: worker } = await import(workerUrl.href);
+    const response = await worker.fetch(
+      new Request("https://public.example/api/v1/xrk/inspect", {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: "<hCNFsample",
+      }),
+      {
+        ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
+        API_URL: "https://backend.example",
+        API_PREFIX: "/api/v1",
+      },
+      { waitUntil() {}, passThroughOnException() {} },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(upstreamRequest.url, "https://backend.example/api/v1/xrk/inspect");
+    assert.equal(upstreamRequest.init.method, "POST");
+    assert.equal(await new Response(upstreamRequest.init.body).text(), "<hCNFsample");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 function sampleSummary() {
