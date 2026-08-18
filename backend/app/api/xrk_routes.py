@@ -10,6 +10,7 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import unquote
 
 import pandas as pd
 from fastapi import APIRouter, File, Request, Response, UploadFile
@@ -27,6 +28,7 @@ from ..analysis.video_telemetry_sync import (
 )
 from ..models.demo_session import DemoSessionResponse
 from ..resources.demo_session import load_demo_session_resource
+from ..utils.xrk_library import XrkSourceError, list_xrk_sources, resolve_xrk_source
 from .errors import PublicApiError
 from ..importers.inspection_store import InspectionExpiredError
 from ..importers.service import (
@@ -69,6 +71,12 @@ class XrkAnalyzeRequest(BaseModel):
     lap_quality_absolute_gap_s: float = Field(default=0.5, ge=0.05, le=5.0)
     lap_quality_relative_gap_pct: float = Field(default=1.0, ge=0.1, le=10.0)
     language: Literal["zh", "en"] = "en"
+
+
+class LocalXrkInspectRequest(BaseModel):
+    """Opaque local-library source selected by the browser."""
+
+    source_id: str = Field(min_length=24, max_length=24)
 
 
 class VideoFeaturePoint(BaseModel):
@@ -116,13 +124,87 @@ def get_demo_session(response: Response) -> DemoSessionResponse:
     return PUBLIC_DEMO_SESSION
 
 
+@router.get("/local-library")
+def local_xrk_library(request: Request) -> dict[str, Any]:
+    """List whitelisted local XRK files without exposing absolute paths."""
+    settings = request.app.state.settings
+    require_local_xrk_mode(settings.app_mode)
+    return {
+        "sources": list_xrk_sources(
+            settings.max_xrk_upload_bytes,
+            settings.racing_xrk_roots,
+        )
+    }
+
+
+@router.post("/inspect-local")
+async def inspect_local_xrk(
+    request: Request,
+    payload: LocalXrkInspectRequest,
+) -> dict[str, Any]:
+    """Inspect a whitelisted local XRK without browser file transfer."""
+    settings = request.app.state.settings
+    require_local_xrk_mode(settings.app_mode)
+    try:
+        source = resolve_xrk_source(
+            payload.source_id,
+            settings.max_xrk_upload_bytes,
+            settings.racing_xrk_roots,
+        )
+    except XrkSourceError as exc:
+        raise PublicApiError(
+            status_code=400,
+            error_code="XRK_LOCAL_SOURCE_UNAVAILABLE",
+            message=str(exc),
+            error_type="local_source",
+        ) from exc
+    with source.open("rb") as stream:
+        upload = UploadFile(
+            file=stream,
+            size=source.stat().st_size,
+            filename=source.name,
+        )
+        return await inspect_xrk(request, upload)
+
+
+def require_local_xrk_mode(app_mode: str) -> None:
+    """Keep local filesystem discovery unavailable in cloud mode."""
+    if app_mode != "local":
+        raise PublicApiError(
+            status_code=503,
+            error_code="XRK_LOCAL_LIBRARY_UNAVAILABLE",
+            message="The local XRK library is available only in local mode.",
+            error_type="deployment_mode",
+        )
+
+
 @router.post("/inspect")
 async def inspect_xrk(
     request: Request,
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(default=None),
 ) -> dict[str, Any]:
     """Inspect real AiM channels and retain normalized data for 30 minutes."""
     settings = request.app.state.settings
+    raw_upload = (
+        file is None
+        and request.headers.get("content-type", "").split(";", 1)[0].lower()
+        == "application/octet-stream"
+    )
+    if raw_upload:
+        file = await upload_file_from_binary_request(
+            request,
+            settings.max_xrk_upload_bytes,
+        )
+    if file is None:
+        raise PublicApiError(
+            status_code=422,
+            error_code="XRK_UPLOAD_MISSING_FILE",
+            message=(
+                "The XRK file was not attached to the upload request. "
+                "Please select the file again."
+            ),
+            error_type="missing_upload",
+        )
     store = request.app.state.xrk_inspection_store
     client_key = request.client.host if request.client else "unknown"
     request_id = getattr(request.state, "request_id", "unknown")
@@ -287,6 +369,66 @@ async def inspect_xrk(
             message="Unable to inspect this XRK/XRZ file.",
             error_type=type(exc).__name__,
         ) from exc
+    finally:
+        if raw_upload:
+            await file.close()
+
+
+async def upload_file_from_binary_request(
+    request: Request,
+    max_bytes: int,
+) -> UploadFile:
+    """Materialize a bounded raw browser upload as a FastAPI UploadFile."""
+    encoded_name = request.headers.get("X-XRK-Filename", "")
+    filename = Path(unquote(encoded_name)).name if encoded_name else ""
+    if not filename:
+        raise PublicApiError(
+            status_code=422,
+            error_code="XRK_UPLOAD_MISSING_FILE",
+            message=(
+                "The XRK file was not attached to the upload request. "
+                "Please select the file again."
+            ),
+            error_type="missing_upload",
+        )
+
+    declared_size = request.headers.get("content-length")
+    if declared_size and declared_size.isdigit() and int(declared_size) > max_bytes:
+        raise PublicApiError(
+            status_code=413,
+            error_code="XRK_FILE_TOO_LARGE",
+            message=f"XRK/XRZ upload exceeds the {max_bytes} byte limit.",
+            error_type="file_size",
+        )
+
+    spool = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b")
+    size = 0
+    try:
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > max_bytes:
+                raise PublicApiError(
+                    status_code=413,
+                    error_code="XRK_FILE_TOO_LARGE",
+                    message=f"XRK/XRZ upload exceeds the {max_bytes} byte limit.",
+                    error_type="file_size",
+                )
+            spool.write(chunk)
+        if size == 0:
+            raise PublicApiError(
+                status_code=422,
+                error_code="XRK_UPLOAD_MISSING_FILE",
+                message=(
+                    "The XRK file was not attached to the upload request. "
+                    "Please select the file again."
+                ),
+                error_type="missing_upload",
+            )
+        spool.seek(0)
+        return UploadFile(file=spool, size=size, filename=filename)
+    except Exception:
+        spool.close()
+        raise
 
 
 @router.post("/analyze")

@@ -53,8 +53,11 @@ import {
 import {
   analyzeXrkInspection,
   deleteXrkInspection,
+  getLocalXrkLibrary,
   getXrkInspection,
+  inspectLocalXrkSource,
   inspectXrkFile,
+  type LocalXrkSource,
   type XrkAnalysis,
   type XrkAnalyzeOptions,
   type XrkInspection,
@@ -126,6 +129,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     useState<DeploymentCapabilities | null>(null);
   const [capabilityError, setCapabilityError] = useState("");
   const [capabilityLoading, setCapabilityLoading] = useState(true);
+  const [localXrkSources, setLocalXrkSources] = useState<LocalXrkSource[]>([]);
   const [aimImportStatus, setAimImportStatus] = useState<"idle" | "inspecting" | "inspected" | "analyzing" | "loaded">(
     "idle"
   );
@@ -158,6 +162,21 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (deploymentCapabilities?.mode !== "local") return;
+    let active = true;
+    void getLocalXrkLibrary()
+      .then((sources) => {
+        if (active) setLocalXrkSources(sources);
+      })
+      .catch(() => {
+        if (active) setLocalXrkSources([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [deploymentCapabilities?.mode]);
 
   useEffect(() => {
     if (initialDemo) void loadDemoData();
@@ -267,7 +286,9 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       );
       return null;
     }
-    xrkAbortRef.current?.abort();
+    if (xrkAbortRef.current) {
+      return null;
+    }
     const controller = new AbortController();
     xrkAbortRef.current = controller;
     setAimImportStatus("inspecting");
@@ -278,6 +299,40 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
         controller.signal,
         serverImport.max_upload_bytes,
       );
+      applyXrkInspection(inspected);
+      return inspected;
+    } catch (error) {
+      if ((error as Error).name === "AbortError") {
+        setDataError("XRK upload was cancelled.");
+      } else {
+        setDataError(formatXrkClientError(error as Error));
+      }
+      setAimImportStatus("idle");
+      return null;
+    } finally {
+      if (xrkAbortRef.current === controller) xrkAbortRef.current = null;
+    }
+  }
+
+  async function handleLocalXrkSource(sourceId: string): Promise<void> {
+    if (xrkAbortRef.current || !sourceId) return;
+    const controller = new AbortController();
+    xrkAbortRef.current = controller;
+    setAimImportStatus("inspecting");
+    setDataError("");
+    try {
+      applyXrkInspection(await inspectLocalXrkSource(sourceId, controller.signal));
+    } catch (error) {
+      if ((error as Error).name !== "AbortError") {
+        setDataError(formatXrkClientError(error as Error));
+      }
+      setAimImportStatus("idle");
+    } finally {
+      if (xrkAbortRef.current === controller) xrkAbortRef.current = null;
+    }
+  }
+
+  function applyXrkInspection(inspected: XrkInspection): void {
       setLapRows(normalizeLapRows([]));
       setTelemetryRows(normalizeTelemetryRows([]));
       setAimImport(null);
@@ -300,18 +355,6 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       setTrackName(metadataText(inspected.metadata, "Venue", "Unknown track"));
       setSessionDate(normalizeAimDate(inspected.metadata["Log Date"]));
       setAimImportStatus("inspected");
-      return inspected;
-    } catch (error) {
-      if ((error as Error).name === "AbortError") {
-        setDataError("XRK upload was cancelled.");
-      } else {
-        setDataError(formatXrkClientError(error as Error));
-      }
-      setAimImportStatus("idle");
-      return null;
-    } finally {
-      if (xrkAbortRef.current === controller) xrkAbortRef.current = null;
-    }
   }
 
   async function handleNewSession(xrkFile: File, videoFile: File | null) {
@@ -548,7 +591,9 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
               capabilities={deploymentCapabilities}
               capabilityError={capabilityError}
               capabilityLoading={capabilityLoading}
+              localXrkSources={localXrkSources}
               onAimFile={handleAimUpload}
+              onLocalXrkSource={handleLocalXrkSource}
               onCancelXrk={() => xrkAbortRef.current?.abort()}
               onLapFile={(file) => handleCsvUpload(file, "lap")}
               onTelemetryFile={(file) => handleCsvUpload(file, "telemetry")}
@@ -1218,7 +1263,9 @@ function DataUploadPanel({
   capabilities,
   capabilityError,
   capabilityLoading,
+  localXrkSources,
   onAimFile,
+  onLocalXrkSource,
   onCancelXrk,
   onLapFile,
   onTelemetryFile,
@@ -1233,12 +1280,15 @@ function DataUploadPanel({
   capabilities: DeploymentCapabilities | null;
   capabilityError: string;
   capabilityLoading: boolean;
+  localXrkSources: LocalXrkSource[];
   onAimFile: (file: File) => void;
+  onLocalXrkSource: (sourceId: string) => void | Promise<void>;
   onCancelXrk: () => void;
   onLapFile: (file: File) => void;
   onTelemetryFile: (file: File) => void;
   onLoadDemo: () => void;
 }) {
+  const [localSourceId, setLocalSourceId] = useState("");
   const aimLabel =
     aimImportStatus === "inspecting"
       ? "Uploading and inspecting channels..."
@@ -1278,6 +1328,36 @@ function DataUploadPanel({
         icon={busy ? <LoaderCircle size={16} className="animate-spin text-[#35d6d0]" /> : undefined}
         onFile={onAimFile}
       />
+      {capabilities?.mode === "local" && localXrkSources.length > 0 && (
+        <div className="mt-3 border-t border-slate-800 pt-3">
+          <p className="text-xs font-medium text-slate-300">本机 XRK 文件库</p>
+          <div className="mt-2 grid gap-2">
+            <select
+              className="min-h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-xs text-slate-200"
+              value={localSourceId || localXrkSources[0]?.source_id}
+              disabled={busy}
+              onChange={(event) => setLocalSourceId(event.target.value)}
+            >
+              {localXrkSources.map((source) => (
+                <option key={source.source_id} value={source.source_id}>
+                  {source.root} / {source.relative_path} · {formatBytes(source.size_bytes)}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void onLocalXrkSource(localSourceId || localXrkSources[0].source_id)}
+              className="min-h-10 rounded-md border border-[#35d6d0] px-3 text-xs font-semibold text-[#35d6d0] disabled:opacity-50"
+            >
+              直接分析本机文件
+            </button>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            文件由本机 FastAPI 直接读取，不经过浏览器上传。
+          </p>
+        </div>
+      )}
       {xrkInspection && (
         <div className="mt-3 rounded-md border border-slate-700 bg-slate-950/60 p-3">
           <div className="grid grid-cols-2 gap-2 text-xs">
@@ -1331,14 +1411,14 @@ function FileInput({
   onFile: (file: File) => void | Promise<unknown>;
 }) {
   return (
-    <label className={`file-input mt-3 flex items-center justify-between gap-3 rounded-md px-3 py-3 text-sm text-slate-300 ${disabled ? "cursor-wait opacity-70" : "cursor-pointer"}`}>
+    <label className={`file-input mt-3 flex items-center justify-between gap-3 rounded-md px-3 py-3 text-sm text-slate-300 ${disabled ? "pointer-events-none cursor-wait opacity-70" : "cursor-pointer"}`}>
       <span className="min-w-0 truncate">{label}</span>
       <input
         className="hidden"
         type="file"
         accept={accept}
-        disabled={disabled}
         onChange={(event) => {
+          if (disabled) return;
           const input = event.currentTarget;
           const file = event.target.files?.[0];
           if (!file) return;

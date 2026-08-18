@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     object_storage_region: str = "auto"
 
     racing_video_roots: str | None = None
+    racing_xrk_roots: str | None = None
     video_cache_ttl_seconds: int = Field(default=24 * 60 * 60, ge=60)
     max_video_source_bytes: int = Field(default=10 * 1024**3, ge=1)
     max_csv_upload_bytes: int = Field(default=20 * 1024**2, ge=1024)
