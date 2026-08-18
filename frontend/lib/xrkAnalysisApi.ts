@@ -1,5 +1,5 @@
 import type { CsvRow } from "./analysis";
-import { resolveApiUrl } from "./config";
+import { resolveApiUrl, resolveXrkUploadUrl } from "./config";
 import { exceedsUploadLimit, materializeUploadBlob } from "./fileUpload";
 import type { VideoSyncFeature } from "./videoFeatureExtraction";
 
@@ -515,7 +515,7 @@ export async function inspectXrkFile(
     );
   }
 
-  const url = await resolveApiUrl("/xrk/inspect");
+  const url = await resolveXrkUploadUrl();
   let response: Response;
   try {
     const form = new FormData();

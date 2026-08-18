@@ -62,7 +62,12 @@ const worker = {
         env.NEXT_PUBLIC_DEPLOYMENT_MODE ??
         "public-demo";
       return Response.json(
-        { apiOrigin, apiPrefix, deploymentMode },
+        {
+          apiOrigin,
+          apiPrefix,
+          xrkUploadUrl: `${runtimeApiOrigin(env)}${apiPrefix.replace(/\/+$/, "")}/xrk/inspect`,
+          deploymentMode,
+        },
         {
           headers: {
             "Cache-Control": "no-store",
