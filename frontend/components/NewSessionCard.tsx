@@ -80,8 +80,9 @@ export function NewSessionCard({
         <input
           type="file"
           accept=".xrk,.xrz"
-          disabled={busy}
-          onChange={(event) => chooseXrk(event.target.files?.[0] ?? null)}
+          onChange={(event) => {
+            if (!busy) chooseXrk(event.target.files?.[0] ?? null);
+          }}
         />
       </label>
       {xrkError ? <p className="new-session-card__error">{xrkError}</p> : null}
@@ -92,8 +93,9 @@ export function NewSessionCard({
         <input
           type="file"
           accept="video/mp4,video/quicktime,.mp4,.mov"
-          disabled={busy}
-          onChange={(event) => setVideoFile(event.target.files?.[0] ?? null)}
+          onChange={(event) => {
+            if (!busy) setVideoFile(event.target.files?.[0] ?? null);
+          }}
         />
       </label>
       <p className="new-session-card__privacy">{t("sessionCard.privacy")}</p>

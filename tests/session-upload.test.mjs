@@ -6,7 +6,11 @@ import {
   commitPendingVideo,
   isXrkFileName,
 } from "../frontend/lib/sessionUpload.ts";
-import { exceedsUploadLimit, materializeUploadBlob } from "../frontend/lib/fileUpload.ts";
+import {
+  binaryFileUploadRequest,
+  exceedsUploadLimit,
+  materializeUploadBlob,
+} from "../frontend/lib/fileUpload.ts";
 import { consumeSelectedFile } from "../frontend/lib/fileUpload.ts";
 
 function file(name) {
@@ -36,11 +40,10 @@ test("commitPendingVideo carries the pending video into the active slot", () => 
   assert.equal(commitPendingVideo(null, null), null);
 });
 
-test("materializeUploadBlob preserves the original browser File handle", async () => {
+test("materializeUploadBlob detaches bytes from the browser File handle", async () => {
   const file = new File(["<hCNFsample"], "sample.xrk", { type: "application/octet-stream" });
-  file.arrayBuffer = () => { throw new Error("must not copy the whole file"); };
   const blob = await materializeUploadBlob(file);
-  assert.equal(blob, file);
+  assert.notEqual(blob, file);
   assert.equal(blob.size, file.size);
   assert.equal(await blob.text(), "<hCNFsample");
 });
@@ -50,6 +53,15 @@ test("upload limit is enforced before the network request", () => {
   assert.equal(exceedsUploadLimit(selected, 4), true);
   assert.equal(exceedsUploadLimit(selected, 5), false);
   assert.equal(exceedsUploadLimit(selected, null), false);
+});
+
+test("XRK browser upload uses a raw body and encoded filename header", () => {
+  const selected = new File(["<hCNFsample"], "driver session.xrk");
+  const request = binaryFileUploadRequest(selected, selected.name);
+  assert.equal(request.method, "POST");
+  assert.equal(request.body, selected);
+  assert.equal(request.headers["Content-Type"], "application/octet-stream");
+  assert.equal(request.headers["X-XRK-Filename"], "driver%20session.xrk");
 });
 
 test("selected file remains available until an async upload settles", async () => {

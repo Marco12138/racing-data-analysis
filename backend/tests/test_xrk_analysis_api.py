@@ -98,6 +98,104 @@ def test_missing_xrk_file_returns_traceable_public_error(tmp_path: Path) -> None
     assert response.headers["X-Request-ID"] == "missing-file-test"
 
 
+def test_raw_browser_upload_reaches_xrk_parser(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Raw browser uploads avoid multipart bodies being dropped by a proxy."""
+    async def fake_inspection(_: Path, output_dir: Path, __: int) -> None:
+        write_inspection(output_dir)
+
+    monkeypatch.setattr(xrk_routes, "run_xrk_inspection", fake_inspection)
+    settings = Settings(
+        app_env="test",
+        app_mode="local",
+        database_url=f"sqlite:///{tmp_path / 'sessions.sqlite3'}",
+        allowed_hosts="testserver",
+        cors_origins="http://localhost:3000",
+        xrk_inspection_cache_dir=str(tmp_path / "cache"),
+        max_xrk_upload_bytes=1024,
+    )
+    with TestClient(create_app(settings)) as client:
+        preflight = client.options(
+            "/api/v1/xrk/inspect",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,x-xrk-filename",
+            },
+        )
+        response = client.post(
+            "/api/v1/xrk/inspect",
+            content=b"<hCNFreal-parser-mocked",
+            headers={
+                "Content-Type": "application/octet-stream",
+                "X-XRK-Filename": "driver%20session.xrk",
+            },
+        )
+
+    assert preflight.status_code == 200
+    assert "x-xrk-filename" in preflight.headers["access-control-allow-headers"].lower()
+    assert response.status_code == 200
+    assert response.json()["filename"] == "driver session.xrk"
+    assert response.json()["laps"] == 2
+
+
+def test_local_xrk_library_inspects_whitelisted_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Local mode should bypass browser transfer without exposing file paths."""
+    source_root = tmp_path / "logs"
+    source_root.mkdir()
+    (source_root / "driver session.xrk").write_bytes(b"<hCNFreal-parser-mocked")
+    monkeypatch.setenv("RACING_XRK_ROOTS", str(source_root))
+
+    async def fake_inspection(_: Path, output_dir: Path, __: int) -> None:
+        write_inspection(output_dir)
+
+    monkeypatch.setattr(xrk_routes, "run_xrk_inspection", fake_inspection)
+    settings = Settings(
+        app_env="test",
+        app_mode="local",
+        database_url=f"sqlite:///{tmp_path / 'sessions.sqlite3'}",
+        allowed_hosts="testserver",
+        cors_origins="http://localhost:3000",
+        xrk_inspection_cache_dir=str(tmp_path / "cache"),
+        max_xrk_upload_bytes=1024,
+    )
+    with TestClient(create_app(settings)) as client:
+        library = client.get("/api/v1/xrk/local-library")
+        assert library.status_code == 200
+        source = library.json()["sources"][0]
+        assert source["name"] == "driver session.xrk"
+        assert str(tmp_path) not in json.dumps(source)
+        inspected = client.post(
+            "/api/v1/xrk/inspect-local",
+            json={"source_id": source["source_id"]},
+        )
+
+    assert inspected.status_code == 200
+    assert inspected.json()["laps"] == 2
+
+
+def test_local_xrk_library_is_unavailable_in_cloud_mode(tmp_path: Path) -> None:
+    """Cloud deployments must never expose server filesystem discovery."""
+    settings = Settings(
+        app_env="test",
+        app_mode="cloud",
+        database_url=f"sqlite:///{tmp_path / 'sessions.sqlite3'}",
+        allowed_hosts="testserver",
+        cors_origins="https://example.com",
+        xrk_inspection_cache_dir=str(tmp_path / "cache"),
+    )
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/api/v1/xrk/local-library")
+
+    assert response.status_code == 503
+    assert response.json()["error_code"] == "XRK_LOCAL_LIBRARY_UNAVAILABLE"
+
+
 def test_inspect_analyze_delete_contract(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

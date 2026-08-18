@@ -24,9 +24,24 @@ or native-library failure.
   metadata, file contents, or temporary filesystem paths.
 - Production client builds fail when they contain a literal loopback API URL.
 
+## Upload body follow-up
+
+Some browser and proxy combinations later delivered the multipart request with
+an empty file body even though capability checks were healthy. Public XRK
+uploads now use a bounded `application/octet-stream` body and carry only the
+URL-encoded basename in `X-XRK-Filename`. FastAPI accepts both this transport
+and the legacy multipart contract, applies the same size/signature checks, and
+deletes the original upload after parsing.
+
+The browser reads the selected file before opening the network request. Files
+that are only iCloud or network-drive placeholders must be downloaded locally
+first. Local development also offers an optional whitelisted XRK library, but
+those filesystem routes return unavailable in `APP_MODE=cloud`; the public
+service never discovers or reads a visitor's local directories.
+
 ## Release verification
 
 Deploy the backend first, then verify health, capabilities, CORS, legacy import,
-and one private XRK inspection. Set the Sites `API_URL` runtime value, deploy
-the exact validated frontend version, and complete an upload, inspection,
-analysis, and explicit token deletion in the public browser.
+raw-body CORS preflight, and one private XRK inspection. Deploy the exact
+validated frontend version and complete an upload, inspection, analysis, and
+explicit token deletion in the public browser.

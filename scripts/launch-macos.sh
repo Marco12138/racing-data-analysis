@@ -5,7 +5,7 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 runtime_dir="$project_root/storage/runtime"
 log_dir="$runtime_dir/logs"
 frontend_url="http://localhost:3000/"
-backend_url="http://127.0.0.1:8000/health"
+backend_url="http://127.0.0.1:8000/api/v1/health"
 
 mkdir -p "$log_dir"
 
@@ -68,7 +68,8 @@ fi
 if ! curl --silent --fail --max-time 2 "$frontend_url" >/dev/null 2>&1; then
   "$python_command" "$project_root/scripts/detach_process.py" \
     "$log_dir/frontend.log" "$project_root" \
-    "$pnpm_command" run dev >"$runtime_dir/frontend.pid"
+    "$pnpm_command" run dev:next --hostname 127.0.0.1 --port 3000 \
+    >"$runtime_dir/frontend.pid"
 fi
 
 echo "正在启动赛车分析网站..."

@@ -1,6 +1,10 @@
 import type { CsvRow } from "./analysis";
 import { resolveApiUrl, resolveXrkUploadUrl } from "./config";
-import { exceedsUploadLimit, materializeUploadBlob } from "./fileUpload";
+import {
+  binaryFileUploadRequest,
+  exceedsUploadLimit,
+  materializeUploadBlob,
+} from "./fileUpload";
 import type { VideoSyncFeature } from "./videoFeatureExtraction";
 
 export type XrkChannel = {
@@ -51,6 +55,16 @@ export type XrkInspection = {
   warning_codes: string[];
   warnings: string[];
   request_id: string;
+};
+
+export type LocalXrkSource = {
+  source_id: string;
+  name: string;
+  kind: "xrk" | "xrz";
+  size_bytes: number;
+  root: string;
+  relative_path: string;
+  modified_at: number;
 };
 
 export type XrkTrackPoint = {
@@ -510,7 +524,7 @@ export async function inspectXrkFile(
   } catch (error) {
     if (error instanceof XrkApiError) throw error;
     throw new XrkApiError(
-      "浏览器无法读取所选 XRK 文件。请重新选择文件，或确认文件未被移动和占用。",
+      "浏览器无法读取所选 XRK 文件。如果文件位于 iCloud、网盘或外置磁盘，请先确认它已完整下载并可在本机打开，然后重新选择。",
       "XRK_FILE_READ_FAILED",
     );
   }
@@ -518,23 +532,45 @@ export async function inspectXrkFile(
   const url = await resolveXrkUploadUrl();
   let response: Response;
   try {
-    const form = new FormData();
-    form.append("file", blob, file.name);
-    response = await fetch(url, {
-      method: "POST",
-      body: form,
-      signal,
-    });
+    response = await fetch(
+      url,
+      binaryFileUploadRequest(blob, file.name, signal),
+    );
   } catch (error) {
     if ((error as Error).name === "AbortError") throw error;
     if (error instanceof XrkApiError) throw error;
     throw new XrkApiError(
-      "浏览器未能把 XRK 发送到分析服务。请检查网络连接；若能力检查正常，请检查 Cloudflare 代理来源和上传限制。CSV 与 Demo 仍可使用。",
+      "浏览器未能把 XRK 发送到分析服务。请确认页面未刷新、文件仍可读取，并重新选择文件。CSV 与 Demo 仍可使用。",
       "XRK_UPLOAD_TRANSPORT_FAILED"
     );
   }
   if (!response.ok) {
     throw await responseError(response, `XRK inspection failed (${response.status}).`);
+  }
+  return response.json() as Promise<XrkInspection>;
+}
+
+export async function getLocalXrkLibrary(): Promise<LocalXrkSource[]> {
+  const response = await fetch(await resolveApiUrl("/xrk/local-library"));
+  if (!response.ok) {
+    throw await responseError(response, "Local XRK library is unavailable.");
+  }
+  const body = (await response.json()) as { sources: LocalXrkSource[] };
+  return body.sources;
+}
+
+export async function inspectLocalXrkSource(
+  sourceId: string,
+  signal?: AbortSignal,
+): Promise<XrkInspection> {
+  const response = await fetch(await resolveApiUrl("/xrk/inspect-local"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source_id: sourceId }),
+    signal,
+  });
+  if (!response.ok) {
+    throw await responseError(response, "Local XRK inspection failed.");
   }
   return response.json() as Promise<XrkInspection>;
 }
