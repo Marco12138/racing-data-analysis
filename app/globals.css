@@ -1772,6 +1772,57 @@ select {
   display: none;
 }
 
+.new-session-card__local {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid rgba(246, 201, 69, 0.32);
+  border-radius: 8px;
+  background: rgba(246, 201, 69, 0.05);
+  padding: 10px;
+}
+
+.new-session-card__local-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: #f6c945;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.new-session-card__local select {
+  min-height: 38px;
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 8px;
+  background: #0b0f14;
+  color: #cbd5e1;
+  font-size: 0.76rem;
+  padding: 0 10px;
+}
+
+.new-session-card__local-start {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgba(246, 201, 69, 0.55);
+  border-radius: 8px;
+  background: rgba(246, 201, 69, 0.12);
+  color: #f6c945;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.new-session-card__local-start:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .new-session-card__error {
   margin: 0;
   color: #fca5a5;

@@ -314,22 +314,36 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     }
   }
 
-  async function handleLocalXrkSource(sourceId: string): Promise<void> {
+  async function handleLocalXrkSource(
+    sourceId: string,
+    autoRun = false,
+    videoFile: File | null = null,
+  ): Promise<void> {
     if (xrkAbortRef.current || !sourceId) return;
     const controller = new AbortController();
     xrkAbortRef.current = controller;
     setAimImportStatus("inspecting");
     setDataError("");
     try {
-      applyXrkInspection(await inspectLocalXrkSource(sourceId, controller.signal));
+      const inspected = await inspectLocalXrkSource(sourceId, controller.signal);
+      applyXrkInspection(inspected);
+      if (autoRun) {
+        await runXrkAnalysis({}, inspected, videoFile);
+      }
     } catch (error) {
       if ((error as Error).name !== "AbortError") {
         setDataError(formatXrkClientError(error as Error));
       }
       setAimImportStatus("idle");
+      if (autoRun) setPendingVideoFile(null);
     } finally {
       if (xrkAbortRef.current === controller) xrkAbortRef.current = null;
     }
+  }
+
+  function handleNewSessionFromLocalSource(sourceId: string, videoFile: File | null): void {
+    setPendingVideoFile(videoFile);
+    void handleLocalXrkSource(sourceId, true, videoFile);
   }
 
   function applyXrkInspection(inspected: XrkInspection): void {
@@ -580,6 +594,8 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
               status={aimImportStatus}
               hasPendingVideo={Boolean(pendingVideoFile)}
               onStart={handleNewSession}
+              localSources={localXrkSources}
+              onStartLocal={handleNewSessionFromLocalSource}
             />
             <DataUploadPanel
               lapLoaded={lapRows.length > 0}
@@ -1107,6 +1123,7 @@ function BrowserVideoUpload() {
   const [previewFrame, setPreviewFrame] = useState("");
   const [info, setInfo] = useState<BrowserVideoInfo | null>(null);
   const [error, setError] = useState("");
+  const [playbackFailed, setPlaybackFailed] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -1123,6 +1140,7 @@ function BrowserVideoUpload() {
     const nextUrl = URL.createObjectURL(file);
     setVideoUrl(nextUrl);
     setPreviewFrame("");
+    setPlaybackFailed(false);
     setError("");
     setInfo({
       name: file.name,
@@ -1151,7 +1169,7 @@ function BrowserVideoUpload() {
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <SectionTitle icon={<Video size={18} />} title="Video Preview" subtitle="Browser-only preview; the file stays on this device" />
         <label className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-md border border-[#f6c945] bg-[#f6c945] px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-[#ffe078]">
-          <Upload size={16} /> Upload Video
+          <Upload size={16} /> 选择本机视频并预览
           <input
             className="hidden"
             type="file"
@@ -1170,13 +1188,27 @@ function BrowserVideoUpload() {
       {info && (
         <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
           <div className="overflow-hidden rounded-md border border-slate-800 bg-black">
-            {previewFrame ? (
+            {!playbackFailed ? (
+              <video
+                className="aspect-video w-full bg-black object-contain"
+                src={videoUrl}
+                controls
+                playsInline
+                preload="auto"
+                onError={() => {
+                  setPlaybackFailed(true);
+                  setError("The browser could not decode this video. File information is still available.");
+                }}
+              />
+            ) : previewFrame ? (
               <>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={previewFrame} alt={`First frame of ${info.name}`} className="aspect-video w-full object-contain" />
               </>
             ) : (
-              <div className="flex aspect-video items-center justify-center text-sm text-slate-500">Reading first frame...</div>
+              <div className="flex aspect-video items-center justify-center px-8 text-center text-sm leading-6 text-slate-400">
+                The browser could not decode this video. File information is still available.
+              </div>
             )}
           </div>
           <div className="grid content-start grid-cols-2 gap-3">
@@ -1203,7 +1235,10 @@ function BrowserVideoUpload() {
               } : current);
             }}
             onLoadedData={(event) => captureFirstFrame(event.currentTarget)}
-            onError={() => setError("The browser could not decode this video. File information is still available.")}
+            onError={() => {
+              setPlaybackFailed(true);
+              setError("The browser could not decode this video. File information is still available.");
+            }}
           />
         </div>
       )}
@@ -1297,8 +1332,10 @@ function DataUploadPanel({
         : xrkInspection
           ? `${xrkInspection.filename} inspected`
           : aimImport
-        ? `${aimImport.source.name} loaded`
-        : "Import XRK / XRZ (Beta)";
+            ? `${aimImport.source.name} loaded`
+            : capabilities?.mode === "cloud"
+              ? "选择本机 XRK 文件并上传（Beta）"
+              : "Import XRK / XRZ (Beta)";
   const busy = aimImportStatus === "inspecting" || aimImportStatus === "analyzing";
   const serverImport = capabilities?.xrk_server_import;
   const xrkAvailable = Boolean(serverImport?.available);
@@ -1328,6 +1365,11 @@ function DataUploadPanel({
         icon={busy ? <LoaderCircle size={16} className="animate-spin text-[#35d6d0]" /> : undefined}
         onFile={onAimFile}
       />
+      {capabilities?.mode === "cloud" && (
+        <p className="mt-2 text-xs leading-5 text-slate-500">
+          公开网站无法直接读取本机磁盘；请用文件选择器选择已下载到本机的 XRK 文件。文件只临时处理，不会永久保存。
+        </p>
+      )}
       {capabilities?.mode === "local" && localXrkSources.length > 0 && (
         <div className="mt-3 border-t border-slate-800 pt-3">
           <p className="text-xs font-medium text-slate-300">本机 XRK 文件库</p>
@@ -1354,7 +1396,7 @@ function DataUploadPanel({
             </button>
           </div>
           <p className="mt-2 text-xs leading-5 text-slate-500">
-            文件由本机 FastAPI 直接读取，不经过浏览器上传。
+            Safari 无法读取外置磁盘文件时，请优先使用这里：文件由本机 FastAPI 直接读取，不经过浏览器上传。
           </p>
         </div>
       )}

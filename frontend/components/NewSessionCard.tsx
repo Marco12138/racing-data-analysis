@@ -1,15 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { Clapperboard, Film, Play, Upload } from "lucide-react";
+import { Clapperboard, Film, HardDrive, Play, Upload } from "lucide-react";
 
 import { useI18n } from "../lib/i18n";
 import { describeFileReadError, materializeXrkFile } from "../lib/fileUpload";
 import {
   canStartNewSession,
   isXrkFileName,
+  resolveLocalXrkSource,
   type SessionUploadSelection,
 } from "../lib/sessionUpload";
+import type { LocalXrkSource } from "../lib/xrkAnalysisApi";
 
 const STEPS = ["sessionCard.step.upload", "sessionCard.step.inspect", "sessionCard.step.analyze", "sessionCard.step.video"] as const;
 
@@ -17,10 +19,14 @@ export function NewSessionCard({
   status,
   hasPendingVideo,
   onStart,
+  localSources = [],
+  onStartLocal,
 }: {
   status: "idle" | "inspecting" | "inspected" | "analyzing" | "loaded";
   hasPendingVideo: boolean;
   onStart: (xrkFile: File, videoFile: File | null) => void;
+  localSources?: LocalXrkSource[];
+  onStartLocal?: (sourceId: string, videoFile: File | null) => void;
 }) {
   const { t } = useI18n();
   const [xrkFile, setXrkFile] = useState<File | null>(null);
@@ -28,8 +34,10 @@ export function NewSessionCard({
   const [xrkError, setXrkError] = useState("");
   const [xrkReading, setXrkReading] = useState(false);
   const [lastStatus, setLastStatus] = useState(status);
+  const [localSourceId, setLocalSourceId] = useState("");
   const selection: SessionUploadSelection = { xrkFile, videoFile };
   const ready = canStartNewSession(selection);
+  const localSource = resolveLocalXrkSource(localSources, localSourceId);
   const busy = status === "inspecting" || status === "analyzing";
   const inputLocked = busy || xrkReading;
 
@@ -84,6 +92,41 @@ export function NewSessionCard({
           <p>{t("sessionCard.description")}</p>
         </div>
       </div>
+
+      {localSources.length > 0 && onStartLocal && (
+        <div className="new-session-card__local">
+          <p className="new-session-card__local-title">
+            <HardDrive size={13} />
+            {t("sessionCard.localLibraryTitle")}
+          </p>
+          <select
+            value={localSource?.source_id ?? ""}
+            disabled={busy}
+            onChange={(event) => setLocalSourceId(event.target.value)}
+            aria-label={t("sessionCard.localLibraryTitle")}
+          >
+            {localSources.map((source) => (
+              <option key={source.source_id} value={source.source_id}>
+                {source.root} / {source.relative_path}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="new-session-card__local-start"
+            disabled={!localSource || busy}
+            onClick={() => {
+              if (localSource && onStartLocal) {
+                onStartLocal(localSource.source_id, videoFile);
+              }
+            }}
+          >
+            <Play size={15} fill="currentColor" />
+            {t("sessionCard.localLibraryStart")}
+          </button>
+          <p className="new-session-card__privacy">{t("sessionCard.localLibraryHint")}</p>
+        </div>
+      )}
 
       <label className="new-session-card__file">
         <Upload size={15} />

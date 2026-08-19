@@ -135,6 +135,7 @@ test("keeps public imports, browser video preview, and runtime API routing expli
   assert.match(dashboard, /loadDemoData/);
   assert.match(dashboard, /BrowserVideoUpload/);
   assert.match(dashboard, /canvas\.toDataURL/);
+  assert.match(dashboard, /playbackFailed/);
   assert.match(dashboard, /Telemetry channel unavailable/);
   assert.match(dashboard, /XRK Server Import/);
   assert.match(dashboard, /Virtual sectors/);

@@ -5,6 +5,7 @@ import {
   canStartNewSession,
   commitPendingVideo,
   isXrkFileName,
+  resolveLocalXrkSource,
 } from "../frontend/lib/sessionUpload.ts";
 import {
   binaryFileUploadRequest,
@@ -65,6 +66,10 @@ test("file read errors are explained without raw internals", () => {
     /系统拒绝/
   );
   assert.match(
+    describeFileReadError(new DOMException("blocked", "NotReadableError")),
+    /本机 XRK 文件库/
+  );
+  assert.match(
     describeFileReadError(new DOMException("blocked", "SecurityError")),
     /系统拒绝/
   );
@@ -76,6 +81,34 @@ test("file read errors are explained without raw internals", () => {
     describeFileReadError(new Error("generic failure")),
     /无法读取/
   );
+});
+
+test("local library source falls back to the first available file", () => {
+  const sources = [
+    {
+      source_id: "first",
+      name: "ren_kosmic_WUHAN_a_0809.xrk",
+      kind: "xrk",
+      size_bytes: 2826404,
+      root: "racing数据",
+      relative_path: "ren_kosmic_WUHAN_a_0809.xrk",
+      modified_at: 1742539904,
+    },
+    {
+      source_id: "second",
+      name: "Marco_Kr 2025 old vega_WSK-WUHAN_a_0059.xrk",
+      kind: "xrk",
+      size_bytes: 3614891,
+      root: "racing数据",
+      relative_path: "Marco_Kr 2025 old vega_WSK-WUHAN_a_0059.xrk",
+      modified_at: 1748253818,
+    },
+  ];
+
+  assert.equal(resolveLocalXrkSource(sources, "")?.source_id, "first");
+  assert.equal(resolveLocalXrkSource(sources, "second")?.source_id, "second");
+  assert.equal(resolveLocalXrkSource(sources, "missing")?.source_id, "first");
+  assert.equal(resolveLocalXrkSource([], "first"), null);
 });
 
 test("materializeUploadBlob falls back to FileReader when arrayBuffer is missing", async () => {
