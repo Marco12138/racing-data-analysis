@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.analysis.video_telemetry_sync import (
     estimate_video_telemetry_offset,
+    estimate_video_telemetry_rpm_offset,
 )
 from backend.app.core.config import Settings
 from backend.app.main import create_app
@@ -42,6 +43,28 @@ def synchronized_fixture(offset_s: float = 7.5) -> tuple[list[dict], list[dict]]
     return video, telemetry
 
 
+def rpm_synchronized_fixture(
+    offset_s: float = 7.5,
+) -> tuple[list[dict], list[dict]]:
+    """Create RPM curves with repeated, traceable lift/brake drops."""
+    times = np.arange(0.0, 60.0, 0.25)
+    rpm = np.full_like(times, 9_000.0)
+    for center in (10.0, 26.0, 44.0):
+        rpm -= 3_600.0 * np.exp(-0.5 * ((times - center) / 0.7) ** 2)
+    # The audio estimator sees the same physical curve with scale error.
+    video_rpm = 0.82 * rpm + 420.0
+    video_times = times + offset_s
+    video = [
+        {"time_s": float(time), "rpm": float(value)}
+        for time, value in zip(video_times, video_rpm, strict=True)
+    ]
+    telemetry = [
+        {"time_s": float(time), "rpm": float(value)}
+        for time, value in zip(times, rpm, strict=True)
+    ]
+    return video, telemetry
+
+
 def test_estimator_finds_coarse_offset_with_reliable_evidence() -> None:
     """Repeated matching events should produce a reliable coarse estimate."""
     video, telemetry = synchronized_fixture()
@@ -60,6 +83,60 @@ def test_estimator_finds_coarse_offset_with_reliable_evidence() -> None:
     assert result["evidence"]["telemetry_deceleration_events"] >= 3
     assert result["evidence"]["search_resolution_ms"] == 250
     assert "frame" not in result["evidence"]["method"]
+
+
+def test_rpm_estimator_finds_offset_across_scale_difference() -> None:
+    """Audio-derived RPM correlates with telemetry RPM despite scale error."""
+    video, telemetry = rpm_synchronized_fixture()
+
+    result = estimate_video_telemetry_rpm_offset(
+        video,
+        telemetry,
+        max_offset_s=15,
+        search_step_s=0.25,
+        min_overlap_s=10,
+    )
+
+    assert result["offset_ms"] == pytest.approx(7_500, abs=250)
+    assert result["reliable"] is True
+    assert 0.7 <= result["confidence"] <= 1.0
+    assert result["evidence"]["method"] == (
+        "audio_rpm_to_telemetry_rpm_cross_correlation"
+    )
+    assert result["evidence"]["telemetry_rpm_drop_events"] >= 3
+    assert result["evidence"]["search_resolution_ms"] == 250
+
+
+def test_rpm_estimator_marks_unrelated_rpm_unreliable() -> None:
+    """Uncorrelated RPM must not be presented as a trustworthy offset."""
+    _, telemetry = rpm_synchronized_fixture(offset_s=0)
+    random = np.random.default_rng(20260819)
+    times = np.arange(0.0, 60.0, 0.25)
+    video = [
+        {"time_s": float(time), "rpm": float(random.uniform(4_000, 12_000))}
+        for time in times
+    ]
+
+    result = estimate_video_telemetry_rpm_offset(
+        video,
+        telemetry,
+        max_offset_s=15,
+        search_step_s=0.25,
+        min_overlap_s=10,
+    )
+
+    assert 0 <= result["confidence"] < 0.7
+    assert result["reliable"] is False
+    assert any("unreliable" in warning for warning in result["warnings"])
+
+
+def test_rpm_estimator_rejects_missing_rpm_data() -> None:
+    """Short arrays cannot produce a plausible RPM offset."""
+    with pytest.raises(ValueError, match="At least 8"):
+        estimate_video_telemetry_rpm_offset(
+            [{"time_s": 0, "rpm": 9_000}],
+            [{"time_s": 0, "rpm": 9_000}],
+        )
 
 
 def test_estimator_marks_unrelated_features_unreliable() -> None:
@@ -135,6 +212,98 @@ def test_auto_sync_api_prefers_temporary_inspection(
     assert body["source"] == "temporary_xrk_inspection"
     assert body["request_id"] == "video-sync-success"
     assert body["reliable"] is True
+
+
+def test_auto_sync_rpm_api_prefers_temporary_inspection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The RPM token path should load only its normalized Parquet RPM samples."""
+    client = build_client(monkeypatch, tmp_path)
+    video, telemetry_rows = rpm_synchronized_fixture()
+    telemetry = pd.DataFrame(telemetry_rows).rename(
+        columns={"time_s": "session_time_s"}
+    )
+    telemetry["lap"] = 1
+    telemetry["lap_time_s"] = telemetry["session_time_s"]
+
+    with client:
+        token = seed_inspection(client, telemetry, has_gps_speed=True, has_rpm=True)
+        response = client.post(
+            "/api/v1/xrk/video-sync/rpm",
+            json={
+                "inspection_id": token,
+                "video_rpm": video,
+                "max_offset_s": 15,
+                "search_step_s": 0.25,
+                "min_overlap_s": 10,
+            },
+            headers={"X-Request-ID": "video-sync-rpm-success"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["offset_ms"] == pytest.approx(7_500, abs=250)
+    assert body["source"] == "temporary_xrk_inspection"
+    assert body["request_id"] == "video-sync-rpm-success"
+    assert body["reliable"] is True
+    assert body["evidence"]["method"].startswith("audio_rpm")
+
+
+def test_auto_sync_rpm_api_requires_telemetry_source(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Missing telemetry RPM should use the stable public error envelope."""
+    client = build_client(monkeypatch, tmp_path)
+    video, _ = rpm_synchronized_fixture()
+    with client:
+        response = client.post(
+            "/api/v1/xrk/video-sync/rpm",
+            json={"video_rpm": video},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["error_code"] == "VIDEO_SYNC_TELEMETRY_REQUIRED"
+    assert response.json()["status"] == "error"
+
+
+def test_auto_sync_rpm_api_rejects_inspection_without_rpm(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Inspections without an RPM channel cannot use RPM alignment."""
+    client = build_client(monkeypatch, tmp_path)
+    video, telemetry_rows = rpm_synchronized_fixture()
+    telemetry = pd.DataFrame(telemetry_rows).rename(
+        columns={"time_s": "session_time_s"}
+    )
+    with client:
+        token = seed_inspection(client, telemetry, has_gps_speed=True, has_rpm=False)
+        response = client.post(
+            "/api/v1/xrk/video-sync/rpm",
+            json={"inspection_id": token, "video_rpm": video},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["error_code"] == "XRK_RPM_UNAVAILABLE"
+
+
+def test_auto_sync_rpm_api_returns_410_for_expired_token(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Expired RPM alignment requests keep the XRK error contract."""
+    client = build_client(monkeypatch, tmp_path)
+    video, _ = rpm_synchronized_fixture()
+    with client:
+        response = client.post(
+            "/api/v1/xrk/video-sync/rpm",
+            json={"inspection_id": "a" * 32, "video_rpm": video},
+        )
+
+    assert response.status_code == 410
+    assert response.json()["error_code"] == "XRK_INSPECTION_EXPIRED"
 
 
 def test_auto_sync_api_requires_telemetry_source(
@@ -259,7 +428,8 @@ def seed_inspection(
     client: TestClient,
     telemetry: pd.DataFrame,
     *,
-    has_gps_speed: bool,
+    has_gps_speed: bool = True,
+    has_rpm: bool = True,
 ) -> str:
     """Write a minimal normalized inspection without any original video/XRK."""
     store = client.app.state.xrk_inspection_store
@@ -267,6 +437,7 @@ def seed_inspection(
     telemetry.to_parquet(directory / "telemetry.parquet", index=False)
     manifest = {
         "has_gps_speed": has_gps_speed,
+        "has_rpm": has_rpm,
         "artifacts": {"telemetry": "telemetry.parquet"},
     }
     (directory / "inspection.json").write_text(

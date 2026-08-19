@@ -341,6 +341,31 @@ export type VideoSyncAutoResult = {
   request_id: string;
 };
 
+export type VideoSyncRpmResult = {
+  offset_ms: number;
+  confidence: number;
+  reliable: boolean;
+  source: "temporary_xrk_inspection" | "request_summary";
+  evidence: {
+    method: string;
+    offset_convention: string;
+    video_rpm_points: number;
+    telemetry_rpm_points: number;
+    video_rpm_drop_events: number;
+    telemetry_rpm_drop_events: number;
+    matched_overlap_s: number;
+    overlap_ratio: number;
+    best_correlation: number;
+    next_distinct_correlation: number;
+    peak_margin: number;
+    search_resolution_ms: number;
+    reliable_confidence_threshold: number;
+    searched_offset_range_ms: [number, number];
+  };
+  warnings: string[];
+  request_id?: string;
+};
+
 export type DriverComparisonResult = {
   format: "cross_session_real_lap_comparison";
   sessions: {
@@ -622,6 +647,26 @@ export async function autoSyncVideoTelemetry(options: {
     throw await responseError(response, `Automatic video alignment failed (${response.status}).`);
   }
   return response.json() as Promise<VideoSyncAutoResult>;
+}
+
+export async function autoSyncVideoRpm(options: {
+  inspection_id?: string;
+  video_rpm: Array<{ time_s: number; rpm: number }>;
+  telemetry_rpm?: Array<{ time_s: number; rpm: number }>;
+  max_offset_s?: number;
+  search_step_s?: number;
+  min_overlap_s?: number;
+}, signal?: AbortSignal): Promise<VideoSyncRpmResult> {
+  const response = await fetch(await resolveApiUrl("/xrk/video-sync/rpm"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options),
+    signal,
+  });
+  if (!response.ok) {
+    throw await responseError(response, `Automatic RPM alignment failed (${response.status}).`);
+  }
+  return response.json() as Promise<VideoSyncRpmResult>;
 }
 
 export async function deleteXrkInspection(inspectionId: string): Promise<void> {

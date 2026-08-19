@@ -24,6 +24,8 @@ from ..analysis.xrk_session_analysis import analyze_xrk_session
 from ..analysis.video_telemetry_sync import (
     MAX_SEARCH_CANDIDATES,
     estimate_video_telemetry_offset,
+    estimate_video_telemetry_rpm_offset,
+    telemetry_rpm_summary,
     telemetry_speed_summary,
 )
 from ..models.demo_session import DemoSessionResponse
@@ -106,6 +108,32 @@ class VideoSyncAutoRequest(BaseModel):
     inspection_id: str | None = Field(default=None, min_length=32, max_length=32)
     video_features: list[VideoFeaturePoint] = Field(min_length=8, max_length=5_000)
     telemetry_speed: list[TelemetrySpeedPoint] | None = Field(
+        default=None,
+        min_length=8,
+        max_length=5_000,
+    )
+    max_offset_s: float = Field(default=300.0, ge=5.0, le=1_800.0)
+    search_step_s: float = Field(default=0.25, ge=0.05, le=2.0)
+    min_overlap_s: float = Field(default=5.0, ge=2.0, le=300.0)
+
+
+class VideoRpmPoint(BaseModel):
+    """One bounded audio-derived or telemetry RPM sample."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    time_s: float = Field(ge=0, le=86_400)
+    rpm: float = Field(ge=0, le=100_000)
+
+
+class VideoSyncRpmAutoRequest(BaseModel):
+    """Inputs for RPM-channel synchronization without uploading any video."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    inspection_id: str | None = Field(default=None, min_length=32, max_length=32)
+    video_rpm: list[VideoRpmPoint] = Field(min_length=8, max_length=5_000)
+    telemetry_rpm: list[VideoRpmPoint] | None = Field(
         default=None,
         min_length=8,
         max_length=5_000,
@@ -568,6 +596,104 @@ async def auto_sync_video(
             estimate_video_telemetry_offset,
             [point.model_dump() for point in payload.video_features],
             telemetry_points,
+            max_offset_s=payload.max_offset_s,
+            search_step_s=payload.search_step_s,
+            min_overlap_s=payload.min_overlap_s,
+        )
+    except ValueError as exc:
+        raise PublicApiError(
+            status_code=422,
+            error_code="VIDEO_SYNC_INSUFFICIENT_DATA",
+            message=str(exc),
+            error_type="video_sync_data",
+        ) from exc
+    except Exception as exc:
+        raise PublicApiError(
+            status_code=400,
+            error_code="VIDEO_SYNC_ANALYSIS_FAILED",
+            message="Automatic video synchronization could not be completed.",
+            error_type=type(exc).__name__,
+        ) from exc
+    result["source"] = source
+    result["request_id"] = getattr(request.state, "request_id", "unknown")
+    return result
+
+
+@router.post("/video-sync/rpm")
+async def auto_sync_video_rpm(
+    request: Request,
+    payload: VideoSyncRpmAutoRequest,
+) -> dict[str, Any]:
+    """Estimate a video offset from audio-derived RPM and telemetry RPM."""
+    candidate_count = int(
+        (2 * payload.max_offset_s) // payload.search_step_s
+    ) + 1
+    if candidate_count > MAX_SEARCH_CANDIDATES:
+        raise PublicApiError(
+            status_code=422,
+            error_code="VIDEO_SYNC_SEARCH_LIMIT_EXCEEDED",
+            message=(
+                f"Offset search is limited to {MAX_SEARCH_CANDIDATES:,} candidates; "
+                "reduce max_offset_s or increase search_step_s."
+            ),
+            error_type="video_sync_limits",
+        )
+    source = "request_summary"
+    if payload.inspection_id:
+        source = "temporary_xrk_inspection"
+        try:
+            record = request.app.state.xrk_inspection_store.load(
+                payload.inspection_id
+            )
+        except InspectionExpiredError as exc:
+            raise PublicApiError(
+                status_code=410,
+                error_code="XRK_INSPECTION_EXPIRED",
+                message=str(exc),
+                error_type="expired_token",
+            ) from exc
+        if record.manifest.get("has_rpm") is False:
+            raise PublicApiError(
+                status_code=422,
+                error_code="XRK_RPM_UNAVAILABLE",
+                message="RPM is unavailable for this inspection.",
+                error_type="video_sync_data",
+            )
+        try:
+            telemetry = await asyncio.to_thread(
+                pd.read_parquet, record.telemetry_path
+            )
+        except Exception as exc:
+            raise PublicApiError(
+                status_code=422,
+                error_code="VIDEO_SYNC_TELEMETRY_UNAVAILABLE",
+                message="Normalized telemetry is unavailable for automatic video sync.",
+                error_type="video_sync_data",
+            ) from exc
+        try:
+            telemetry_rpm = telemetry_rpm_summary(telemetry)
+        except ValueError as exc:
+            raise PublicApiError(
+                status_code=422,
+                error_code="XRK_RPM_UNAVAILABLE",
+                message=str(exc),
+                error_type="video_sync_data",
+            ) from exc
+    elif payload.telemetry_rpm:
+        telemetry_rpm = [point.model_dump() for point in payload.telemetry_rpm]
+    else:
+        raise PublicApiError(
+            status_code=422,
+            error_code="VIDEO_SYNC_TELEMETRY_REQUIRED",
+            message="Provide a valid inspection_id or a bounded telemetry RPM summary.",
+            error_type="video_sync_data",
+        )
+
+    try:
+        result = await asyncio.to_thread(
+            estimate_video_telemetry_rpm_offset,
+            [point.model_dump() for point in payload.video_rpm],
+            telemetry_rpm,
             max_offset_s=payload.max_offset_s,
             search_step_s=payload.search_step_s,
             min_overlap_s=payload.min_overlap_s,

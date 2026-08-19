@@ -33,6 +33,7 @@ import {
 
 import {
   analyzeLapAudio,
+  extractVideoRpmTrace,
   type LapAudioAnalysis,
 } from "../lib/audioRpm";
 import {
@@ -48,7 +49,10 @@ import type {
   XrkEvent,
   XrkTrackPoint,
 } from "../lib/xrkAnalysisApi";
-import { autoSyncVideoTelemetry } from "../lib/xrkAnalysisApi";
+import {
+  autoSyncVideoRpm,
+  autoSyncVideoTelemetry,
+} from "../lib/xrkAnalysisApi";
 import { extractVideoSyncFeatures } from "../lib/videoFeatureExtraction";
 import { initialVideoState } from "../lib/videoSession";
 import { resolveApiConfig } from "../lib/config";
@@ -923,6 +927,14 @@ export function SingleLapAnalysisPanel({
   const [rpmHint, setRpmHint] = useState("");
   const [rpmStrokes, setRpmStrokes] = useState<2 | 4>(2);
   const [rpmReplacePending, setRpmReplacePending] = useState(false);
+  const [manualAnchorActive, setManualAnchorActive] = useState(() => calibration != null);
+  const [pendingAutoResult, setPendingAutoResult] = useState<{
+    offset_ms: number;
+    confidence: number;
+    source: string;
+  } | null>(null);
+  const [rpmSyncing, setRpmSyncing] = useState(false);
+  const [rpmSyncProgress, setRpmSyncProgress] = useState(0);
 
   const issues = useMemo(() => findCornerIssues(corners), [corners]);
   const straights = useMemo(() => straightGaps(corners), [corners]);
@@ -1196,6 +1208,8 @@ export function SingleLapAnalysisPanel({
       });
       setCalibration(next);
       setOffsetMs(next.offset_ms);
+      setManualAnchorActive(true);
+      setPendingAutoResult(null);
       setSyncError("");
       setSyncMessage(t("xrk.video.calibrated", {
         video: next.video_time_s.toFixed(3),
@@ -1211,8 +1225,49 @@ export function SingleLapAnalysisPanel({
     setOffsetMs(value);
     setCalibration(null);
     window.localStorage.removeItem(storageKey);
+    setManualAnchorActive(true);
+    setPendingAutoResult(null);
     setSyncError("");
     setSyncMessage(t("xrk.video.manualActive"));
+  }
+
+  function applyOffsetResult(offsetMsValue: number, label: string) {
+    setOffsetMs(offsetMsValue);
+    setCalibration(null);
+    window.localStorage.removeItem(storageKey);
+    setManualAnchorActive(false);
+    setPendingAutoResult(null);
+    setSyncError("");
+    setSyncMessage(t("xrk.video.autoApplied", {
+      label,
+      offset: signedMilliseconds(offsetMsValue),
+    }));
+  }
+
+  function considerAutoResult(
+    result: { offset_ms: number; confidence: number; reliable: boolean },
+    label: string,
+  ) {
+    setAutoConfidence(result.confidence);
+    if (!result.reliable) {
+      setPendingAutoResult(null);
+      setSyncMessage("");
+      setSyncError(t("xrk.video.autoDiscarded", {
+        confidence: formatConfidence(result.confidence),
+      }));
+      return;
+    }
+    if (manualAnchorActive) {
+      setPendingAutoResult({
+        offset_ms: result.offset_ms,
+        confidence: result.confidence,
+        source: label,
+      });
+      setSyncMessage("");
+      setSyncError("");
+      return;
+    }
+    applyOffsetResult(result.offset_ms, label);
   }
 
   async function runAutomaticAlignment() {
@@ -1241,22 +1296,7 @@ export function SingleLapAnalysisPanel({
         inspection_id: analysis.inspection_id,
         video_features: videoFeatures,
       }, controller.signal);
-      setOffsetMs(result.offset_ms);
-      setCalibration(null);
-      window.localStorage.removeItem(storageKey);
-      setAutoConfidence(result.confidence);
-      if (result.reliable) {
-        setSyncMessage(t("xrk.video.autoReliable", {
-          offset: signedMilliseconds(result.offset_ms),
-          confidence: formatConfidence(result.confidence),
-        }));
-      } else {
-        setSyncMessage("");
-        setSyncError(t("xrk.video.autoUnreliable", {
-          confidence: formatConfidence(result.confidence),
-          offset: signedMilliseconds(result.offset_ms),
-        }));
-      }
+      considerAutoResult(result, t("xrk.video.speedChannelLabel"));
     } catch (error) {
       if ((error as Error).name !== "AbortError") {
         setSyncMessage("");
@@ -1265,6 +1305,44 @@ export function SingleLapAnalysisPanel({
     } finally {
       if (autoSyncAbortRef.current === controller) autoSyncAbortRef.current = null;
       setAutoSyncing(false);
+    }
+  }
+
+  async function runAudioRpmAlignment() {
+    if (!videoFile || !videoUrl || videoDurationS <= 0) {
+      setSyncError(t("xrk.video.chooseBeforeAuto"));
+      return;
+    }
+    if (!analysis.inspection_id || analysis.inspection_id.startsWith("public-demo")) {
+      setSyncError(t("xrk.video.activeInspectionRequired"));
+      return;
+    }
+    setRpmSyncing(true);
+    setRpmSyncProgress(0);
+    setSyncError("");
+    setSyncMessage(t("xrk.video.rpmAutoRunning"));
+    try {
+      const trace = await extractVideoRpmTrace(videoFile, {
+        strokes: rpmStrokes,
+        onProgress: (fraction) => setRpmSyncProgress(fraction),
+      });
+      setSyncMessage(t("xrk.video.comparing"));
+      const result = await autoSyncVideoRpm({
+        inspection_id: analysis.inspection_id,
+        video_rpm: trace.times.map((time_s, index) => ({
+          time_s,
+          rpm: trace.rpm[index],
+        })),
+        search_step_s: 0.25,
+      });
+      considerAutoResult(result, t("xrk.video.rpmChannelLabel"));
+    } catch (error) {
+      if ((error as Error).name !== "AbortError") {
+        setSyncMessage("");
+        setSyncError((error as Error).message || t("xrk.video.autoFailed"));
+      }
+    } finally {
+      setRpmSyncing(false);
     }
   }
 
@@ -1286,6 +1364,8 @@ export function SingleLapAnalysisPanel({
     setVideoName("");
     setVideoDurationS(0);
     resetLapAnalysis();
+    setManualAnchorActive(false);
+    setPendingAutoResult(null);
     setCalibration(null);
     setOffsetMs(0);
     setSyncMessage("");
@@ -1341,6 +1421,8 @@ export function SingleLapAnalysisPanel({
               setVideoFile(file);
               setVideoDurationS(0);
               resetLapAnalysis();
+              setManualAnchorActive(false);
+              setPendingAutoResult(null);
               setSyncMessage("");
               setSyncError("");
               setAutoConfidence(null);
@@ -1635,12 +1717,55 @@ export function SingleLapAnalysisPanel({
           >
             <WandSparkles size={16} /> {autoSyncing ? t("xrk.video.autoRunning") : t("xrk.video.auto")}
           </button>
+          <button
+            type="button"
+            onClick={runAudioRpmAlignment}
+            disabled={rpmSyncing || !videoUrl || videoDurationS <= 0 || !analysis.inspection_id || analysis.inspection_id.startsWith("public-demo")}
+            className="mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-fuchsia-500/60 bg-fuchsia-500/10 px-4 text-sm font-semibold text-fuchsia-100 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <Activity size={16} />
+            {rpmSyncing
+              ? `${t("xrk.video.rpmAutoRunning")} ${Math.round(rpmSyncProgress * 100)}%`
+              : t("xrk.video.rpmAuto")}
+          </button>
           <p className="mt-2 text-xs leading-5 text-slate-500">
             {t("xrk.video.privacy")}
           </p>
           {autoConfidence != null && (
             <p className="mt-2 text-xs text-slate-400">{t("xrk.video.autoConfidence", { value: formatConfidence(autoConfidence) })}</p>
           )}
+          {manualAnchorActive ? (
+            <p className="mt-2 text-xs leading-5 text-amber-300">
+              {t("xrk.video.manualPriorityHint")}
+            </p>
+          ) : null}
+          {pendingAutoResult ? (
+            <div className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+              <p className="text-xs leading-5 text-amber-200">
+                {t("xrk.video.manualPriority", {
+                  source: pendingAutoResult.source,
+                  offset: signedMilliseconds(pendingAutoResult.offset_ms),
+                  confidence: formatConfidence(pendingAutoResult.confidence),
+                })}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => applyOffsetResult(pendingAutoResult.offset_ms, pendingAutoResult.source)}
+                  className="rounded-md border border-amber-500/50 px-3 py-1 text-xs font-semibold text-amber-200 hover:bg-amber-500/10"
+                >
+                  {t("xrk.video.applyAuto")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingAutoResult(null)}
+                  className="rounded-md border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                >
+                  {t("xrk.video.keepManual")}
+                </button>
+              </div>
+            </div>
+          ) : null}
           <button
             type="button"
             onClick={calibrateCurrentMoment}

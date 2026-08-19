@@ -37,6 +37,12 @@ export type LapAudioAnalysis = {
   lapEndS: number;
 };
 
+export type VideoRpmTrace = {
+  /** Video-relative timestamps of the RPM samples (seconds). */
+  times: number[];
+  rpm: number[];
+};
+
 const MAX_VIDEO_SECONDS = 900;
 const DEFAULT_WINDOW_SIZE = 2048;
 const DEFAULT_HOP_SIZE = 2048;
@@ -384,6 +390,44 @@ export async function decodeAudioFile(file: File): Promise<AudioBuffer> {
     throw new Error("NO_AUDIO_TRACK");
   }
   return buffer;
+}
+
+/**
+ * Extract a full-video RPM trace from the audio track. Used for RPM-channel
+ * alignment with telemetry; the decoded audio never leaves the browser.
+ */
+export async function extractVideoRpmTrace(
+  file: File,
+  options: { strokes?: 2 | 4; onProgress?: (fraction: number) => void } = {},
+): Promise<VideoRpmTrace> {
+  const strokes = options.strokes ?? 2;
+  options.onProgress?.(0.05);
+  const buffer = await decodeAudioFile(file);
+  if (buffer.duration > MAX_VIDEO_SECONDS) throw new Error("VIDEO_TOO_LONG");
+  options.onProgress?.(0.2);
+
+  const mono = monoChannel(buffer);
+  const sampleRate = buffer.sampleRate;
+  let hopSize = DEFAULT_HOP_SIZE;
+  const approxFrames = mono.length / hopSize;
+  if (approxFrames > MAX_FRAMES) {
+    hopSize = Math.max(2048, Math.ceil((mono.length / MAX_FRAMES) / 256) * 256);
+  }
+  const spectrum = stft(mono, {
+    sampleRate,
+    windowSize: DEFAULT_WINDOW_SIZE,
+    hopSize,
+  });
+  options.onProgress?.(0.78);
+
+  const trace = trackEngineRpm(spectrum, { strokes });
+  const smoothed = smoothRpmForEvents(trace.rpm);
+  options.onProgress?.(1);
+
+  return {
+    times: spectrum.times.map((value) => round(value, 3)),
+    rpm: smoothed.map((value) => Math.round(value)),
+  };
 }
 
 /**
