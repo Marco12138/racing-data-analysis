@@ -483,7 +483,17 @@ export function VideoCoachExperiment() {
           <p className="hero-kicker"><Scissors size={15} /> {t("videoCoach.kicker")}</p>
           <h1>{t("videoCoach.title")}</h1>
           <p>{t("videoCoach.description")}</p>
-          <p className="video-coach__privacy">{t("videoCoach.privacy")}</p>
+          <p className="video-coach__privacy">
+            {t("videoCoach.privacy")}{" "}
+            <a
+              className="video-coach__external"
+              href="https://ai-racing-telemetry-platform.vercel.app"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {t("videoCoach.openTelemetry")}
+            </a>
+          </p>
         </div>
       </header>
 

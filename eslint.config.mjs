@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Standalone sub-app is built and checked separately.
+    "video-coach-site/**",
   ]),
 ]);
 

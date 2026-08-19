@@ -1409,6 +1409,12 @@ select {
   font-size: 0.76rem !important;
 }
 
+.video-coach__external {
+  color: #35d6d0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .video-coach__meta {
   display: flex;
   gap: 14px;

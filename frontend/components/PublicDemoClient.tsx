@@ -89,6 +89,14 @@ export function PublicDemoClient({ initialDemo }: { initialDemo: PublicDemoSumma
             <Link href="/profile" className="nav-command">
               {t("nav.profile")}
             </Link>
+            <a
+              href="https://ai-video-coach.vercel.app"
+              target="_blank"
+              rel="noreferrer"
+              className="nav-command"
+            >
+              {t("nav.videoCoach")}
+            </a>
             <button type="button" className="nav-command" onClick={() => openDashboard(false)}>
               {t("nav.openDashboard")}
             </button>
