@@ -8,7 +8,9 @@ import {
 } from "../frontend/lib/sessionUpload.ts";
 import {
   binaryFileUploadRequest,
+  describeFileReadError,
   exceedsUploadLimit,
+  materializeXrkFile,
   materializeUploadBlob,
 } from "../frontend/lib/fileUpload.ts";
 import { consumeSelectedFile } from "../frontend/lib/fileUpload.ts";
@@ -46,6 +48,71 @@ test("materializeUploadBlob detaches bytes from the browser File handle", async 
   assert.notEqual(blob, file);
   assert.equal(blob.size, file.size);
   assert.equal(await blob.text(), "<hCNFsample");
+});
+
+test("materializeXrkFile preserves the name for a delayed session start", async () => {
+  const file = new File(["<hCNFsample"], "session.xrk");
+  const stable = await materializeXrkFile(file);
+  assert.notEqual(stable, file);
+  assert.equal(stable.name, "session.xrk");
+  assert.equal(stable.size, file.size);
+  assert.equal(await stable.text(), "<hCNFsample");
+});
+
+test("file read errors are explained without raw internals", () => {
+  assert.match(
+    describeFileReadError(new DOMException("blocked", "NotReadableError")),
+    /系统拒绝/
+  );
+  assert.match(
+    describeFileReadError(new DOMException("blocked", "SecurityError")),
+    /系统拒绝/
+  );
+  assert.match(
+    describeFileReadError(new TypeError("arrayBuffer is not a function")),
+    /升级 Safari/
+  );
+  assert.match(
+    describeFileReadError(new Error("generic failure")),
+    /无法读取/
+  );
+});
+
+test("materializeUploadBlob falls back to FileReader when arrayBuffer is missing", async () => {
+  const originalFileReader = globalThis.FileReader;
+  class TestFileReader {
+    result = null;
+    error = null;
+    onload = null;
+    onerror = null;
+    onabort = null;
+    readAsArrayBuffer(blob) {
+      blob.slice().arrayBuffer().then(
+        (buffer) => {
+          this.result = buffer;
+          this.onload?.();
+        },
+        (error) => {
+          this.error = error;
+          this.onerror?.();
+        }
+      );
+    }
+  }
+  globalThis.FileReader = TestFileReader;
+  try {
+    const file = new File(["<hCNFsample"], "fallback.xrk");
+    Object.defineProperty(file, "arrayBuffer", { value: undefined });
+    const blob = await materializeUploadBlob(file);
+    assert.equal(blob.size, file.size);
+    assert.equal(await blob.text(), "<hCNFsample");
+  } finally {
+    if (originalFileReader === undefined) {
+      delete globalThis.FileReader;
+    } else {
+      globalThis.FileReader = originalFileReader;
+    }
+  }
 });
 
 test("upload limit is enforced before the network request", () => {

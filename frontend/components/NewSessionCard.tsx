@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Clapperboard, Film, Play, Upload } from "lucide-react";
 
 import { useI18n } from "../lib/i18n";
+import { describeFileReadError, materializeXrkFile } from "../lib/fileUpload";
 import {
   canStartNewSession,
   isXrkFileName,
@@ -25,10 +26,12 @@ export function NewSessionCard({
   const [xrkFile, setXrkFile] = useState<File | null>(null);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [xrkError, setXrkError] = useState("");
+  const [xrkReading, setXrkReading] = useState(false);
   const [lastStatus, setLastStatus] = useState(status);
   const selection: SessionUploadSelection = { xrkFile, videoFile };
   const ready = canStartNewSession(selection);
   const busy = status === "inspecting" || status === "analyzing";
+  const inputLocked = busy || xrkReading;
 
   if (status !== lastStatus) {
     setLastStatus(status);
@@ -39,7 +42,7 @@ export function NewSessionCard({
     }
   }
 
-  function chooseXrk(file: File | null) {
+  async function chooseXrk(file: File | null) {
     setXrkError("");
     if (!file) {
       setXrkFile(null);
@@ -50,7 +53,15 @@ export function NewSessionCard({
       setXrkFile(null);
       return;
     }
-    setXrkFile(file);
+    setXrkReading(true);
+    try {
+      setXrkFile(await materializeXrkFile(file));
+    } catch (error) {
+      setXrkFile(null);
+      setXrkError(describeFileReadError(error));
+    } finally {
+      setXrkReading(false);
+    }
   }
 
   const activeStep =
@@ -76,12 +87,12 @@ export function NewSessionCard({
 
       <label className="new-session-card__file">
         <Upload size={15} />
-        <span>{xrkFile ? xrkFile.name : t("sessionCard.xrkLabel")}</span>
+        <span>{xrkReading ? t("sessionCard.reading") : xrkFile ? xrkFile.name : t("sessionCard.xrkLabel")}</span>
         <input
           type="file"
           accept=".xrk,.xrz"
           onChange={(event) => {
-            if (!busy) chooseXrk(event.target.files?.[0] ?? null);
+            if (!inputLocked) void chooseXrk(event.target.files?.[0] ?? null);
           }}
         />
       </label>
@@ -94,7 +105,7 @@ export function NewSessionCard({
           type="file"
           accept="video/mp4,video/quicktime,.mp4,.mov"
           onChange={(event) => {
-            if (!busy) setVideoFile(event.target.files?.[0] ?? null);
+            if (!inputLocked) setVideoFile(event.target.files?.[0] ?? null);
           }}
         />
       </label>
@@ -103,7 +114,7 @@ export function NewSessionCard({
       <button
         type="button"
         className="new-session-card__start"
-        disabled={!ready || busy}
+        disabled={!ready || busy || xrkReading}
         onClick={() => {
           if (xrkFile) onStart(xrkFile, videoFile);
         }}

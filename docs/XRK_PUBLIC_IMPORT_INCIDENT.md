@@ -39,6 +39,17 @@ first. Local development also offers an optional whitelisted XRK library, but
 those filesystem routes return unavailable in `APP_MODE=cloud`; the public
 service never discovers or reads a visitor's local directories.
 
+## Delayed file-handle read failure
+
+The new-session card kept the raw browser `File` in React state and only read
+its bytes after the user clicked Start. Safari can release a file's backing
+data after the picker event settles, so that delayed read failed locally and
+was reported as `XRK_FILE_READ_FAILED`. The card now materializes the XRK bytes
+at selection time and stores a detached file with the original name; the
+general upload path also falls back from `File.arrayBuffer()` to `FileReader`
+for older Safari, and the error text now distinguishes an OS read rejection,
+an unsupported browser API, and a not-yet-downloaded iCloud/network file.
+
 ## Release verification
 
 Deploy the backend first, then verify health, capabilities, CORS, legacy import,

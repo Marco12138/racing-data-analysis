@@ -2,6 +2,7 @@ import type { CsvRow } from "./analysis";
 import { resolveApiUrl, resolveXrkUploadUrl } from "./config";
 import {
   binaryFileUploadRequest,
+  describeFileReadError,
   exceedsUploadLimit,
   materializeUploadBlob,
 } from "./fileUpload";
@@ -524,7 +525,7 @@ export async function inspectXrkFile(
   } catch (error) {
     if (error instanceof XrkApiError) throw error;
     throw new XrkApiError(
-      "浏览器无法读取所选 XRK 文件。如果文件位于 iCloud、网盘或外置磁盘，请先确认它已完整下载并可在本机打开，然后重新选择。",
+      describeFileReadError(error),
       "XRK_FILE_READ_FAILED",
     );
   }
