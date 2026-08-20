@@ -57,6 +57,10 @@ import {
   buildVideoDeltaCurve,
   telemetryAtVideoTime,
 } from "../lib/videoGauge";
+import {
+  detectVideoCodecFromFile,
+  type DetectedVideoCodec,
+} from "../lib/videoCodec";
 import { extractVideoSyncFeatures } from "../lib/videoFeatureExtraction";
 import { initialVideoState } from "../lib/videoSession";
 import { resolveApiConfig } from "../lib/config";
@@ -943,6 +947,8 @@ export function SingleLapAnalysisPanel({
   const [rpmSyncing, setRpmSyncing] = useState(false);
   const [rpmSyncProgress, setRpmSyncProgress] = useState(0);
   const [rpmAmbiguous, setRpmAmbiguous] = useState(false);
+  const [detectedCodec, setDetectedCodec] = useState<DetectedVideoCodec>("unknown");
+  const codecProbeRef = useRef<File | null>(null);
 
   const issues = useMemo(() => findCornerIssues(corners), [corners]);
   const straights = useMemo(() => straightGaps(corners), [corners]);
@@ -1202,6 +1208,16 @@ export function SingleLapAnalysisPanel({
     }
   }
 
+  function onVideoError() {
+    const video = videoRef.current;
+    const code = video?.error?.code;
+    if (code === 4 && detectedCodec === "hevc") {
+      setSyncError(t("videoCoach.codecHevc"));
+      return;
+    }
+    setSyncError(t("videoCoach.loadFailed"));
+  }
+
   function calibrateCurrentMoment() {
     const video = videoRef.current;
     if (!video || !videoFile) {
@@ -1403,6 +1419,8 @@ export function SingleLapAnalysisPanel({
     setRpmReplacePending(false);
     setRpmProgress(0);
     setRpmAmbiguous(false);
+    setDetectedCodec("unknown");
+    codecProbeRef.current = null;
   }
 
   return (
@@ -1417,7 +1435,7 @@ export function SingleLapAnalysisPanel({
               className="aspect-video w-full bg-black"
               onTimeUpdate={onTimeUpdate}
               onLoadedMetadata={loadVideoMetadata}
-              onError={() => setSyncError(t("videoCoach.loadFailed"))}
+              onError={onVideoError}
             />
             <button
               type="button"
@@ -1440,6 +1458,15 @@ export function SingleLapAnalysisPanel({
               setVideoFile(file);
               setVideoDurationS(0);
               resetLapAnalysis();
+              codecProbeRef.current = file;
+              setDetectedCodec("unknown");
+              void detectVideoCodecFromFile(file).then((codec) => {
+                if (codecProbeRef.current !== file) return;
+                setDetectedCodec(codec);
+                if (codec === "hevc") {
+                  setSyncError(t("videoCoach.codecHevc"));
+                }
+              });
               setManualAnchorActive(false);
               setPendingAutoResult(null);
               setSyncMessage("");

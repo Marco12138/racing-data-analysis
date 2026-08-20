@@ -19,6 +19,10 @@ import {
   type LapAudioAnalysis,
 } from "../lib/audioRpm";
 import {
+  detectVideoCodecFromFile,
+  type DetectedVideoCodec,
+} from "../lib/videoCodec";
+import {
   buildManualCorner,
   findCornerIssues,
   lateralPositionFromRgba,
@@ -41,6 +45,7 @@ export function VideoCoachExperiment() {
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const sampleRef = useRef<HTMLCanvasElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const codecProbeRef = useRef<File | null>(null);
 
   const [videoUrl, setVideoUrl] = useState("");
   const [videoFile, setVideoFile] = useState<File | null>(null);
@@ -73,6 +78,7 @@ export function VideoCoachExperiment() {
   const [rpmHint, setRpmHint] = useState("");
   const [rpmStrokes, setRpmStrokes] = useState<2 | 4>(2);
   const [rpmReplacePending, setRpmReplacePending] = useState(false);
+  const [detectedCodec, setDetectedCodec] = useState<DetectedVideoCodec>("unknown");
   const [loopCorner, setLoopCorner] = useState<number | null>(null);
   const videoReady = durationS > 0 && !videoError;
   const issues = useMemo(() => findCornerIssues(corners), [corners]);
@@ -131,6 +137,8 @@ export function VideoCoachExperiment() {
 
   function onFile(file: File | null) {
     if (!file) return;
+    codecProbeRef.current = file;
+    setDetectedCodec("unknown");
     const probe = document.createElement("video");
     const h264 = probe.canPlayType('video/mp4; codecs="avc1.42E01E,mp4a.40.2"');
     if (h264 === "") {
@@ -155,6 +163,13 @@ export function VideoCoachExperiment() {
     setLoading(true);
     setLargeFile(file.size > 200 * 1024 * 1024);
     setFileSizeMb(Number((file.size / (1024 * 1024)).toFixed(1)));
+    void detectVideoCodecFromFile(file).then((codec) => {
+      if (codecProbeRef.current !== file) return;
+      setDetectedCodec(codec);
+      if (codec === "hevc") {
+        setVideoError(t("videoCoach.codecHevc"));
+      }
+    });
   }
 
   function onLoadedMetadata() {
@@ -170,10 +185,16 @@ export function VideoCoachExperiment() {
 
   function onVideoError() {
     setLoading(false);
-    setVideoError(t("videoCoach.loadFailed"));
     const video = videoRef.current;
+    const code = video?.error?.code;
+    if (code === 4 && detectedCodec === "hevc") {
+      setVideoError(t("videoCoach.codecHevc"));
+      setMediaErrorDetail("MEDIA_ERR_SRC_NOT_SUPPORTED");
+      return;
+    }
+    setVideoError(t("videoCoach.loadFailed"));
     if (!video?.error) return;
-    const code = video.error.code;
+    const errorCode = video.error.code;
     const codes: Record<number, string> = {
       1: "MEDIA_ERR_ABORTED",
       2: "MEDIA_ERR_NETWORK",
@@ -181,7 +202,7 @@ export function VideoCoachExperiment() {
       4: "MEDIA_ERR_SRC_NOT_SUPPORTED",
     };
     const message = video.error.message ? `: ${video.error.message}` : "";
-    setMediaErrorDetail(`${codes[code] ?? code}${message}`);
+    setMediaErrorDetail(`${codes[errorCode] ?? errorCode}${message}`);
   }
 
   function onTimeUpdate() {
