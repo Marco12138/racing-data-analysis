@@ -13,6 +13,116 @@ from scipy.signal import savgol_filter
 from .lap_analysis import analyze_laps
 
 
+DEFAULT_MAX_DISTANCE_GAP_M = 20.0
+DEFAULT_STALL_SECONDS = 3.0
+DEFAULT_STALL_STEP_M = 1.0
+DEFAULT_STALL_MAX_DISTANCE_M = 2.0
+
+
+def validate_lap_integrity(
+    lap: pd.DataFrame,
+    *,
+    max_distance_gap_m: float = DEFAULT_MAX_DISTANCE_GAP_M,
+    stall_seconds: float = DEFAULT_STALL_SECONDS,
+    stall_step_m: float = DEFAULT_STALL_STEP_M,
+    stall_max_distance_m: float = DEFAULT_STALL_MAX_DISTANCE_M,
+) -> dict[str, Any]:
+    """Validate one lap against the single-car, complete-lap premise.
+
+    The import and cleaning pipeline already removes gross GPS jumps and
+    outlying samples. This gate catches what survives cleaning: internal
+    distance gaps (signal loss / off-track excursions) and extended
+    near-stationary periods (spin, waiting, or traffic interference).
+    Thresholds are physical defaults and should be re-calibrated against a
+    track's real logger data when available.
+    """
+    if lap is None or lap.empty:
+        return {
+            "valid": False,
+            "issues": [{"type": "empty_lap", "detail": "No telemetry samples are available for this lap."}],
+            "stats": {},
+        }
+    missing = sorted({"lap_time_s", "distance_m"} - set(lap.columns))
+    if missing:
+        return {
+            "valid": False,
+            "issues": [
+                {
+                    "type": "missing_channels",
+                    "detail": f"Lap integrity cannot be checked without {', '.join(missing)}.",
+                }
+            ],
+            "stats": {},
+        }
+    ordered = lap.sort_values("lap_time_s").dropna(subset=["lap_time_s", "distance_m"])
+    if len(ordered) < 10:
+        return {
+            "valid": False,
+            "issues": [
+                {
+                    "type": "insufficient_samples",
+                    "detail": "Fewer than 10 valid samples are available for integrity checks.",
+                }
+            ],
+            "stats": {"samples": int(len(ordered))},
+        }
+
+    distance = ordered["distance_m"].to_numpy(dtype=float)
+    time = ordered["lap_time_s"].to_numpy(dtype=float)
+    steps = np.abs(np.diff(distance))
+    dts = np.diff(time)
+    issues: list[dict[str, Any]] = []
+
+    gap_count = int((steps > max_distance_gap_m).sum())
+    if gap_count:
+        issues.append(
+            {
+                "type": "distance_gap",
+                "detail": (
+                    f"Detected {gap_count} distance jump(s) above {max_distance_gap_m:.0f} m; "
+                    "the lap may contain GPS signal loss or an off-track excursion."
+                ),
+            }
+        )
+
+    best_run_s = 0.0
+    run_s = 0.0
+    run_d = 0.0
+    for index, is_slow in enumerate(steps < stall_step_m):
+        interval_s = float(dts[index]) if index < len(dts) and np.isfinite(dts[index]) else 0.0
+        if is_slow:
+            run_s += max(interval_s, 0.0)
+            run_d += float(steps[index])
+        else:
+            if run_d < stall_max_distance_m and run_s > best_run_s:
+                best_run_s = run_s
+            run_s = 0.0
+            run_d = 0.0
+    if run_d < stall_max_distance_m and run_s > best_run_s:
+        best_run_s = run_s
+    if best_run_s >= stall_seconds:
+        issues.append(
+            {
+                "type": "possible_stall",
+                "detail": (
+                    f"Tracked nearly stationary for {best_run_s:.1f}s over a very short distance; "
+                    "this may be a spin, waiting, or traffic interference."
+                ),
+            }
+        )
+
+    return {
+        "valid": len(issues) == 0,
+        "issues": issues,
+        "stats": {
+            "samples": int(len(ordered)),
+            "span_s": round(float(time[-1] - time[0]), 3),
+            "distance_m": round(float(distance[-1]), 3),
+            "max_distance_gap_m": round(float(steps.max()), 3) if len(steps) else 0.0,
+        },
+    }
+
+
 def calculate_track_curvature(df: pd.DataFrame) -> pd.DataFrame:
     """Calculate smoothed absolute heading curvature against distance."""
     output: list[pd.DataFrame] = []
@@ -135,7 +245,7 @@ def generate_auto_zones(
     if not np.isfinite(threshold) or threshold <= 0:
         return []
     active = curvature >= threshold
-    zones: list[tuple[float, float, float]] = []
+    zones: list[tuple[float, float, float, float]] = []
     start: int | None = None
     for index, value in enumerate(active):
         if value and start is None:
@@ -145,21 +255,26 @@ def generate_auto_zones(
             entry = float(ordered["distance_m"].iloc[start])
             exit_distance = float(ordered["distance_m"].iloc[end])
             if exit_distance - entry >= 10.0:
+                segment = curvature.iloc[start : end + 1].to_numpy(dtype=float)
+                apex_index = start + int(np.argmax(segment))
                 zones.append(
                     (
                         max(0.0, entry - 12.0),
                         min(float(ordered["distance_m"].max()), exit_distance + 15.0),
                         float(curvature.iloc[start : end + 1].max()),
+                        float(ordered["distance_m"].iloc[apex_index]),
                     )
                 )
             start = None
     merged: list[list[float]] = []
-    for entry, exit_distance, peak in zones:
+    for entry, exit_distance, peak, apex in zones:
         if merged and entry - merged[-1][1] <= 12.0:
             merged[-1][1] = max(merged[-1][1], exit_distance)
-            merged[-1][2] = max(merged[-1][2], peak)
+            if peak > merged[-1][2]:
+                merged[-1][2] = peak
+                merged[-1][3] = apex
         else:
-            merged.append([entry, exit_distance, peak])
+            merged.append([entry, exit_distance, peak, apex])
     selected = sorted(merged, key=lambda item: item[2], reverse=True)[:max_zones]
     selected.sort(key=lambda item: item[0])
     return [
@@ -167,6 +282,7 @@ def generate_auto_zones(
             "id": f"auto-zone-{index}",
             "name": f"Suggested Zone {index}",
             "entry_distance_m": round(entry, 3),
+            "apex_distance_m": round(apex, 3),
             "exit_distance_m": round(exit_distance, 3),
             "source": "automatic_curvature",
             "confidence": "medium",
@@ -175,7 +291,7 @@ def generate_auto_zones(
                 "curvature_threshold": round(threshold, 7),
             },
         }
-        for index, (entry, exit_distance, peak) in enumerate(selected, start=1)
+        for index, (entry, exit_distance, peak, apex) in enumerate(selected, start=1)
     ]
 
 

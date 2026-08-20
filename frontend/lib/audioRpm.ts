@@ -41,6 +41,14 @@ export type VideoRpmTrace = {
   /** Video-relative timestamps of the RPM samples (seconds). */
   times: number[];
   rpm: number[];
+  /** Optional multi-engine-source warning from the audio spectrum. */
+  source_ambiguity?: EngineSourceAmbiguity;
+};
+
+export type EngineSourceAmbiguity = {
+  ambiguous: boolean;
+  persistent_peaks: number;
+  strength_ratio: number;
 };
 
 const MAX_VIDEO_SECONDS = 900;
@@ -255,6 +263,65 @@ export function trackEngineRpm(
   return { rpm: medianSmooth(raw, options.smoothWindow ?? 7), confidence };
 }
 
+/**
+ * Detect whether the audio contains more than one persistent engine source.
+ * Peaks that are harmonically related to the strongest engine frequency are
+ * treated as the same source; a second unrelated persistent peak at similar
+ * strength suggests another kart or a strongly interfering source, so
+ * automatic alignment confidence should be treated conservatively.
+ */
+export function detectEngineSourceAmbiguity(
+  spectrum: StftResult,
+  options: { minHz?: number; maxHz?: number; minStrengthRatio?: number } = {},
+): EngineSourceAmbiguity {
+  const minHz = options.minHz ?? 60;
+  const maxHz = options.maxHz ?? 300;
+  const minStrengthRatio = options.minStrengthRatio ?? 0.65;
+  if (spectrum.frequencies.length === 0 || spectrum.magnitude.length === 0) {
+    return { ambiguous: false, persistent_peaks: 0, strength_ratio: 0 };
+  }
+  const mean = new Float64Array(spectrum.frequencies.length);
+  for (const frame of spectrum.magnitude) {
+    for (let i = 0; i < mean.length; i += 1) mean[i] += frame[i];
+  }
+  for (let i = 0; i < mean.length; i += 1) mean[i] /= spectrum.magnitude.length;
+
+  const peaks: number[] = [];
+  for (let i = 1; i < spectrum.frequencies.length - 1; i += 1) {
+    const freq = spectrum.frequencies[i];
+    if (freq < minHz || freq > maxHz) continue;
+    if (mean[i] > mean[i - 1] && mean[i] >= mean[i + 1] && mean[i] > 1e-9) {
+      const previous = peaks[peaks.length - 1];
+      if (previous === undefined || i - previous >= 2) peaks.push(i);
+      else if (mean[i] > mean[previous]) peaks[peaks.length - 1] = i;
+    }
+  }
+  if (peaks.length < 2) {
+    return { ambiguous: false, persistent_peaks: peaks.length, strength_ratio: 0 };
+  }
+  const byStrength = [...peaks].sort((a, b) => mean[b] - mean[a]);
+  const strongest = byStrength[0];
+  const f0 = spectrum.frequencies[strongest];
+  const foreign = byStrength.slice(1).filter((index) => {
+    const freq = spectrum.frequencies[index];
+    if (Math.abs(freq - f0) / f0 < 0.08) return false;
+    for (let harmonic = 2; harmonic <= 6; harmonic += 1) {
+      if (Math.abs(freq - f0 * harmonic) / (f0 * harmonic) < 0.08) return false;
+    }
+    return true;
+  });
+  if (foreign.length === 0) {
+    return { ambiguous: false, persistent_peaks: peaks.length, strength_ratio: 0 };
+  }
+  const strongestForeign = foreign[0];
+  const ratio = mean[strongestForeign] / mean[strongest];
+  return {
+    ambiguous: ratio >= minStrengthRatio,
+    persistent_peaks: peaks.length,
+    strength_ratio: Number(ratio.toFixed(3)),
+  };
+}
+
 function zoneRanges(mask: boolean[], dt: number, minDurationS: number): Array<[number, number]> {
   const ranges: Array<[number, number]> = [];
   let start: number | null = null;
@@ -422,11 +489,13 @@ export async function extractVideoRpmTrace(
 
   const trace = trackEngineRpm(spectrum, { strokes });
   const smoothed = smoothRpmForEvents(trace.rpm);
+  const ambiguity = detectEngineSourceAmbiguity(spectrum);
   options.onProgress?.(1);
 
   return {
     times: spectrum.times.map((value) => round(value, 3)),
     rpm: smoothed.map((value) => Math.round(value)),
+    source_ambiguity: ambiguity,
   };
 }
 

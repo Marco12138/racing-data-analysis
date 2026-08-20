@@ -26,6 +26,7 @@ from .sector_zone_analysis import (
     calculate_virtual_sectors,
     generate_auto_zones,
     generate_sector_boundaries,
+    validate_lap_integrity,
 )
 from .telemetry_alignment import (
     align_laps_by_distance,
@@ -179,7 +180,25 @@ def analyze_xrk_session(
         reference_trace,
         distance_step_m,
     )
-    auto_zones = generate_auto_zones(reference_resampled)
+    integrity = validate_lap_integrity(reference_trace)
+    base["data_quality"] = {
+        "reference_lap": int(reference_lap),
+        "valid": integrity["valid"],
+        "issues": integrity["issues"],
+        "stats": integrity["stats"],
+    }
+    if integrity["valid"]:
+        auto_zones = generate_auto_zones(reference_resampled)
+    else:
+        auto_zones = []
+        base["warnings"].append(
+            "Reference lap {} data integrity is in question ({}); automatic corner "
+            "zones were skipped. Use a complete, uninterrupted single-car lap as "
+            "the reference.".format(
+                reference_lap,
+                "; ".join(issue["type"] for issue in integrity["issues"]),
+            )
+        )
     zones = normalize_manual_zones(
         manual_zones or [],
         lap_length_m,

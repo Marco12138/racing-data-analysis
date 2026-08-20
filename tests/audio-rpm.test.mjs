@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  detectEngineSourceAmbiguity,
   detectLiftEvents,
   smoothRpmForEvents,
   stft,
@@ -119,4 +120,30 @@ test("smoothing removes octave jumps so a real braking event is still found", ()
   const event = events[0];
   assert.ok(event.entry_s < event.apex_s && event.apex_s < event.exit_s);
   assert.ok(event.drop_rpm > 2000, `drop=${event.drop_rpm}`);
+});
+
+test("single engine tone is not flagged as ambiguous", () => {
+  const sampleRate = 44100;
+  const spectrum = stft(harmonicAudio(4, sampleRate, 150, [1, 2, 3, 4, 5, 6]), {
+    sampleRate,
+    windowSize: 2048,
+    hopSize: 1024,
+  });
+  const result = detectEngineSourceAmbiguity(spectrum);
+  assert.equal(result.ambiguous, false);
+  assert.ok(result.persistent_peaks >= 1);
+});
+
+test("two persistent engine tones are flagged as ambiguous", () => {
+  const sampleRate = 44100;
+  const first = harmonicAudio(4, sampleRate, 150, [1, 2, 3]);
+  const second = harmonicAudio(4, sampleRate, 220, [1, 2, 3]);
+  const mixed = new Float32Array(first.length);
+  for (let i = 0; i < mixed.length; i += 1) {
+    mixed[i] = first[i] + 0.8 * second[i];
+  }
+  const spectrum = stft(mixed, { sampleRate, windowSize: 2048, hopSize: 1024 });
+  const result = detectEngineSourceAmbiguity(spectrum);
+  assert.equal(result.ambiguous, true);
+  assert.ok(result.strength_ratio >= 0.6);
 });

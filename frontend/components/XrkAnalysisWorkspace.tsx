@@ -935,6 +935,7 @@ export function SingleLapAnalysisPanel({
   } | null>(null);
   const [rpmSyncing, setRpmSyncing] = useState(false);
   const [rpmSyncProgress, setRpmSyncProgress] = useState(0);
+  const [rpmAmbiguous, setRpmAmbiguous] = useState(false);
 
   const issues = useMemo(() => findCornerIssues(corners), [corners]);
   const straights = useMemo(() => straightGaps(corners), [corners]);
@@ -1319,6 +1320,7 @@ export function SingleLapAnalysisPanel({
     }
     setRpmSyncing(true);
     setRpmSyncProgress(0);
+    setRpmAmbiguous(false);
     setSyncError("");
     setSyncMessage(t("xrk.video.rpmAutoRunning"));
     try {
@@ -1326,6 +1328,7 @@ export function SingleLapAnalysisPanel({
         strokes: rpmStrokes,
         onProgress: (fraction) => setRpmSyncProgress(fraction),
       });
+      setRpmAmbiguous(trace.source_ambiguity?.ambiguous ?? false);
       setSyncMessage(t("xrk.video.comparing"));
       const result = await autoSyncVideoRpm({
         inspection_id: analysis.inspection_id,
@@ -1384,6 +1387,7 @@ export function SingleLapAnalysisPanel({
     setRpmHint("");
     setRpmReplacePending(false);
     setRpmProgress(0);
+    setRpmAmbiguous(false);
   }
 
   return (
@@ -1739,6 +1743,11 @@ export function SingleLapAnalysisPanel({
               {t("xrk.video.manualPriorityHint")}
             </p>
           ) : null}
+          {rpmAmbiguous ? (
+            <p className="mt-2 text-xs leading-5 text-amber-300">
+              {t("xrk.video.rpmAmbiguous")}
+            </p>
+          ) : null}
           {pendingAutoResult ? (
             <div className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
               <p className="text-xs leading-5 text-amber-200">
@@ -1793,6 +1802,9 @@ export function SingleLapAnalysisPanel({
           </p>
           <p className="mt-2 text-xs leading-5 text-slate-600">
             {t("xrk.video.savedPrivacy")}
+          </p>
+          <p className="mt-3 border-t border-slate-800 pt-3 text-[11px] leading-5 text-slate-600">
+            {t("xrk.boundary.singleCar")}
           </p>
         </Panel>
         {rpmResult && rpmResult.times.length > 1 ? (
@@ -1928,6 +1940,9 @@ function CoachSummaryPanel({
             </p>
           </>
         )}
+        <p className="mt-4 border-t border-slate-800 pt-3 text-[11px] leading-5 text-slate-500">
+          {t("xrk.boundary.singleCar")}
+        </p>
       </Panel>
 
       <Panel title={t("xrk.coach.nextPriorities")} subtitle={t("xrk.coach.nextSubtitle")}>
