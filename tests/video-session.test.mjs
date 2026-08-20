@@ -181,4 +181,5 @@ test("SingleLapAnalysisPanel shows lap-range and audio auto-mark controls for a 
   assert.match(html, /入弯点/);
   assert.match(html, /单圈分析/);
   assert.match(html, /音频 RPM 自动对齐/);
+  assert.match(html, /实时遥测仪表盘/);
 });

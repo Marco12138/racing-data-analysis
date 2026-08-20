@@ -53,6 +53,10 @@ import {
   autoSyncVideoRpm,
   autoSyncVideoTelemetry,
 } from "../lib/xrkAnalysisApi";
+import {
+  buildVideoDeltaCurve,
+  telemetryAtVideoTime,
+} from "../lib/videoGauge";
 import { extractVideoSyncFeatures } from "../lib/videoFeatureExtraction";
 import { initialVideoState } from "../lib/videoSession";
 import { resolveApiConfig } from "../lib/config";
@@ -907,7 +911,10 @@ export function SingleLapAnalysisPanel({
   const [autoConfidence, setAutoConfidence] = useState<number | null>(null);
   const autoSyncAbortRef = useRef<AbortController | null>(null);
   const storageKey = `racing-video-sync:${analysis.track?.track_id ?? "unknown"}:${analysis.file_fingerprint}`;
-  const targetPoints = analysis.track?.target ?? [];
+  const targetPoints = useMemo(
+    () => analysis.track?.target ?? [],
+    [analysis.track?.target],
+  );
   const cursorPoint = nearestPointByDistance(targetPoints, cursorDistance);
 
   const [currentTime, setCurrentTime] = useState(0);
@@ -948,6 +955,14 @@ export function SingleLapAnalysisPanel({
           }))
         : [],
     [rpmResult],
+  );
+  const gauge = useMemo(
+    () => telemetryAtVideoTime(targetPoints, currentTime, offsetMs),
+    [targetPoints, currentTime, offsetMs],
+  );
+  const deltaCurve = useMemo(
+    () => buildVideoDeltaCurve(analysis.comparison, targetPoints, offsetMs),
+    [analysis.comparison, targetPoints, offsetMs],
   );
   const nextPhaseLabel =
     draft.entry == null
@@ -1689,6 +1704,14 @@ export function SingleLapAnalysisPanel({
         </div>
       </Panel>
       <div className="flex min-w-0 flex-col gap-5">
+        <Panel title={t("xrk.video.gaugeTitle")} subtitle={t("xrk.video.gaugeHint")}>
+          <div className="grid grid-cols-2 gap-3">
+            <GaugeStat label={t("xrk.video.gaugeSpeed")} value={gauge.speed_kmh} unit="km/h" />
+            <GaugeStat label={t("xrk.video.gaugeRpm")} value={gauge.rpm} unit="" />
+            <GaugeStat label={t("xrk.video.gaugeLongitudinal")} value={gauge.longitudinal_g} unit="g" />
+            <GaugeStat label={t("xrk.video.gaugeLateral")} value={gauge.lateral_g} unit="g" />
+          </div>
+        </Panel>
         <Panel title={t("xrk.video.syncTitle")} subtitle={t("xrk.video.syncSubtitle")}>
           <label className="block text-xs text-slate-400">
             {t("xrk.video.offset")}
@@ -1840,6 +1863,42 @@ export function SingleLapAnalysisPanel({
                   dataKey="rpm"
                   name={t("videoCoach.rpmLabel")}
                   stroke="#ff5964"
+                  dot={false}
+                  strokeWidth={1.6}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </Panel>
+        ) : null}
+        {deltaCurve.length > 1 ? (
+          <Panel title={t("xrk.video.deltaChart")} subtitle={t("xrk.video.deltaHint")}>
+            <ResponsiveContainer width="100%" height={180}>
+              <LineChart data={deltaCurve} margin={{ top: 8, right: 8, bottom: 0, left: -8 }}>
+                <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="video_time_s"
+                  type="number"
+                  domain={["dataMin", "dataMax"]}
+                  tick={{ fontSize: 10, fill: "#64748b" }}
+                  tickFormatter={(value: number) => `${value.toFixed(0)}s`}
+                />
+                <YAxis tick={{ fontSize: 10, fill: "#64748b" }} />
+                <Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155", fontSize: 12 }} />
+                <ReferenceLine x={currentTime} stroke="#f6c945" strokeDasharray="4 4" />
+                {corners.map((corner) => (
+                  <ReferenceLine
+                    key={`delta-${corner.start}`}
+                    x={corner.start}
+                    stroke="#f6c945"
+                    strokeDasharray="3 3"
+                    opacity={0.35}
+                  />
+                ))}
+                <Line
+                  type="monotone"
+                  dataKey="delta_s"
+                  name={t("xrk.video.deltaLabel")}
+                  stroke="#66e38f"
                   dot={false}
                   strokeWidth={1.6}
                 />
@@ -2086,6 +2145,30 @@ function QualityFact({ label, value }: { label: string; value: string }) {
     <div>
       <p className="text-[11px] uppercase text-slate-500">{label}</p>
       <p className="mt-1 text-base font-semibold text-white">{value}</p>
+    </div>
+  );
+}
+
+function GaugeStat({
+  label,
+  value,
+  unit,
+}: {
+  label: string;
+  value: number | null;
+  unit: string;
+}) {
+  const display =
+    value == null || !Number.isFinite(value)
+      ? "—"
+      : `${Number(value.toFixed(value >= 100 ? 0 : 1))}`;
+  return (
+    <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
+      <p className="text-[11px] uppercase text-slate-500">{label}</p>
+      <p className="mt-1 text-xl font-semibold text-white">
+        {display}
+        {unit ? <span className="ml-1 text-xs font-normal text-slate-500">{unit}</span> : null}
+      </p>
     </div>
   );
 }
