@@ -34,7 +34,7 @@ import {
   type LapSample,
 } from "../lib/lapVision";
 
-const SAMPLE_FPS = 8;
+const SAMPLE_FPS = 6;
 const OVERLAY_W = 640;
 const OVERLAY_H = 360;
 const TRACE_ROW = 0.55;
@@ -321,7 +321,7 @@ export function VideoCoachExperiment() {
       const timer = window.setTimeout(() => {
         cleanup();
         reject(new Error("seek-timeout"));
-      }, 8000);
+      }, 12000);
       const cleanup = () => {
         window.clearTimeout(timer);
         video.removeEventListener("seeked", onSeeked);
@@ -366,7 +366,12 @@ export function VideoCoachExperiment() {
     const found: LapSample[] = [];
     try {
       for (let index = 0; index < times.length; index += 1) {
-        await seekTo(times[index]);
+        try {
+          await seekTo(times[index]);
+        } catch (seekError) {
+          if ((seekError as Error).message !== "seek-timeout") throw seekError;
+          await seekTo(times[index]);
+        }
         ctx.drawImage(video, 0, 0, width, height);
         const image = ctx.getImageData(0, 0, width, height);
         const lateral = lateralPositionFromRgba(image.data, width, height);
@@ -376,7 +381,7 @@ export function VideoCoachExperiment() {
         setProgress((index + 1) / times.length);
       }
     } catch {
-      setError(t("videoCoach.analyzeFailed"));
+      setError(`${t("videoCoach.analyzeFailed")} ${t("videoCoach.analyzeFailedHint")}`);
       setAnalyzing(false);
       setProgress(0);
       return;
