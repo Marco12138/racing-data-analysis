@@ -1215,7 +1215,11 @@ export function SingleLapAnalysisPanel({
       setSyncError(t("videoCoach.codecHevc"));
       return;
     }
-    setSyncError(t("videoCoach.loadFailed"));
+    setSyncError(
+      code === 4
+        ? `${t("videoCoach.loadFailed")} ${t("videoCoach.externalDriveHint")}`
+        : t("videoCoach.loadFailed")
+    );
   }
 
   function calibrateCurrentMoment() {

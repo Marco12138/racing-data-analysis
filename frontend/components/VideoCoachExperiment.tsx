@@ -202,7 +202,8 @@ export function VideoCoachExperiment() {
       4: "MEDIA_ERR_SRC_NOT_SUPPORTED",
     };
     const message = video.error.message ? `: ${video.error.message}` : "";
-    setMediaErrorDetail(`${codes[errorCode] ?? errorCode}${message}`);
+    const hint = errorCode === 4 ? ` · ${t("videoCoach.externalDriveHint")}` : "";
+    setMediaErrorDetail(`${codes[errorCode] ?? errorCode}${message}${hint}`);
   }
 
   function onTimeUpdate() {
