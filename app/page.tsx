@@ -1,5 +1,5 @@
-import { PublicDemoPage } from "@/frontend/components/PublicDemoPage";
+import { LandingPage } from "@/frontend/components/LandingPage";
 
 export default function Home() {
-  return <PublicDemoPage />;
+  return <LandingPage />;
 }
