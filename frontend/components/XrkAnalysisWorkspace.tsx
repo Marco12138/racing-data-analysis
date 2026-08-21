@@ -11,6 +11,7 @@ import {
   Gauge,
   Link2,
   Map,
+  MoreHorizontal,
   Play,
   ShieldCheck,
   SlidersHorizontal,
@@ -103,6 +104,9 @@ const tabs = [
 ] as const satisfies ReadonlyArray<readonly [string, TranslationKey, typeof Gauge]>;
 
 type TabId = (typeof tabs)[number][0];
+const primaryTabIds: readonly TabId[] = ["overview", "track", "comparison", "actions", "video", "coach"];
+const primaryTabs = tabs.filter(([id]) => primaryTabIds.includes(id));
+const secondaryTabs = tabs.filter(([id]) => !primaryTabIds.includes(id));
 type MapMode = "reference" | "target" | "overlay";
 type ColorChannel = "speed" | "rpm" | "time_delta_s" | "longitudinal_g" | "lateral_g";
 
@@ -233,7 +237,7 @@ export function XrkAnalysisWorkspace({
   return (
     <section className="flex min-w-0 flex-col gap-5">
       <nav className="panel thin-scrollbar flex overflow-x-auto rounded-lg p-2" aria-label={t("xrk.navLabel")}>
-        {tabs.map(([id, labelKey, Icon]) => (
+        {primaryTabs.map(([id, labelKey, Icon]) => (
           <button
             key={id}
             type="button"
@@ -247,6 +251,25 @@ export function XrkAnalysisWorkspace({
             <Icon size={16} /> {t(labelKey)}
           </button>
         ))}
+        <label className={`relative ml-auto flex min-h-10 shrink-0 items-center gap-2 rounded-md px-3 text-sm ${
+          secondaryTabs.some(([id]) => id === activeTab)
+            ? "bg-[#f6c945] font-semibold text-slate-950"
+            : "text-slate-400 hover:bg-slate-800 hover:text-white"
+        }`}>
+          <MoreHorizontal size={16} />
+          <span>{t("xrk.tab.more")}</span>
+          <select
+            className="absolute inset-0 cursor-pointer opacity-0"
+            aria-label={t("xrk.tab.more")}
+            value={secondaryTabs.some(([id]) => id === activeTab) ? activeTab : ""}
+            onChange={(event) => {
+              if (event.target.value) setActiveTab(event.target.value as TabId);
+            }}
+          >
+            <option value="" disabled>{t("xrk.tab.more")}</option>
+            {secondaryTabs.map(([id, labelKey]) => <option key={id} value={id}>{t(labelKey)}</option>)}
+          </select>
+        </label>
       </nav>
 
       {analysis.track ? <PersistentWeaknessHint trackId={analysis.track.track_id} /> : null}

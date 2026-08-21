@@ -139,7 +139,7 @@ function Metric({ label, value, detail }: { label: string; value: string; detail
   return <div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>;
 }
 
-function MiniTrackMap({ points }: { points: PublicDemoTrackPoint[] }) {
+export function MiniTrackMap({ points }: { points: PublicDemoTrackPoint[] }) {
   const { t } = useI18n();
   const usable = points.filter((point) => Number.isFinite(point.local_x_m) && Number.isFinite(point.local_y_m));
   if (usable.length < 2) return <p className="public-demo-unavailable">{t("demo.trackUnavailable")}</p>;

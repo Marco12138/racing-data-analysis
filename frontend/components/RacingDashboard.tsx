@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   Activity,
   AlertTriangle,
+  ArrowLeft,
   BarChart3,
   CirclePlay,
   Database,
   Download,
   Flag,
+  FolderOpen,
   Gauge,
   LineChart,
   LoaderCircle,
@@ -117,6 +120,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
   const [referenceLap, setReferenceLap] = useState(initialDemo ? 6 : 1);
   const [targetLap, setTargetLap] = useState(initialDemo ? 3 : 1);
   const [videoJob, setVideoJob] = useState<VideoJob | null>(null);
+  const [videoModeRequested, setVideoModeRequested] = useState(false);
   const [dataError, setDataError] = useState("");
   const [aimImport, setAimImport] = useState<AimImportResponse | null>(null);
   const [xrkInspection, setXrkInspection] = useState<XrkInspection | null>(null);
@@ -553,6 +557,9 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
   }
 
   const videoMetadata = videoJob?.metadata;
+  const workspaceHasData = Boolean(
+    lapRows.length || telemetryRows.length || aimImport || xrkInspection || xrkAnalysis || videoJob || videoModeRequested
+  );
   const metrics = lapAnalysis
       ? [
         [<Flag size={20} key="laps" />, "Total Laps", String(lapRows.length), "Timed laps analyzed", "#66e38f"],
@@ -570,51 +577,108 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
   return (
     <main className="dashboard-shell engineering-grid">
       <section className="mx-auto flex max-w-[1680px] flex-col gap-5 px-5 py-5 lg:px-8">
+        <nav className="workspace-topbar panel rounded-lg" aria-label="Workspace navigation">
+          <Link href="/" className="workspace-topbar__brand"><Gauge size={18} /> Racing Data Lab</Link>
+          <div className="workspace-topbar__actions">
+            <Link href="/demo" className="nav-command">Sample Review</Link>
+            <Link href="/" className="nav-command"><ArrowLeft size={15} /> Home</Link>
+          </div>
+        </nav>
         <header className="panel flex flex-col gap-5 rounded-lg px-5 py-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <div className="mb-3 flex items-center gap-3 text-xs font-semibold uppercase text-[#35d6d0]">
               <Gauge size={18} /> Motorsport engineering dashboard
             </div>
-            <h1 className="text-3xl font-semibold text-white md:text-5xl">AI Racing Telemetry Analysis</h1>
-            <p className="mt-3 max-w-3xl text-sm text-slate-300 md:text-base">
-              Local onboard video review with optional lap and telemetry data
-            </p>
+            <h1 className="text-2xl font-semibold text-white md:text-3xl">Session Workspace</h1>
           </div>
-          <div className="grid gap-2 text-sm text-slate-300 sm:grid-cols-2 xl:min-w-[720px] xl:grid-cols-4">
+          {workspaceHasData && <div className="grid gap-2 text-sm text-slate-300 sm:grid-cols-2 xl:min-w-[720px] xl:grid-cols-4">
             <SessionInput label="Driver" value={driverName} onChange={setDriverName} />
             <SessionInput label="Vehicle" value={vehicleName} onChange={setVehicleName} />
             <SessionInput label="Track" value={trackName} onChange={setTrackName} />
             <SessionInput label="Date" value={sessionDate} onChange={setSessionDate} />
-          </div>
+          </div>}
         </header>
 
-        <section className="grid gap-5 xl:grid-cols-[340px_1fr]">
-          <aside className="flex flex-col gap-5">
-            <NewSessionCard
-              status={aimImportStatus}
-              hasPendingVideo={Boolean(pendingVideoFile)}
-              onStart={handleNewSession}
-              localSources={localXrkSources}
-              onStartLocal={handleNewSessionFromLocalSource}
-            />
-            <DataUploadPanel
-              lapLoaded={lapRows.length > 0}
-              telemetryLoaded={telemetryRows.length > 0}
-              aimImport={aimImport}
-              xrkInspection={xrkInspection}
-              aimImportStatus={aimImportStatus}
-              error={dataError}
-              capabilities={deploymentCapabilities}
-              capabilityError={capabilityError}
-              capabilityLoading={capabilityLoading}
-              localXrkSources={localXrkSources}
-              onAimFile={handleAimUpload}
-              onLocalXrkSource={handleLocalXrkSource}
-              onCancelXrk={() => xrkAbortRef.current?.abort()}
-              onLapFile={(file) => handleCsvUpload(file, "lap")}
-              onTelemetryFile={(file) => handleCsvUpload(file, "telemetry")}
-              onLoadDemo={loadDemoData}
-            />
+        {!workspaceHasData ? (
+          <section className="workspace-start" aria-labelledby="workspace-start-title">
+            <div className="workspace-start__intro">
+              <p className="hero-kicker">Start a session</p>
+              <h2 id="workspace-start-title">Import telemetry, then inspect the evidence</h2>
+              <p>Upload an AiM logger file with optional onboard video, use CSV exports, or open the reviewed sample.</p>
+            </div>
+            <div className="workspace-start__grid">
+              <NewSessionCard
+                status={aimImportStatus}
+                hasPendingVideo={Boolean(pendingVideoFile)}
+                onStart={handleNewSession}
+                localSources={localXrkSources}
+                onStartLocal={handleNewSessionFromLocalSource}
+              />
+              <DataUploadPanel
+                showXrk={false}
+                lapLoaded={false}
+                telemetryLoaded={false}
+                aimImport={null}
+                xrkInspection={null}
+                aimImportStatus={aimImportStatus}
+                error={dataError}
+                capabilities={deploymentCapabilities}
+                capabilityError={capabilityError}
+                capabilityLoading={capabilityLoading}
+                localXrkSources={localXrkSources}
+                onAimFile={handleAimUpload}
+                onLocalXrkSource={handleLocalXrkSource}
+                onCancelXrk={() => xrkAbortRef.current?.abort()}
+                onLapFile={(file) => handleCsvUpload(file, "lap")}
+                onTelemetryFile={(file) => handleCsvUpload(file, "telemetry")}
+                onLoadDemo={loadDemoData}
+              />
+            </div>
+            <button type="button" className="workspace-video-mode" onClick={() => setVideoModeRequested(true)}>
+              <Video size={17} /> Review video without telemetry
+            </button>
+          </section>
+        ) : <section className="grid gap-5 xl:grid-cols-[320px_1fr]">
+          <aside className="flex flex-col gap-5 self-start xl:sticky xl:top-5">
+            {xrkSessions.length > 0 && (
+              <SessionRail
+                sessions={xrkSessions}
+                activeInspectionId={xrkInspection?.inspection_id ?? null}
+                onSelect={selectTemporarySession}
+                onRemove={removeTemporarySession}
+              />
+            )}
+            <details className="workspace-disclosure">
+              <summary>Import another session</summary>
+              <NewSessionCard
+                status={aimImportStatus}
+                hasPendingVideo={Boolean(pendingVideoFile)}
+                onStart={handleNewSession}
+                localSources={localXrkSources}
+                onStartLocal={handleNewSessionFromLocalSource}
+              />
+            </details>
+            <details className="workspace-disclosure">
+              <summary>CSV and inspection tools</summary>
+              <DataUploadPanel
+                lapLoaded={lapRows.length > 0}
+                telemetryLoaded={telemetryRows.length > 0}
+                aimImport={aimImport}
+                xrkInspection={xrkInspection}
+                aimImportStatus={aimImportStatus}
+                error={dataError}
+                capabilities={deploymentCapabilities}
+                capabilityError={capabilityError}
+                capabilityLoading={capabilityLoading}
+                localXrkSources={localXrkSources}
+                onAimFile={handleAimUpload}
+                onLocalXrkSource={handleLocalXrkSource}
+                onCancelXrk={() => xrkAbortRef.current?.abort()}
+                onLapFile={(file) => handleCsvUpload(file, "lap")}
+                onTelemetryFile={(file) => handleCsvUpload(file, "telemetry")}
+                onLoadDemo={loadDemoData}
+              />
+            </details>
             <DataReadinessPanel
               lapLoaded={lapRows.length > 0}
               telemetryLoaded={telemetryRows.length > 0}
@@ -789,7 +853,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
               </>
             )}
           </section>
-        </section>
+        </section>}
         <MultiSessionWorkspace
           sessions={xrkSessions}
           activeInspectionId={xrkInspection?.inspection_id ?? null}
@@ -1289,6 +1353,7 @@ function MarkerTable({ job, onSeek, onDelete }: { job: VideoJob; onSeek: (time: 
 }
 
 function DataUploadPanel({
+  showXrk = true,
   lapLoaded,
   telemetryLoaded,
   aimImport,
@@ -1306,6 +1371,7 @@ function DataUploadPanel({
   onTelemetryFile,
   onLoadDemo,
 }: {
+  showXrk?: boolean;
   lapLoaded: boolean;
   telemetryLoaded: boolean;
   aimImport: AimImportResponse | null;
@@ -1342,7 +1408,8 @@ function DataUploadPanel({
   const xrkDisabled = busy || capabilityLoading || !xrkAvailable;
   return (
     <section className="panel rounded-lg p-4">
-      <SectionTitle icon={<Upload size={18} />} title="Session Data" subtitle="AiM logger file or existing CSV exports" />
+      <SectionTitle icon={<Upload size={18} />} title="Session Data" subtitle={showXrk ? "AiM logger file or existing CSV exports" : "CSV exports or reviewed sample"} />
+      {showXrk && <>
       <div className="mt-3 flex items-start justify-between gap-3 border-y border-slate-800 py-3 text-xs">
         <div>
           <p className="font-medium text-slate-300">XRK Server Import</p>
@@ -1422,8 +1489,9 @@ function DataUploadPanel({
           Cancel
         </button>
       )}
+      </>}
       <div className="my-3 flex items-center gap-3 text-[10px] uppercase text-slate-600">
-        <span className="h-px flex-1 bg-slate-800" /> or CSV <span className="h-px flex-1 bg-slate-800" />
+        <span className="h-px flex-1 bg-slate-800" /> {showXrk ? "or CSV" : "CSV imports"} <span className="h-px flex-1 bg-slate-800" />
       </div>
       <FileInput label={lapLoaded ? "Lap/Sector CSV loaded" : "Lap/Sector CSV"} accept=".csv" onFile={onLapFile} />
       <FileInput label={telemetryLoaded ? "Telemetry CSV loaded" : "Telemetry CSV"} accept=".csv" onFile={onTelemetryFile} />
@@ -1531,6 +1599,47 @@ function DataReadinessPanel({
         </>
       )}
       {!lapLoaded && <p className="mt-3 rounded-md border border-amber-400/25 bg-amber-400/8 px-3 py-2 text-xs leading-5 text-amber-100">只有视频时不计算圈速或 sector loss。</p>}
+    </section>
+  );
+}
+
+function SessionRail({
+  sessions,
+  activeInspectionId,
+  onSelect,
+  onRemove,
+}: {
+  sessions: XrkInspection[];
+  activeInspectionId: string | null;
+  onSelect: (inspectionId: string) => void;
+  onRemove: (inspectionId: string) => void;
+}) {
+  return (
+    <section className="panel rounded-lg p-3" aria-label="Temporary sessions">
+      <div className="mb-2 flex items-center gap-2 px-1 text-xs font-semibold uppercase text-slate-400">
+        <FolderOpen size={15} className="text-[#35d6d0]" /> Sessions
+      </div>
+      <div className="grid gap-1.5">
+        {sessions.map((session) => {
+          const active = session.inspection_id === activeInspectionId;
+          return (
+            <div key={session.inspection_id} className={`grid grid-cols-[1fr_34px] items-center rounded-md border ${active ? "border-[#f6c945]/55 bg-[#f6c945]/8" : "border-slate-800 bg-slate-950/35"}`}>
+              <button type="button" className="min-w-0 px-3 py-2.5 text-left" onClick={() => onSelect(session.inspection_id)}>
+                <span className={`block truncate text-xs font-semibold ${active ? "text-[#f6c945]" : "text-slate-200"}`}>
+                  {metadataText(session.metadata, "Driver", "Driver")}
+                </span>
+                <span className="mt-1 block truncate text-[11px] text-slate-500">
+                  {metadataText(session.metadata, "Venue", "Unknown track")} · {session.valid_laps.length} laps
+                </span>
+              </button>
+              <button type="button" className="flex h-8 w-8 items-center justify-center text-slate-600 hover:text-red-300" onClick={() => onRemove(session.inspection_id)} aria-label={`Remove ${session.filename}`} title="Remove temporary session">
+                <Trash2 size={14} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-2 px-1 text-[11px] leading-4 text-slate-600">Temporary normalized data expires at the server deadline.</p>
     </section>
   );
 }

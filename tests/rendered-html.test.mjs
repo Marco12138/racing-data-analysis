@@ -6,18 +6,19 @@ async function render(
   env = { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
   acceptLanguage = "zh-CN,zh;q=0.9",
   cookie = "",
+  path = "/",
 ) {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
   return worker.fetch(
-    new Request("http://localhost/", { headers: { accept: "text/html", "accept-language": acceptLanguage, cookie, host: "localhost" } }),
+    new Request(`http://localhost${path}`, { headers: { accept: "text/html", "accept-language": acceptLanguage, cookie, host: "localhost" } }),
     env,
     { waitUntil() {}, passThroughOnException() {} },
   );
 }
 
-test("server-renders the public racing analysis demo", async () => {
+test("server-renders a focused landing page without embedding the workspace", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
@@ -28,10 +29,30 @@ test("server-renders the public racing analysis demo", async () => {
   assert.match(html, /AI 赛车遥测分析平台/);
   assert.match(html, /使用样例 XRK 体验 Demo/);
   assert.match(html, /遥测分析/);
-  assert.match(html, /Lap &amp; Sector Analysis/);
-  assert.match(html, /新建 Session/);
-  assert.match(html, /开始分析/);
+  assert.match(html, /一张图，先看懂这次 Session/);
+  assert.doesNotMatch(html, /Lap &amp; Sector Analysis/);
+  assert.doesNotMatch(html, /新建 Session/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
+});
+
+test("server-renders the import workflow only on the workspace route", async () => {
+  const response = await render(undefined, "en-US,en;q=0.9", "", "/workspace");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /Session Workspace/);
+  assert.match(html, /Import telemetry, then inspect the evidence/);
+  assert.match(html, /New Session/);
+  assert.match(html, /Start analysis/);
+  assert.doesNotMatch(html, /Understand a session at a glance/);
+});
+
+test("server-renders the reviewed sample on its own demo route", async () => {
+  const response = await render(undefined, "en-US,en;q=0.9", "", "/demo");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /Anonymized sample XRK session/);
+  assert.match(html, /Open Dashboard/);
+  assert.doesNotMatch(html, /Import telemetry, then inspect the evidence/);
 });
 
 test("server and client share the Accept-Language locale on first render", async () => {
@@ -67,7 +88,7 @@ test("server-renders verified sample metrics injected by the Sites worker", asyn
       ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
       API_URL: "https://backend.example",
       API_PREFIX: "/api/v1",
-    }, "en-US,en;q=0.9");
+    }, "en-US,en;q=0.9", "", "/demo");
     const html = await response.text();
     assert.match(html, /40\.326s/);
     assert.match(html, /Anonymized sample XRK session/);
@@ -107,6 +128,8 @@ test("serves the Sites API through the current public origin", async () => {
 test("keeps public imports, browser video preview, and runtime API routing explicit", async () => {
   const [
     publicPage,
+    landingPage,
+    landingClient,
     publicClient,
     dashboard,
     inspectionWorkspace,
@@ -119,6 +142,8 @@ test("keeps public imports, browser video preview, and runtime API routing expli
     packageJson,
   ] = await Promise.all([
     readFile(new URL("../frontend/components/PublicDemoPage.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../frontend/components/LandingPage.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../frontend/components/LandingPageClient.tsx", import.meta.url), "utf8"),
     readFile(new URL("../frontend/components/PublicDemoClient.tsx", import.meta.url), "utf8"),
     readFile(new URL("../frontend/components/RacingDashboard.tsx", import.meta.url), "utf8"),
     readFile(new URL("../frontend/components/XrkInspectionWorkspace.tsx", import.meta.url), "utf8"),
@@ -147,8 +172,12 @@ test("keeps public imports, browser video preview, and runtime API routing expli
   assert.match(xrkAnalysisApi, /XRK_UPLOAD_TRANSPORT_FAILED/);
   assert.match(dashboard, /当前为视频独立分析模式/);
   assert.match(publicPage, /loadServerPublicDemo/);
-  assert.match(publicClient, /hero\.tryDemo/);
-  assert.match(publicClient, /hero\.upload/);
+  assert.match(landingPage, /loadServerPublicDemo/);
+  assert.match(landingClient, /hero\.tryDemo/);
+  assert.match(landingClient, /href="\/workspace"/);
+  assert.doesNotMatch(landingClient, /RacingDashboard/);
+  assert.match(publicClient, /PublicDemoDashboard/);
+  assert.doesNotMatch(publicClient, /RacingDashboard/);
   assert.doesNotMatch(frontendConfig, /http:\/\/127\.0\.0\.1:8000/);
   assert.match(frontendConfig, /\/api\/runtime-config/);
   assert.match(frontendConfig, /XRK_FRONTEND_API_MISCONFIGURED/);
