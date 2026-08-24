@@ -17,6 +17,7 @@ from ..utils.storage import check_database
 router = APIRouter(prefix="/system", tags=["system"])
 
 
+@router.get("/health")
 def public_health() -> dict[str, str]:
     """Return the stable health contract used by public hosting providers."""
     return {"status": "ok"}

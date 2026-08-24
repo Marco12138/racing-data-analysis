@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     allowed_hosts: str = "localhost,127.0.0.1,testserver"
 
     database_url: str = f"sqlite:///{PROJECT_ROOT / 'storage' / 'sessions.sqlite3'}"
+    database_path: str | None = None
     storage_backend: Literal["local", "s3", "r2"] = "local"
     task_queue_backend: Literal["inline", "redis"] = "inline"
     redis_url: str | None = None
@@ -78,7 +79,11 @@ class Settings(BaseSettings):
 
     @property
     def sqlite_path(self) -> Path:
-        """Resolve the current SQLite URL to a filesystem path."""
+        """Resolve the SQLite path, preferring a mounted-volume override."""
+        if self.database_path and self.database_path.strip():
+            path = Path(self.database_path.strip())
+            return path if path.is_absolute() else (PROJECT_ROOT / path).resolve()
+
         prefix = "sqlite:///"
         if not self.database_url.startswith(prefix):
             raise RuntimeError(

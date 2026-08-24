@@ -73,9 +73,24 @@ def test_versioned_health_and_csv_validation(
         assert public_health.status_code == 200
         assert public_health.json() == {"status": "ok"}
 
+        system_health = client.get("/api/v1/system/health")
+        assert system_health.status_code == 200
+        assert system_health.json() == {"status": "ok"}
+
         invalid = client.post(
             "/api/v1/analysis",
             files={"lap_file": ("laps.txt", b"lap,lap_time\n1,50.0\n", "text/plain")},
         )
         assert invalid.status_code == 400
         assert invalid.json()["detail"] == "Only CSV files are accepted."
+
+
+def test_database_path_overrides_database_url(tmp_path: Path) -> None:
+    """A mounted SQLite path should take precedence without breaking DATABASE_URL."""
+    mounted_path = tmp_path / "mounted" / "racing.sqlite"
+    settings = Settings(
+        database_path=str(mounted_path),
+        database_url="sqlite:///./storage/ignored.sqlite3",
+    )
+
+    assert settings.sqlite_path == mounted_path

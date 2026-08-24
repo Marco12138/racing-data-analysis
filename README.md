@@ -43,11 +43,12 @@ racing-ai-platform/
 ├── docker/                      # 前端与 FastAPI 生产镜像
 ├── docs/
 │   ├── ARCHITECTURE.md          # 当前边界与多用户演进架构
-│   └── DEPLOYMENT.md            # Vercel、容器和云服务部署说明
+│   ├── DEPLOYMENT.md            # Vercel、容器和云服务部署说明
+│   └── COACH_PILOT_V1.md        # 教练封闭试用范围和验收门槛
 ├── scripts/                     # 本机启动、关闭脚本
 ├── docker-compose.yml           # 本机容器化运行
 ├── vercel.json                  # Vercel Next.js 构建
-├── railway.toml                 # FastAPI Railway 示例
+├── railway.toml                 # FastAPI Railway 生产配置
 ├── 启动赛车分析网站.command       # macOS 双击启动器
 ├── 关闭赛车分析网站.command       # macOS 双击关闭器
 ├── requirements.txt
@@ -168,7 +169,7 @@ docker compose up --build
 第一阶段公开 Demo 推荐：
 
 - Sites 或 Vercel：Next.js 前端；
-- Railway / Render：使用根目录 `Dockerfile` 部署可选 FastAPI 服务。
+- Railway：使用根目录 `Dockerfile` 部署 FastAPI。
 
 当前公开 Dashboard 的 Demo 数据、CSV 分析和视频首帧预览都可在浏览器
 完成，不要求 PostgreSQL、Redis、用户系统或对象存储。
@@ -183,7 +184,7 @@ docker compose up --build
 Sites 部署使用 Worker 运行时变量，避免构建产物意外写入本机地址：
 
 ```text
-API_URL=https://<backend-domain>
+API_URL=https://racing-ai-platform-api-production.up.railway.app
 API_PREFIX=/api/v1
 DEPLOYMENT_MODE=public-demo
 ```
@@ -196,7 +197,8 @@ Vercel 部署步骤：
 
 1. 将仓库连接到 GitHub。
 2. 在 Vercel 中导入仓库，保持项目根目录不变。
-3. 设置 `NEXT_PUBLIC_API_URL=https://<backend-domain>`、
+3. 设置 `API_URL` 和 `NEXT_PUBLIC_API_URL` 为 Railway API origin，
+   `XRK_UPLOAD_URL=https://<railway-domain>/api/v1/xrk/inspect`、
    `NEXT_PUBLIC_API_PREFIX=/api/v1` 和
    `NEXT_PUBLIC_DEPLOYMENT_MODE=public-demo`。
 4. 点击 Deploy；Vercel 会按 `vercel.json` 执行生产构建。
@@ -206,22 +208,22 @@ Vercel 部署步骤：
 
 ## Backend Deployment
 
-1. 在 Railway 或 Render 中连接同一个 GitHub 仓库。
-2. 选择根目录 `Dockerfile`，平台会启动
-   `uvicorn app.main:app --host 0.0.0.0 --port $PORT`。
-3. 设置 `APP_ENV=production`、`APP_MODE=cloud`、
-   `CORS_ORIGINS=https://<frontend-domain>` 和平台对应的
-   `ALLOWED_HOSTS`。Railway 部署时需同时加入
-   `healthcheck.railway.app`，否则 Trusted Host 会拒绝平台健康检查。
+1. 在 Railway 中连接同一 GitHub 仓库，并选择根目录 `Dockerfile`。
+2. 为 API service 附加 Railway Volume，mount path 设为 `/data`。
+3. 导入 `.env.production.example` 中的非敏感配置，并在 Railway
+   Variables 中单独设置 `LLM_API_KEY`。
+4. 保持 `WEB_CONCURRENCY=1` 和 `DATABASE_PATH=/data/racing.sqlite`；
+   当 inspection cache 仍在本机文件系统时不要水平扩容。
    XRK Demo 还需设置 `XRK_INSPECTION_TTL_SECONDS=1800`、
    `XRK_INSPECTION_CACHE_DIR=/tmp/racing-xrk-inspections` 和
    `XRK_SERVER_IMPORT_ENABLED=true`、`XRK_PARSER=auto`、
    `WEB_CONCURRENCY=1`。
-4. 将健康检查路径设置为 `/api/v1/health`；成功响应为
-   `{"status":"ok"}`。
+5. Railway 健康检查使用 `/api/v1/system/health/ready`；公开稳定契约
+   `/api/v1/health` 仍返回 `{"status":"ok"}`。
 
 部署后前端通常为 `https://<project>.vercel.app`，后端通常为
-`https://<service>.up.railway.app` 或 `https://<service>.onrender.com`。
+`https://<service>.up.railway.app`。封闭试用范围和验收标准见
+[`docs/COACH_PILOT_V1.md`](docs/COACH_PILOT_V1.md)。
 
 ## CSV 格式
 
@@ -259,7 +261,7 @@ XRK 分析不会把不同圈的最快 sector 或局部 RPM 片段拼成目标圈
 
 `libxrk` 使用 MIT 许可证，并提供 macOS、Windows 与 manylinux wheel。
 公开 Linux 容器使用该 adapter。AiM 官方 XRK DLL 仅作为 Windows 本地转换
-方案，不打包进 Railway Docker 镜像。
+方案，不打包进 Railway Linux Docker 镜像。
 
 需要离线转换或不希望上传素材时，也可以安装解析依赖：
 
@@ -307,6 +309,6 @@ pnpm run build:vercel
 ## 边界与 Roadmap
 
 当前不判断转向不足/过度，不推断精确油门或制动力度，也不将 Suggested Zone
-或 virtual sector 描述为官方赛道数据。公开 Demo 保持单 Railway worker；
+或 virtual sector 描述为官方赛道数据。Coach Pilot v1 保持单 Railway worker；
 横向扩容前必须把临时令牌数据迁移到共享对象存储。商业化下一步优先完成
 账户、对象存储直传、PostgreSQL session repository 和独立任务队列。

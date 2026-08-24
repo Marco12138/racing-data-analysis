@@ -5,7 +5,7 @@
 The current public demo only needs:
 
 - Frontend: Vercel, built with `pnpm run build:vercel`.
-- API: Railway or Render using the root `Dockerfile`.
+- API: Railway using the root `Dockerfile`.
 
 CSV analysis and video first-frame preview run in the browser. AiM XRK/XRZ
 files are sent to the FastAPI container for temporary parsing. The API is
@@ -13,9 +13,10 @@ required for XRK/XRZ import, the optional server-side CSV endpoint, and
 health/capability checks. PostgreSQL, Redis, authentication, and object storage
 are intentionally not required in this phase.
 
-Railway or Render is the simplest first backend host because OpenCV and FFmpeg
-need a normal container and analysis tasks may outlive serverless request limits.
-Cloud Run is a good later option when job volume and operational requirements grow.
+Railway runs the existing Linux container, including OpenCV, FFmpeg, PyArrow,
+and the native `libxrk` wheel. Coach Pilot v1 uses one worker and a Railway
+Volume mounted at `/data` for SQLite persistence. Horizontal scaling still
+requires shared inspection storage and a multi-user persistence layer.
 
 ## Local environments
 
@@ -62,9 +63,11 @@ docker compose down
 3. Set:
 
 ```text
-NEXT_PUBLIC_API_URL=https://api.example.com
+NEXT_PUBLIC_API_URL=https://racing-ai-platform-api-production.up.railway.app
 NEXT_PUBLIC_API_PREFIX=/api/v1
 NEXT_PUBLIC_DEPLOYMENT_MODE=public-demo
+API_URL=https://racing-ai-platform-api-production.up.railway.app
+XRK_UPLOAD_URL=https://racing-ai-platform-api-production.up.railway.app/api/v1/xrk/inspect
 ```
 
 These values are embedded in browser assets at build time. Redeploy after they change.
@@ -74,7 +77,7 @@ These values are embedded in browser assets at build time. Redeploy after they c
 Set these Worker runtime values in Sites:
 
 ```text
-API_URL=https://api.example.com
+API_URL=https://racing-ai-platform-api-production.up.railway.app
 API_PREFIX=/api/v1
 DEPLOYMENT_MODE=public-demo
 ```
@@ -85,9 +88,16 @@ analysis, deletion, and capability requests. HTTPS pages reject loopback or
 non-HTTPS API origins. `pnpm run build` scans client assets and fails when a
 literal `http://127.0.0.1:8000` or `http://localhost:8000` is present.
 
-## FastAPI container
+## Railway FastAPI backend
 
-Deploy the root `Dockerfile`. For the current public Demo adapter:
+Create one Railway service from this repository and let `railway.toml` select
+the root `Dockerfile`. Attach a Railway Volume at `/data` before inviting pilot
+users. The volume keeps SQLite feedback, storyboard, and session metadata across
+deployments; temporary XRK inspection artifacts still expire after 30 minutes.
+The container entrypoint prepares the mounted directory and then drops to the
+unprivileged `appuser`; do not override it with a custom Railway start command.
+
+Set the following service variables:
 
 ```text
 APP_ENV=production
@@ -95,9 +105,9 @@ APP_MODE=cloud
 API_HOST=0.0.0.0
 API_PORT=8000
 DOCS_ENABLED=false
-CORS_ORIGINS=https://www.example.com
-ALLOWED_HOSTS=api.example.com,healthcheck.railway.app
-DATABASE_URL=sqlite:////app/storage/sessions.sqlite3
+CORS_ORIGINS=https://ai-racing-telemetry-platform.vercel.app,https://ai-racing-telemetry-platform.marcosebastian1144.chatgpt.site
+ALLOWED_HOSTS=racing-ai-platform-api-production.up.railway.app,healthcheck.railway.app,localhost,127.0.0.1
+DATABASE_PATH=/data/racing.sqlite
 STORAGE_BACKEND=local
 TASK_QUEUE_BACKEND=inline
 WEB_CONCURRENCY=1
@@ -113,6 +123,29 @@ XRK_MAX_COMPARISON_POINTS=5000
 XRK_SERVER_IMPORT_ENABLED=true
 XRK_PARSER=auto
 ```
+
+Keep `WEB_CONCURRENCY=1` while inspection tokens and Parquet artifacts are on
+the container-local `/tmp` filesystem. Railway provides
+`RAILWAY_VOLUME_MOUNT_PATH` when a volume is attached, but the application uses
+the explicit `DATABASE_PATH` so its persistence contract is visible and
+testable.
+
+Verify every deployment before publishing it:
+
+```bash
+curl --fail https://racing-ai-platform-api-production.up.railway.app/api/v1/health
+curl --fail https://racing-ai-platform-api-production.up.railway.app/api/v1/system/health/ready
+curl --fail https://racing-ai-platform-api-production.up.railway.app/api/v1/system/capabilities
+
+# Use a private local sample; never commit it.
+curl --fail -F "file=@/absolute/path/session.xrk" \
+  https://racing-ai-platform-api-production.up.railway.app/api/v1/xrk/inspect
+```
+
+The `railway.toml` health check targets the readiness endpoint, and the restart
+policy keeps the single pilot worker available after process failures. Railway
+deployments with an attached volume may have a short restart window; do not
+promise zero downtime for Coach Pilot v1.
 
 This cloud-mode container is suitable for publishing the frontend and CSV
 analysis API. XRK/XRZ files are parsed in an isolated subprocess. The raw file
@@ -151,15 +184,16 @@ LLM_MODEL=deepseek-chat
 
 ### 点亮 LLM 一键流程
 
-1. **Railway Dashboard** → 后端服务 `racing-ai-platform-api` → **Variables**，
-   添加 `LLM_BASE_URL`（deepseek 用 `https://api.deepseek.com/v1`）、
-   `LLM_API_KEY`、`LLM_MODEL=deepseek-chat`，然后重新 **Deploy**。
+1. **Railway Dashboard** → API service → **Variables**，添加
+   `LLM_BASE_URL`（DeepSeek 用 `https://api.deepseek.com/v1`）、
+   `LLM_API_KEY`、`LLM_MODEL=deepseek-chat`，然后重新 Deploy。
 2. 验证连通性（本地，脚本只从环境变量读 key，不写盘不打日志）：
    ```bash
    LLM_BASE_URL=... LLM_API_KEY=... LLM_MODEL=deepseek-chat \
      python scripts/verify_llm_config.py
    ```
-   也可以只设置变量后在 Railway 后端环境里执行同一命令。
+   也可以在 Railway service shell 中执行同一命令；不要把 key
+   写入文件或日志。
 3. 生成评估样本。脚本会先执行与第 2 步相同的最小连通性验证；验证失败时
    不创建评估结果。随后优先读取 `tmp/narrative_eval/samples/*.json` 中的真实
    analyze 响应，并为每个 session 生成中文和英文叙事。如果没有真实样本，
@@ -219,14 +253,11 @@ python scripts/render_feedback_stats.py
 `public/og.png` 作为静态品牌图。部署前确认 Vercel 的 `API_URL` 能由服务端访问，
 否则分享页本身仍可打开，但爬虫无法取得最快圈标题。
 
-Railway sends deployment health checks with `healthcheck.railway.app` as the
-Host header. Keep that hostname in `ALLOWED_HOSTS` so Trusted Host validation
-accepts the platform health check.
-
 Use these health checks:
 
 ```text
 GET /api/v1/health
+GET /api/v1/system/health
 GET /api/v1/system/health/live
 GET /api/v1/system/health/ready
 GET /api/v1/capabilities
@@ -278,6 +309,7 @@ pnpm run build:vercel
 pnpm run test:api-proxy
 pnpm run build:api-proxy
 docker compose config
+python scripts/verify_pilot_deployment.py --require-llm
 ```
 
 Check CORS with the real frontend domain and confirm cloud mode returns
@@ -286,8 +318,8 @@ exposing the API publicly.
 
 ## Production API routing
 
-The primary public deployment uses a Vercel external rewrite directly to
-Railway:
+The primary public deployment uses a Vercel external rewrite directly to the
+Railway API:
 
 ```text
 Small API calls: Browser -> same-origin Vercel /api/v1 -> Railway FastAPI
@@ -297,10 +329,14 @@ XRK upload:      Browser -> Railway /api/v1/xrk/inspect
 The Next.js `/api/runtime-config` route returns the current Vercel origin for
 ordinary API calls and a dedicated `xrkUploadUrl` for the large multipart
 request. XRK bypasses Vercel's external rewrite because a browser multipart
-request without a declared content length was observed reaching Railway with a
+request without a declared content length previously reached a proxy with a
 zero-byte body. Keep Railway CORS configured for the public Vercel and Sites
-origins. `XRK_UPLOAD_URL` may override the Railway inspection endpoint without
-changing the client bundle.
+origins. `XRK_UPLOAD_URL` may override the direct Railway inspection endpoint
+without changing the client bundle.
+
+`vercel.json`, `app/api/runtime-config/route.ts`, Vercel `API_URL`, and
+`XRK_UPLOAD_URL` must refer to the same Railway service. Verify runtime config
+after every frontend release; production must never contain a localhost origin.
 
 ## Optional Cloudflare API proxy
 
@@ -334,13 +370,12 @@ NEXT_PUBLIC_API_PREFIX=/api/v1
 ```
 
 Sites follows the same browser contract. Its Worker returns the Sites origin
-from `/api/runtime-config` and streams `/api/v1/*` to the configured Railway
-`API_URL`. Do not change runtime configuration back to a cross-origin browser
-URL; that reintroduces DNS, privacy-extension, and CORS failure modes for large
-uploads.
+from `/api/runtime-config` and streams `/api/v1/*` to the Railway `API_URL`.
+Do not change runtime configuration back to an untrusted or non-HTTPS origin;
+that reintroduces DNS, privacy-extension, and CORS failure modes.
 
 Keep `UPSTREAM_ORIGIN` and `ALLOWED_ORIGINS` in `wrangler.jsonc` limited to the
-actual Railway service and approved frontend origins. The optional
+actual Railway API and approved frontend origins. The optional
 `ALLOWED_ORIGIN_HOST_PATTERNS` is hostname-only and currently admits this
 project's HTTPS Vercel Preview domains; do not replace it with a broad
 `*.vercel.app` pattern. Cloudflare's request body
@@ -366,8 +401,8 @@ POST <worker>/api/v1/xrk/inspect
 - `XRK_UPLOAD_TRANSPORT_FAILED`: the file was readable but the browser did not
   receive an HTTP response. First confirm `/api/runtime-config` returns the
   current frontend origin, then check the same-origin `/api/v1/health` path and
-  its edge rewrite/upstream. Direct browser access to `workers.dev` or
-  `railway.app` should not be required in production.
+  its edge rewrite/upstream. Direct browser access to `workers.dev` should not
+  be required in production.
 - `PROXY_UPSTREAM_UNAVAILABLE`: the Worker answered but could not reach Railway;
   inspect Worker logs and Railway health before changing the frontend.
 
@@ -378,7 +413,10 @@ frontend variable changes.
 ## Provider references
 
 - [Vercel environment variables](https://vercel.com/docs/environment-variables)
-- [Railway FastAPI deployment](https://docs.railway.com/guides/fastapi)
+- [Railway configuration as code](https://docs.railway.com/config-as-code/reference)
+- [Railway volumes](https://docs.railway.com/volumes)
+- [Railway health checks](https://docs.railway.com/deployments/healthchecks)
+- [libxrk wheels](https://pypi.org/project/libxrk/)
 - [FastAPI container deployment](https://fastapi.tiangolo.com/deployment/docker/)
 - [Neon connection pooling](https://neon.com/docs/connect/connection-pooling)
 - [Cloudflare R2 presigned URLs](https://developers.cloudflare.com/r2/api/s3/presigned-urls/)
