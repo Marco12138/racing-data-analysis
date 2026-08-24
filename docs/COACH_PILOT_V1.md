@@ -32,12 +32,16 @@ must not reintroduce theoretical-best laps or synthetic telemetry curves.
 
 ### Deployment
 
-- [ ] Railway Volume is attached at `/data`.
-- [ ] `DATABASE_PATH=/data/racing.sqlite` and `WEB_CONCURRENCY=1` are active.
-- [ ] Railway health check uses `/api/v1/system/health/ready`.
-- [ ] Vercel runtime config and direct XRK upload target the same Railway API.
-- [ ] A feedback write remains available after a Railway restart or redeploy.
-- [ ] `python scripts/verify_pilot_deployment.py` passes against production.
+- [x] Railway Volume is attached at `/data`.
+- [x] `DATABASE_PATH=/data/racing.sqlite` and `WEB_CONCURRENCY=1` are active.
+- [x] Railway health check uses `/api/v1/system/health/ready`.
+- [x] Vercel runtime config and direct XRK upload target the same Railway API.
+- [x] A feedback write remains available after a Railway restart or redeploy.
+- [x] `python scripts/verify_pilot_deployment.py` passes against production.
+
+These deployment gates were verified on 2026-08-24. They establish a stable
+single-worker pilot baseline; they do not complete the real-data or coaching
+validation gates below.
 
 ### Real-data validation
 
