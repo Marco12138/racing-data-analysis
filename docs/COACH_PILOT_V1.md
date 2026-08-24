@@ -65,6 +65,9 @@ validation gates below.
 
 ### Operations and privacy
 
+- [ ] Migrate the existing `railway.toml` service configuration to Railway's
+  `.railway/railway.ts` format before the documented 2026-12-01 cutoff. This is
+  maintenance work, not a blocker for the initial pilot cohort.
 - [ ] Pilot participants receive a short notice covering temporary XRK
   processing, metadata retention, local video handling, and deletion requests.
 - [ ] The team has an owner for deployment alerts and participant support.

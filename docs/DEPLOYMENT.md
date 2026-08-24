@@ -147,6 +147,11 @@ policy keeps the single pilot worker available after process failures. Railway
 deployments with an attached volume may have a short restart window; do not
 promise zero downtime for Coach Pilot v1.
 
+Railway has deprecated Config as Code and documents a 2026-12-01 cutoff for
+existing `railway.toml` services. Migrate this existing service to
+`.railway/railway.ts` before that date; do not combine that infrastructure
+migration with pilot analysis changes.
+
 This cloud-mode container is suitable for publishing the frontend and CSV
 analysis API. XRK/XRZ files are parsed in an isolated subprocess. The raw file
 is deleted immediately; normalized Parquet and its manifest use an opaque token
