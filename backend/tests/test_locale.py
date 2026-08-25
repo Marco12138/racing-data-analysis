@@ -163,14 +163,16 @@ def test_ai_coach_summary_locale_zh_and_en() -> None:
 
     assert "所有基准均来自真实完成" in zh["reference_statement"]
     priority_zh = zh["training_priorities"][0]
-    assert "提前恢复 RPM" in priority_zh["what_to_test"]
+    assert "最低转速后只做一次连续的恢复动作" in priority_zh["what_to_test"]
+    assert "140.5 m" not in priority_zh["what_to_test"]
     assert "停止条件" not in priority_zh["stop_condition"]
     assert "连续跑 3 圈" in priority_zh["training_drill"]
     assert "抬油门位置稳定在 110.0 m 附近" in zh["stable_strengths"][0]["finding"]
 
     assert "All benchmarks come from real" in en["reference_statement"]
     priority_en = en["training_priorities"][0]
-    assert "Test a sustained RPM recovery near 140.5 m" in priority_en["what_to_test"]
+    assert "one continuous recovery input after minimum RPM" in priority_en["what_to_test"]
+    assert "140.5 m" not in priority_en["what_to_test"]
     assert "Run three consecutive laps" in priority_en["training_drill"]
     assert "Lift position repeats near 110.0 m" in en["stable_strengths"][0]["finding"]
 
@@ -256,17 +258,17 @@ def test_llm_narrative_rejects_vague_output_and_forwards_language(
     assert vague is None
 
     specific = _run_with_transport(
-        "训练重点一：Zone 4（512.4-590.0 m）保持油门恢复。\n"
+        "训练重点一：Zone 4 保持出弯恢复。\n"
         "对应证据：真实圈 13、8，净收益 0.24s。\n"
-        "练习建议：在 512.4 m 只测试油门恢复并核对 0.24s。\n"
+        "练习建议：保持入弯准备不变，只测试恢复动作并核对 0.24s。\n"
         "停止条件：若损失高于 0.24s，停止实验。\n"
-        "训练重点二：Zone 4（512.4-590.0 m）保持速度。\n"
+        "训练重点二：Zone 4 保持出弯速度。\n"
         "对应证据：最快圈为 40.326s，净收益 0.24s。\n"
-        "练习建议：在 590.0 m 核对速度对应的 0.24s。\n"
+        "练习建议：只改变恢复动作并核对速度对应的 0.24s。\n"
         "停止条件：若损失高于 0.24s，停止实验。\n"
-        "训练重点三：Zone 4（512.4-590.0 m）保持 RPM 恢复。\n"
+        "训练重点三：Zone 4 保持 RPM 恢复。\n"
         "对应证据：真实圈 13、8，净收益 0.24s。\n"
-        "练习建议：在 512.4 m 只测试 RPM 恢复并核对 0.24s。\n"
+        "练习建议：从最低转速后只测试连续 RPM 恢复并核对 0.24s。\n"
         "停止条件：若损失高于 0.24s，停止实验。",
         "zh",
     )
@@ -274,17 +276,17 @@ def test_llm_narrative_rejects_vague_output_and_forwards_language(
     assert "0.24s" in specific
 
     english = _run_with_transport(
-        "Training focus one: hold throttle recovery at Zone 4 (512.4-590.0 m).\n"
+        "Training focus one: hold a continuous recovery at Zone 4.\n"
         "Evidence: real laps 13 and 8, net gain 0.24s.\n"
-        "Drill: hold the recovery action at 512.4 m and verify 0.24s.\n"
+        "Drill: keep entry preparation unchanged and verify 0.24s.\n"
         "Stop condition: stop when loss exceeds 0.24s.\n"
-        "Training focus two: maintain speed at Zone 4 (512.4-590.0 m).\n"
+        "Training focus two: maintain exit speed at Zone 4.\n"
         "Evidence: fastest lap is 40.326s and net gain is 0.24s.\n"
-        "Drill: hold speed at 590.0 m and verify 0.24s.\n"
+        "Drill: change only the recovery input and verify 0.24s.\n"
         "Stop condition: stop when loss exceeds 0.24s.\n"
-        "Training focus three: maintain RPM at Zone 4 (512.4-590.0 m).\n"
+        "Training focus three: maintain RPM recovery at Zone 4.\n"
         "Evidence: real laps 13 and 8, net gain 0.24s.\n"
-        "Drill: hold RPM recovery at 512.4 m and verify 0.24s.\n"
+        "Drill: make one continuous RPM recovery and verify 0.24s.\n"
         "Stop condition: stop when loss exceeds 0.24s.",
         "en",
     )

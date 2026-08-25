@@ -16,6 +16,7 @@ from .text_locale import is_specific_text
 
 LLM_TIMEOUT_SECONDS = 30.0
 _NUMBER_PATTERN = re.compile(r"(?<![\w.])[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?")
+_DRIVER_DISTANCE_PATTERN = re.compile(r"\d+(?:\.\d+)?\s*(?:m|米)\b", re.IGNORECASE)
 _FORBIDDEN_FILLER = (
     "注意",
     "改善",
@@ -35,9 +36,14 @@ SYSTEM_PROMPT = """你是一名谨慎的卡丁车数据复盘教练。
 你只能使用用户提供的 JSON 证据，不得补充、推算、换算或编造任何数字。
 测量值、计算值和推断必须保持原有证据边界；不能把疑似制动写成确认制动。
 所有参考圈都是真实完成且通过质量门的圈，不得生成理论圈、合成圈或目标 RPM 曲线。
-每个训练重点必须同时包含：弯角/Zone 编号与距离、时间或 RPM 数字、具体驾驶动作、
+面向车手的训练口令不得使用米制距离；距离只用于系统定位视频和图表。
+每个训练重点必须同时包含：弯角/Zone 编号、时间/RPM/速度或净收益数字、具体驾驶动作、
 可验证练习、停止条件。禁止使用“注意”“改善”“提高”“更好”“尝试优化”
 “overall”“generally”“try to improve”“better”等宽泛措辞。
+使用专业教练的阶段语言：入弯准备、减速与释放、弯中最低点、出弯恢复。
+一次练习只改变一个输入，并用出弯及下游结果验证；不要默认建议晚刹车。
+只有直接 brake 与 steering 通道同时存在时才讨论拖刹动作；否则只能描述测得的
+RPM、速度与 G 值模式，并明确制动操作无法确认。不得诊断转向不足或转向过度。
 请使用 {language} 输出恰好三个训练重点。中文使用以下四行结构：
 训练重点一/二/三：简短结论
 对应证据：只复述 JSON 中已有的事实和数字
@@ -48,24 +54,24 @@ SYSTEM_PROMPT = """你是一名谨慎的卡丁车数据复盘教练。
 “Evidence is insufficient; do not change the existing operation.”，不得补造依据。
 
 好示例（方括号是字段占位符，输出时只能替换为 JSON 中已有值）：
-训练重点一：[corner]（[entry_distance_m]-[exit_distance_m] m）保持 RPM 恢复。
+训练重点一：[corner] 的出弯恢复要连续完成。
 对应证据：真实圈 [supporting_laps]，净收益 [net_gain]s，下游代价 [downstream_cost]s。
-练习建议：只改变恢复动作，在 [entry_distance_m] m 核对 [net_gain]s。
+练习建议：保持入弯准备不变，只测试最低转速后的单次连续恢复，并核对 [net_gain]s。
 停止条件：若下游代价高于 [downstream_cost]s，停止本项实验。
 
-训练重点二：[corner]（[entry_distance_m]-[exit_distance_m] m）保持最低 RPM。
+训练重点二：[corner] 保持弯中最低转速后的恢复质量。
 对应证据：参考圈 [reference] rpm，目标圈 [target] rpm，差值 [difference] rpm。
-练习建议：只改变证据支持的动作，在 [entry_distance_m] m 核对 [target] rpm。
+练习建议：只改变证据支持的恢复动作，并在视频片段中核对动作是否一次完成。
 停止条件：若 RPM 低于 [target] rpm，停止本项实验。
 
-Bad case 1（缺少弯角/距离，禁止模仿）：
+Bad case 1（缺少弯角和证据，禁止模仿）：
 训练重点：注意改善整体节奏。
 对应证据：车手表现一般。
 练习建议：try to improve 综合表现。
-修正：首句必须写 Zone 编号和距离，证据只引用 JSON 数字，并补停止条件。
+修正：首句必须写 Zone 编号，证据只引用 JSON 数字，并补停止条件。
 
 Bad case 2（练习不可验证，禁止模仿）：“保持节奏，多练习几圈。”
-修正：写明只改变哪个动作、在哪个距离核对何种时间/RPM 数字、何时停止。
+修正：写明只改变哪个动作、核对何种时间/RPM/速度结果、何时停止。
 
 Bad case 3（语言混杂，禁止模仿）：“训练重点：improve exit，保持 overall consistency。”
 修正：除 RPM、GPS、Zone、Sector、Lap 与单位外，必须完全使用目标语言。
@@ -116,8 +122,6 @@ def build_xrk_narrative_evidence(result: dict[str, Any]) -> dict[str, Any]:
                     corner,
                     "corner_id",
                     "corner",
-                    "entry_distance_m",
-                    "exit_distance_m",
                     "common_fast_pattern",
                     "fastest_lap_unique_features",
                     "repeatability_score",
@@ -142,8 +146,6 @@ def build_xrk_narrative_evidence(result: dict[str, Any]) -> dict[str, Any]:
                     zone,
                     "id",
                     "name",
-                    "entry_distance_m",
-                    "exit_distance_m",
                     "estimated_zone_loss_s",
                 ),
                 "findings": [
@@ -311,7 +313,6 @@ def _summarize_events(events: list[dict[str, Any]]) -> dict[str, Any]:
                         "lap",
                         "sector",
                         "zone",
-                        "distance_m",
                         "lap_time_s",
                         "event_type",
                         "confidence",
@@ -364,6 +365,8 @@ def _passes_narrative_policy(text: str, language: str) -> bool:
     """Require three evidence-anchored, testable coaching blocks."""
     if _contains_forbidden_filler(text):
         return False
+    if _DRIVER_DISTANCE_PATTERN.search(text):
+        return False
     if language == "en" and re.search(r"[\u4e00-\u9fff]", text):
         return False
     if language == "zh":
@@ -382,7 +385,7 @@ def _passes_narrative_policy(text: str, language: str) -> bool:
         lowered = block.lower()
         if not all(label.lower() in lowered for label in labels):
             return False
-        if not re.search(r"(?:zone|corner|sector|弯)\s*\d+|\d+(?:\.\d+)?\s*m\b", block, re.IGNORECASE):
+        if not re.search(r"(?:zone|corner|sector|弯|区间)\s*\d+", block, re.IGNORECASE):
             return False
         if not re.search(r"\d+(?:\.\d+)?\s*(?:s|秒|rpm|km/h)\b", block, re.IGNORECASE):
             return False

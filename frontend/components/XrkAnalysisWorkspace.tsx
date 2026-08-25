@@ -552,11 +552,13 @@ function CoachOverview({
                 (item) => item.corner === priority.corner,
               );
               const recoveryDistance = priorityRecoveryDistance(priority);
+              const clipFocusDistance = recoveryDistance
+                ?? (corner ? (corner.entry_distance_m + corner.exit_distance_m) / 2 : null);
               const clip = clipMappingAvailable && corner && analysis.track
+                && clipFocusDistance != null
                 ? buildCoachVideoWindow(
                     analysis.track.target,
-                    corner.entry_distance_m,
-                    corner.exit_distance_m,
+                    clipFocusDistance,
                     offsetMs,
                     videoDurationS,
                   )
@@ -610,9 +612,7 @@ function CoachOverview({
                     </p>
                     <CoachField
                       label={t("xrk.coach.whatToTest")}
-                      value={recoveryDistance == null
-                        ? priority.what_to_test
-                        : t("xrk.coach.overviewRecoveryTest", { distance: recoveryDistance.toFixed(1) })}
+                      value={t("xrk.coach.overviewRecoveryTest")}
                     />
                     <CoachField
                       label={t("xrk.coach.trainingDrill")}
@@ -2366,7 +2366,7 @@ function CoachSummaryPanel({
                     </div>
                   </div>
                   <p className="mt-3 text-sm leading-6 text-slate-300">{priority.why}</p>
-                  <CoachField label={t("xrk.coach.whatToTest")} value={priority.what_to_test} />
+                  <CoachField label={t("xrk.coach.whatToTest")} value={t("xrk.coach.overviewRecoveryTest")} />
                   <CoachField label={t("xrk.coach.trainingDrill")} value={priority.training_drill} />
                   <CoachField label={t("xrk.coach.stopCondition")} value={priority.stop_condition} />
                   <div className="mt-3">

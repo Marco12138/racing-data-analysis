@@ -3,48 +3,45 @@ import type { XrkTrackPoint } from "./xrkAnalysisApi";
 export type CoachVideoWindow = {
   start_s: number;
   end_s: number;
-  entry_distance_m: number;
-  exit_distance_m: number;
+  focus_distance_m: number;
 };
 
-/** Map one telemetry zone to a bounded local-video window using a verified offset. */
+/** Build a short local-video review clip around one telemetry event. */
 export function buildCoachVideoWindow(
   targetTrack: XrkTrackPoint[],
-  entryDistanceM: number,
-  exitDistanceM: number,
+  focusDistanceM: number,
   offsetMs: number,
   videoDurationS: number,
-  paddingS = 0.8,
+  clipDurationS = 4,
 ): CoachVideoWindow | null {
-  if (!targetTrack.length || !Number.isFinite(videoDurationS) || videoDurationS <= 0) {
+  if (!targetTrack.length || !Number.isFinite(videoDurationS) || videoDurationS < 3) {
     return null;
   }
   const usableTrack = targetTrack.filter(
     (point) => typeof point.session_time_s === "number" && Number.isFinite(point.session_time_s),
   );
-  const entry = nearestByDistance(usableTrack, entryDistanceM);
-  const exit = nearestByDistance(usableTrack, exitDistanceM);
+  const focus = nearestByDistance(usableTrack, focusDistanceM);
   if (
-    typeof entry?.session_time_s !== "number"
-    || !Number.isFinite(entry.session_time_s)
-    || typeof exit?.session_time_s !== "number"
-    || !Number.isFinite(exit.session_time_s)
+    typeof focus?.session_time_s !== "number"
+    || !Number.isFinite(focus.session_time_s)
   ) {
     return null;
   }
 
-  const rawStart = entry.session_time_s + offsetMs / 1000;
-  const rawEnd = exit.session_time_s + offsetMs / 1000;
-  const start = Math.max(0, Math.min(rawStart, rawEnd) - Math.max(0, paddingS));
-  const end = Math.min(videoDurationS, Math.max(rawStart, rawEnd) + Math.max(0, paddingS));
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end - start < 0.25) {
+  const duration = Math.min(5, Math.max(3, clipDurationS));
+  const focusTime = focus.session_time_s + offsetMs / 1000;
+  if (!Number.isFinite(focusTime) || focusTime < 0 || focusTime > videoDurationS) {
     return null;
   }
+  const start = Math.min(
+    Math.max(0, focusTime - duration / 2),
+    videoDurationS - duration,
+  );
+  const end = start + duration;
   return {
     start_s: start,
     end_s: end,
-    entry_distance_m: Math.min(entryDistanceM, exitDistanceM),
-    exit_distance_m: Math.max(entryDistanceM, exitDistanceM),
+    focus_distance_m: focus.distance_m,
   };
 }
 

@@ -63,17 +63,17 @@ def test_llm_narrative_parses_fixed_response(
     configure_llm(monkeypatch)
     captured: dict = {}
     content = (
-        "训练重点一：Zone 4（512.4-590.0 m）保持油门恢复。\n"
+        "训练重点一：Zone 4 的出弯恢复要连续完成。\n"
         "对应证据：Lap 13 为 40.326s，净收益 0.24s。\n"
-        "练习建议：在 512.4 m 只测试油门恢复并核对 0.24s。\n"
+        "练习建议：保持入弯准备不变，只测试恢复动作并核对 0.24s。\n"
         "停止条件：若净收益低于 0.24s，停止实验。\n"
-        "训练重点二：Zone 4（512.4-590.0 m）保持速度。\n"
+        "训练重点二：Zone 4 保持出弯速度。\n"
         "对应证据：Lap 13 为 40.326s，Zone 4 损失 0.24s。\n"
-        "练习建议：在 590.0 m 核对速度对应的 0.24s。\n"
+        "练习建议：只改变恢复动作并核对速度对应的 0.24s。\n"
         "停止条件：若损失高于 0.24s，停止实验。\n"
-        "训练重点三：Zone 4（512.4-590.0 m）保持 RPM 恢复。\n"
+        "训练重点三：Zone 4 保持 RPM 恢复。\n"
         "对应证据：真实圈为 Lap 13 和 Lap 8，损失 0.24s。\n"
-        "练习建议：在 512.4 m 只测试 RPM 恢复并核对 0.24s。\n"
+        "练习建议：从最低转速后只测试连续 RPM 恢复并核对 0.24s。\n"
         "停止条件：若损失高于 0.24s，停止实验。"
     )
     narrative = run_with_transport(content, "zh", captured)
@@ -97,9 +97,27 @@ def test_llm_narrative_falls_back_when_output_contains_forbidden_filler(
     configure_llm(monkeypatch)
     captured: dict = {}
     block = (
-        "训练重点一：Zone 4（512.4-590.0 m）注意提高油门恢复。\n"
+        "训练重点一：Zone 4 注意提高油门恢复。\n"
         "对应证据：Lap 13 为 40.326s，净收益 0.24s。\n"
-        "练习建议：在 512.4 m 核对 0.24s。\n"
+        "练习建议：核对 0.24s。\n"
+        "停止条件：若损失高于 0.24s，停止实验。"
+    )
+    content = "\n".join(
+        block.replace("训练重点一", label)
+        for label in ("训练重点一", "训练重点二", "训练重点三")
+    )
+    assert run_with_transport(content, "zh", captured) is None
+
+
+def test_llm_narrative_rejects_driver_facing_metre_instructions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configure_llm(monkeypatch)
+    captured: dict = {}
+    block = (
+        "训练重点一：Zone 4 保持 RPM 恢复。\n"
+        "对应证据：Lap 13 为 40.326s，净收益 0.24s。\n"
+        "练习建议：在 512.4 m 只测试 RPM 恢复并核对 0.24s。\n"
         "停止条件：若损失高于 0.24s，停止实验。"
     )
     content = "\n".join(

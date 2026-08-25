@@ -61,8 +61,8 @@ _PRIORITY_TEXT: dict[str, dict[str, str]] = {
             "a {gain:.3f}s net gain after downstream cost."
         ),
         "what_to_test_target": (
-            "Test a sustained RPM recovery near {target:.1f} m while keeping the preceding "
-            "preparation unchanged."
+            "Make one continuous recovery input after minimum RPM while keeping the "
+            "corner-entry preparation unchanged."
         ),
         "what_to_test_fallback": (
             "Repeat the measured fast-lap exit pattern without changing more than one input."
@@ -84,7 +84,7 @@ _PRIORITY_TEXT: dict[str, dict[str, str]] = {
     },
     "zh": {
         "why": "该模式出现在 {count} 个合格圈中，扣除下游代价后净收益 {gain:.3f}s。",
-        "what_to_test_target": "在 {target:.1f} m 处提前恢复 RPM，并保持此前准备动作不变。",
+        "what_to_test_target": "从最低转速后只做一次连续的恢复动作，并保持入弯准备不变。",
         "what_to_test_fallback": "复现测得的最快圈出弯模式，单次只改变一个操作。",
         "drill": "连续跑 3 圈，只改变恢复阶段，然后对比弯心出口与下游终点的圈时差。",
         "success_1": "该行为在可比较的 3 圈中至少 2 圈出现。",
@@ -498,7 +498,7 @@ def _training_priority(
     ]
     target = round(float(np.median(recoveries)), 1) if recoveries else None
     what_to_test = (
-        pt["what_to_test_target"].format(target=target)
+        pt["what_to_test_target"]
         if target is not None
         else pt["what_to_test_fallback"]
     )

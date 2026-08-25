@@ -163,17 +163,17 @@ def test_llm_success_uses_summary_evidence_only(
                     {
                         "message": {
                             "content": (
-                                "训练重点一：Zone 4（512.4-590.0 m）保持 RPM 恢复\n"
+                                "训练重点一：Zone 4 的出弯 RPM 恢复要连续完成\n"
                                 "对应证据：Lap 13 为 40.326s，净收益为 0.24s。\n"
-                                "练习建议：在 512.4 m 只测试持续 RPM 恢复并核对 0.24s。\n"
+                                "练习建议：保持入弯准备不变，只测试连续 RPM 恢复并核对 0.24s。\n"
                                 "停止条件：若下游代价高于 0.0s，停止实验。\n"
-                                "训练重点二：Zone 4（512.4-590.0 m）保持最低 RPM\n"
+                                "训练重点二：Zone 4 保持最低 RPM 后的恢复质量\n"
                                 "对应证据：参考圈为 8740 rpm，目标圈为 8420 rpm。\n"
-                                "练习建议：在 512.4 m 保持 RPM，并核对 8420 rpm。\n"
+                                "练习建议：只改变恢复动作，并核对 8420 rpm。\n"
                                 "停止条件：若 RPM 低于 8420 rpm，停止实验。\n"
-                                "训练重点三：Zone 4（512.4-590.0 m）核对收油动作\n"
+                                "训练重点三：Zone 4 核对收油与恢复衔接\n"
                                 "对应证据：Lap 10 在 24.1s 出现 LIFTING。\n"
-                                "练习建议：在 512.4 m 只调整收油动作并核对 24.1s。\n"
+                                "练习建议：只调整收油与恢复衔接并核对 24.1s。\n"
                                 "停止条件：若净收益低于 0.24s，停止实验。"
                             )
                         }
@@ -197,6 +197,8 @@ def test_llm_success_uses_summary_evidence_only(
     assert '"channels"' not in prompt
     assert '"lap_rows"' not in prompt
     assert '"aligned"' not in prompt
+    assert '"entry_distance_m"' not in prompt
+    assert '"exit_distance_m"' not in prompt
     assert "99999" not in prompt
     assert "12223" not in prompt
     assert "raw_window" not in prompt
