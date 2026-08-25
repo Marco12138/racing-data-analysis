@@ -627,6 +627,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
                 onStart={handleNewSession}
                 localSources={localXrkSources}
                 onStartLocal={handleNewSessionFromLocalSource}
+                onVideoSelect={setPendingVideoFile}
               />
               <DataUploadPanel
                 showXrk={false}
@@ -648,7 +649,14 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
                 onLoadDemo={loadDemoData}
               />
             </div>
-            <button type="button" className="workspace-video-mode" onClick={() => setVideoModeRequested(true)}>
+            <button
+              type="button"
+              className="workspace-video-mode"
+              onClick={() => {
+                setActiveVideoFile(pendingVideoFile);
+                setVideoModeRequested(true);
+              }}
+            >
               <Video size={17} /> Review video without telemetry
             </button>
           </section>
@@ -670,6 +678,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
                 onStart={handleNewSession}
                 localSources={localXrkSources}
                 onStartLocal={handleNewSessionFromLocalSource}
+                onVideoSelect={setPendingVideoFile}
               />
             </details>
             <details className="workspace-disclosure">
@@ -726,7 +735,12 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
               ))}
             </div>
 
-            {!xrkAnalysis && <VideoWorkspace onJobChange={setVideoJob} />}
+            {!xrkAnalysis && (
+              <VideoWorkspace
+                onJobChange={setVideoJob}
+                initialVideoFile={activeVideoFile}
+              />
+            )}
 
             {xrkAnalysis ? (
               <XrkAnalysisWorkspace
@@ -880,7 +894,13 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
   );
 }
 
-function VideoWorkspace({ onJobChange }: { onJobChange: (job: VideoJob | null) => void }) {
+function VideoWorkspace({
+  onJobChange,
+  initialVideoFile,
+}: {
+  onJobChange: (job: VideoJob | null) => void;
+  initialVideoFile: File | null;
+}) {
   const localMode = frontendConfig.deploymentMode === "local";
   const [sources, setSources] = useState<VideoSource[]>([]);
   const [selectedSourceId, setSelectedSourceId] = useState("");
@@ -1028,12 +1048,12 @@ function VideoWorkspace({ onJobChange }: { onJobChange: (job: VideoJob | null) =
   const selectedSource = sources.find((source) => source.source_id === selectedSourceId);
 
   if (!localMode) {
-    return <BrowserVideoUpload />;
+    return <BrowserVideoUpload initialVideoFile={initialVideoFile} />;
   }
 
   return (
     <div className="flex flex-col gap-5" data-testid="video-workspace">
-      <BrowserVideoUpload />
+      <BrowserVideoUpload initialVideoFile={initialVideoFile} />
       <section className="panel rounded-lg p-4 md:p-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <SectionTitle icon={<Video size={18} />} title="Local Video Analysis" subtitle="本机读取，不上传云端" />
@@ -1196,10 +1216,23 @@ type BrowserVideoInfo = {
   height: number | null;
 };
 
-function BrowserVideoUpload() {
-  const [videoUrl, setVideoUrl] = useState("");
+function BrowserVideoUpload({ initialVideoFile }: { initialVideoFile: File | null }) {
+  const [videoUrl, setVideoUrl] = useState(() =>
+    initialVideoFile ? URL.createObjectURL(initialVideoFile) : ""
+  );
   const [previewFrame, setPreviewFrame] = useState("");
-  const [info, setInfo] = useState<BrowserVideoInfo | null>(null);
+  const [info, setInfo] = useState<BrowserVideoInfo | null>(() =>
+    initialVideoFile
+      ? {
+          name: initialVideoFile.name,
+          size: initialVideoFile.size,
+          type: initialVideoFile.type || "video",
+          duration: null,
+          width: null,
+          height: null,
+        }
+      : null
+  );
   const [error, setError] = useState("");
   const [playbackFailed, setPlaybackFailed] = useState(false);
 

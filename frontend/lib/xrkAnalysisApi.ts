@@ -149,6 +149,52 @@ export type XrkEvent = {
   evidence: Record<string, number | boolean | null>;
 };
 
+export type XrkBrakingPoint = {
+  distance_m: number | null;
+  lap_time_s: number | null;
+  session_time_s: number | null;
+  brake?: number | null;
+  brake_normalized?: number | null;
+};
+
+export type XrkBrakingPattern = {
+  pattern_id: string;
+  event_type:
+    | "BRAKE_LATE_REINFORCEMENT"
+    | "BRAKE_RELEASE_ABRUPT"
+    | "BRAKE_STEERING_OVERLAP";
+  lap: number;
+  distance_m: number | null;
+  lap_time_s: number | null;
+  session_time_s: number | null;
+  confidence: "low" | "medium" | "high";
+  evidence_class: "calculated_from_measured_channels";
+  channels_used: string[];
+  evidence: Record<string, number | null>;
+};
+
+export type XrkBrakingEpisode = {
+  episode_id: string;
+  lap: number;
+  sequence: number;
+  sector: number;
+  start: XrkBrakingPoint;
+  first_peak: XrkBrakingPoint;
+  release_start: XrkBrakingPoint;
+  release_complete: XrkBrakingPoint;
+  turn_in: XrkBrakingPoint | null;
+  end: XrkBrakingPoint;
+  start_distance_m: number;
+  end_distance_m: number;
+  minimum_speed: number | null;
+  minimum_rpm: number | null;
+  overlap_duration_s: number | null;
+  patterns: XrkBrakingPattern[];
+  channels_used: string[];
+  evidence_class: "measured_and_calculated";
+  confidence: "low" | "medium" | "high";
+};
+
 export type XrkZoneComparison = {
   id: string;
   name: string;
@@ -182,6 +228,7 @@ export type XrkAnalysis = {
     official_sectors: boolean;
     direct_brake: boolean;
     direct_throttle: boolean;
+    direct_steering?: boolean;
   };
   reference_lap: number;
   target_lap: number;
@@ -217,6 +264,32 @@ export type XrkAnalysis = {
   };
   events: XrkEvent[];
   event_comparison: Array<Record<string, unknown>>;
+  braking_analysis?: {
+    available: boolean;
+    reason: string | null;
+    capabilities: {
+      direct_brake: boolean;
+      direct_steering: boolean;
+      late_reinforcement: boolean;
+      abrupt_release: boolean;
+      brake_steering_overlap: boolean;
+    };
+    thresholds: Record<string, number>;
+    episodes: XrkBrakingEpisode[];
+    comparisons: Array<{
+      comparison_id: string;
+      reference_episode_id: string;
+      target_episode_id: string;
+      reference_lap: number;
+      target_lap: number;
+      reference_focus_distance_m: number;
+      target_focus_distance_m: number;
+      peak_distance_difference_m: number;
+      reference_pattern_types: string[];
+      target_pattern_types: string[];
+    }>;
+    evidence_boundary: Record<string, string[]>;
+  };
   sectors: null | {
     source: string;
     official: boolean;

@@ -89,6 +89,21 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS coach_validations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                inspection_id TEXT NOT NULL,
+                episode_id TEXT NOT NULL,
+                pattern_id TEXT NOT NULL,
+                pattern_type TEXT NOT NULL,
+                verdict TEXT NOT NULL,
+                locale TEXT NOT NULL,
+                notes TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            )
+            """
+        )
         _ensure_owner_column(conn, "sessions")
         _ensure_owner_column(conn, "video_jobs")
         _ensure_owner_column(conn, "video_markers")
@@ -103,6 +118,10 @@ def init_db() -> None:
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_storyboards_owner_created ON storyboards(owner_id, created_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_coach_validations_pattern_created "
+            "ON coach_validations(pattern_type, created_at)"
         )
 
 
@@ -410,6 +429,36 @@ def narrative_feedback_stats(limit: int = 50) -> dict:
         "thumbs_down_count": total - thumbs_up,
         "recent": recent,
     }
+
+
+def save_coach_validation(
+    inspection_id: str,
+    episode_id: str,
+    pattern_id: str,
+    pattern_type: str,
+    verdict: str,
+    locale: str,
+    notes: str = "",
+) -> int:
+    """Persist one coach-confirmed detector label without telemetry payloads."""
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute(
+            "INSERT INTO coach_validations ("
+            "inspection_id, episode_id, pattern_id, pattern_type, verdict, locale, notes, created_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                inspection_id,
+                episode_id,
+                pattern_id,
+                pattern_type,
+                verdict,
+                locale,
+                notes,
+                _now(),
+            ),
+        )
+        return int(cursor.lastrowid)
 
 
 def _decode_json(value: str | None, default: object) -> object:

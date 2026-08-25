@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from .gps_processing import clean_gps_points, resample_lap_by_distance
+from .braking_analysis import analyze_braking_episodes
 from .corner_consensus import (
     build_ai_coach_summary,
     build_top3_consensus_benchmark,
@@ -143,6 +144,12 @@ def analyze_xrk_session(
     sector_analysis = sector_result["analysis"]
     classified, events, action_meta = detect_driver_actions(
         processed,
+        sector_boundaries_m=boundaries,
+    )
+    braking_analysis = analyze_braking_episodes(
+        classified,
+        reference_lap=reference_lap,
+        target_lap=target_lap,
         sector_boundaries_m=boundaries,
     )
     aligned = align_laps_by_distance(
@@ -281,6 +288,7 @@ def analyze_xrk_session(
                 **action_meta,
                 "event_counts_by_lap": event_counts_by_lap(events),
             },
+            "braking_analysis": braking_analysis,
             "sectors": {
                 "source": "virtual_distance",
                 "official": False,
@@ -358,6 +366,8 @@ def basic_response(
             in manifest.get("available_canonical_channels", []),
             "direct_throttle": "throttle"
             in manifest.get("available_canonical_channels", []),
+            "direct_steering": "steering_angle"
+            in manifest.get("available_canonical_channels", []),
         },
         "reference_lap": reference_lap,
         "target_lap": target_lap,
@@ -378,6 +388,28 @@ def basic_response(
         },
         "events": [],
         "event_comparison": [],
+        "braking_analysis": {
+            "available": False,
+            "reason": "Distance-based direct-brake analysis is unavailable.",
+            "capabilities": {
+                "direct_brake": False,
+                "direct_steering": False,
+                "late_reinforcement": False,
+                "abrupt_release": False,
+                "brake_steering_overlap": False,
+            },
+            "thresholds": {},
+            "episodes": [],
+            "comparisons": [],
+            "evidence_boundary": {
+                "measured": [],
+                "calculated": [],
+                "not_concluded": [
+                    "Trail-braking quality",
+                    "Wheel lock-up without independent wheel speed",
+                ],
+            },
+        },
         "sectors": None,
         "zones": {"automatic": [], "active": [], "comparisons": []},
         "evidence_catalog": evidence_catalog(manifest),
@@ -535,6 +567,7 @@ def evidence_catalog(manifest: dict[str, Any]) -> dict[str, list[str]]:
             ("lateral_g", "Lateral G"),
             ("brake", "Direct brake channel"),
             ("throttle", "Direct throttle channel"),
+            ("steering_angle", "Direct steering angle"),
             ("gear", "Calculated gear"),
             ("predictive_time", "Predictive time"),
         ]
@@ -550,6 +583,8 @@ def evidence_catalog(manifest: dict[str, Any]) -> dict[str, list[str]]:
             "Track curvature",
             "Distance-aligned lap delta",
             "Virtual sector and zone time",
+            "Direct-brake episode phases when brake is available",
+            "Brake and steering overlap when both channels are available",
         ],
         "inferred": [
             "Lifting",

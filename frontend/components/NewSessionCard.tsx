@@ -21,12 +21,14 @@ export function NewSessionCard({
   onStart,
   localSources = [],
   onStartLocal,
+  onVideoSelect,
 }: {
   status: "idle" | "inspecting" | "inspected" | "analyzing" | "loaded";
   hasPendingVideo: boolean;
   onStart: (xrkFile: File, videoFile: File | null) => void;
   localSources?: LocalXrkSource[];
   onStartLocal?: (sourceId: string, videoFile: File | null) => void;
+  onVideoSelect?: (videoFile: File | null) => void;
 }) {
   const { t } = useI18n();
   const [xrkFile, setXrkFile] = useState<File | null>(null);
@@ -148,7 +150,11 @@ export function NewSessionCard({
           type="file"
           accept="video/mp4,video/quicktime,.mp4,.mov"
           onChange={(event) => {
-            if (!inputLocked) setVideoFile(event.target.files?.[0] ?? null);
+            if (!inputLocked) {
+              const nextVideo = event.target.files?.[0] ?? null;
+              setVideoFile(nextVideo);
+              onVideoSelect?.(nextVideo);
+            }
           }}
         />
       </label>

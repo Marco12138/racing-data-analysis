@@ -1,10 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Activity,
   AlertTriangle,
   BarChart3,
+  Check,
   Clapperboard,
   FileText,
   Flag,
@@ -13,6 +21,7 @@ import {
   Map,
   MoreHorizontal,
   Play,
+  CircleHelp,
   ShieldCheck,
   SlidersHorizontal,
   Target,
@@ -20,6 +29,7 @@ import {
   ThumbsUp,
   WandSparkles,
   Video,
+  X,
 } from "lucide-react";
 import {
   CartesianGrid,
@@ -47,6 +57,8 @@ import {
 import type {
   XrkAnalysis,
   XrkAnalyzeOptions,
+  XrkBrakingEpisode,
+  XrkBrakingPattern,
   XrkEvent,
   XrkTrackPoint,
 } from "../lib/xrkAnalysisApi";
@@ -66,10 +78,15 @@ import { extractVideoSyncFeatures } from "../lib/videoFeatureExtraction";
 import { initialVideoState } from "../lib/videoSession";
 import {
   buildCoachVideoWindow,
+  buildCoachVideoPair,
   type CoachVideoWindow,
 } from "../lib/coachVideoEvidence";
 import { resolveApiConfig } from "../lib/config";
-import { submitNarrativeFeedback } from "../lib/feedbackApi";
+import {
+  submitCoachValidation,
+  submitNarrativeFeedback,
+  type CoachValidationInput,
+} from "../lib/feedbackApi";
 import {
   createVideoSyncCalibration,
   nearestPointByDistance,
@@ -296,6 +313,7 @@ export function XrkAnalysisWorkspace({
           selectedEvent={selectedEvent}
           onCursor={selectDistance}
           videoUrl={videoUrl}
+          videoFile={videoFile}
           videoDurationS={videoDurationS}
           calibration={calibration}
           offsetMs={offsetMs}
@@ -340,11 +358,16 @@ export function XrkAnalysisWorkspace({
       )}
 
       {activeTab === "actions" && (
-        analysis.capabilities.rpm ? (
+        analysis.capabilities.rpm || analysis.capabilities.direct_brake ? (
           <ActionsPanel
             analysis={analysis}
             cursorDistance={cursorDistance}
             onCursor={selectDistance}
+            videoUrl={videoUrl}
+            videoFile={videoFile}
+            videoDurationS={videoDurationS}
+            calibration={calibration}
+            offsetMs={offsetMs}
           />
         ) : (
           <Unavailable reason={t("xrk.unavailable.rpm")} />
@@ -418,6 +441,7 @@ function Overview({
   selectedEvent,
   onCursor,
   videoUrl,
+  videoFile,
   videoDurationS,
   calibration,
   offsetMs,
@@ -427,6 +451,7 @@ function Overview({
   selectedEvent?: XrkEvent;
   onCursor: (distance: number) => void;
   videoUrl: string;
+  videoFile: File | null;
   videoDurationS: number;
   calibration: VideoSyncCalibration | null;
   offsetMs: number;
@@ -468,6 +493,7 @@ function Overview({
         analysis={analysis}
         onCursor={onCursor}
         videoUrl={videoUrl}
+        videoFile={videoFile}
         videoDurationS={videoDurationS}
         calibration={calibration}
         offsetMs={offsetMs}
@@ -481,6 +507,7 @@ function CoachOverview({
   analysis,
   onCursor,
   videoUrl,
+  videoFile,
   videoDurationS,
   calibration,
   offsetMs,
@@ -489,6 +516,7 @@ function CoachOverview({
   analysis: XrkAnalysis;
   onCursor: (distance: number) => void;
   videoUrl: string;
+  videoFile: File | null;
   videoDurationS: number;
   calibration: VideoSyncCalibration | null;
   offsetMs: number;
@@ -500,8 +528,10 @@ function CoachOverview({
   const priorities = summary.training_priorities.slice(0, 3);
   const clipMappingAvailable = Boolean(
     videoUrl
+    && videoFile
     && videoDurationS > 0
     && calibration
+    && calibrationMatchesVideo(calibration, videoFile, videoDurationS)
     && calibration.target_lap === analysis.target_lap
     && analysis.track,
   );
@@ -978,10 +1008,20 @@ function ActionsPanel({
   analysis,
   cursorDistance,
   onCursor,
+  videoUrl,
+  videoFile,
+  videoDurationS,
+  calibration,
+  offsetMs,
 }: {
   analysis: XrkAnalysis;
   cursorDistance: number;
   onCursor: (distance: number) => void;
+  videoUrl: string;
+  videoFile: File | null;
+  videoDurationS: number;
+  calibration: VideoSyncCalibration | null;
+  offsetMs: number;
 }) {
   const { t } = useI18n();
   return (
@@ -1021,12 +1061,228 @@ function ActionsPanel({
           </div>
         </Panel>
       </div>
+      <BrakingEpisodePanel
+        analysis={analysis}
+        videoUrl={videoUrl}
+        videoFile={videoFile}
+        videoDurationS={videoDurationS}
+        calibration={calibration}
+        offsetMs={offsetMs}
+        onCursor={onCursor}
+      />
       {!analysis.capabilities.direct_brake && (
         <div className="rounded-md border border-amber-400/25 bg-amber-400/8 px-4 py-3 text-sm leading-6 text-amber-100">
           {t("xrk.actions.noBrake")}
         </div>
       )}
     </>
+  );
+}
+
+function BrakingEpisodePanel({
+  analysis,
+  videoUrl,
+  videoFile,
+  videoDurationS,
+  calibration,
+  offsetMs,
+  onCursor,
+}: {
+  analysis: XrkAnalysis;
+  videoUrl: string;
+  videoFile: File | null;
+  videoDurationS: number;
+  calibration: VideoSyncCalibration | null;
+  offsetMs: number;
+  onCursor: (distance: number) => void;
+}) {
+  const { t, locale } = useI18n();
+  const braking = analysis.braking_analysis;
+  const [validated, setValidated] = useState<Record<string, CoachValidationInput["verdict"]>>({});
+  const [validationError, setValidationError] = useState("");
+  if (!braking?.available) {
+    return (
+      <Panel title={t("xrk.braking.title")} subtitle={t("xrk.braking.subtitle")}>
+        <p className="text-sm leading-6 text-slate-400">
+          {braking?.reason ?? t("xrk.braking.unavailable")}
+        </p>
+      </Panel>
+    );
+  }
+
+  const episodeById = new globalThis.Map(
+    braking.episodes.map((episode) => [episode.episode_id, episode]),
+  );
+  const canSubmit = /^[0-9a-f]{32}$/.test(analysis.inspection_id);
+
+  async function validatePattern(
+    episode: XrkBrakingEpisode,
+    pattern: XrkBrakingPattern,
+    verdict: CoachValidationInput["verdict"],
+  ) {
+    if (!canSubmit) return;
+    const config = await resolveApiConfig();
+    const ok = await submitCoachValidation(config.apiOrigin, config.apiPrefix, {
+      inspection_id: analysis.inspection_id,
+      episode_id: episode.episode_id,
+      pattern_id: pattern.pattern_id,
+      pattern_type: pattern.event_type,
+      verdict,
+      locale,
+    });
+    if (ok) {
+      setValidated((current) => ({ ...current, [pattern.pattern_id]: verdict }));
+      setValidationError("");
+    } else {
+      setValidationError(t("xrk.braking.validationFailed"));
+    }
+  }
+
+  return (
+    <Panel title={t("xrk.braking.title")} subtitle={t("xrk.braking.subtitle")}>
+      <div className="mb-4 rounded-md border border-slate-800 bg-slate-950/60 px-4 py-3 text-xs leading-5 text-slate-400">
+        {t("xrk.braking.evidenceBoundary")}
+        {!braking.capabilities.direct_steering ? ` ${t("xrk.braking.noSteering")}` : ""}
+      </div>
+      {braking.comparisons.length ? (
+        <div className="space-y-5">
+          {braking.comparisons.slice(0, 6).map((comparison) => {
+            const reference = episodeById.get(comparison.reference_episode_id);
+            const target = episodeById.get(comparison.target_episode_id);
+            if (!reference || !target) return null;
+            const clips = calibration
+              && videoFile
+              && calibrationMatchesVideo(calibration, videoFile, videoDurationS)
+              && videoUrl
+              && analysis.track
+              ? buildCoachVideoPair(
+                  analysis.track.reference,
+                  analysis.track.target,
+                  comparison.reference_focus_distance_m,
+                  comparison.target_focus_distance_m,
+                  offsetMs,
+                  videoDurationS,
+                )
+              : null;
+            return (
+              <article key={comparison.comparison_id} className="border-t border-slate-800 pt-5 first:border-t-0 first:pt-0">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">
+                      {t("xrk.braking.episode", { sector: target.sector, sequence: target.sequence })}
+                    </h3>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {t("xrk.braking.realLapPair", { reference: comparison.reference_lap, target: comparison.target_lap })}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onCursor(comparison.target_focus_distance_m)}
+                    className="rounded-md border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:border-[#35d6d0]"
+                  >
+                    {t("xrk.coach.jump")}
+                  </button>
+                </div>
+                {clips ? (
+                  <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                    <CoachEvidenceClip
+                      videoUrl={videoUrl}
+                      clip={clips.reference}
+                      label={t("xrk.braking.referenceClip", { lap: comparison.reference_lap })}
+                    />
+                    <CoachEvidenceClip
+                      videoUrl={videoUrl}
+                      clip={clips.target}
+                      label={t("xrk.braking.targetClip", { lap: comparison.target_lap })}
+                    />
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-md border border-dashed border-slate-700 px-4 py-5 text-sm text-slate-500">
+                    {t("xrk.braking.pairUnavailable")}
+                  </div>
+                )}
+                <div className="mt-4 space-y-2">
+                  {target.patterns.length ? target.patterns.map((pattern) => (
+                    <div key={pattern.pattern_id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-800 bg-slate-950/50 p-3">
+                      <div>
+                        <p className="text-sm font-medium text-white">
+                          {brakingPatternLabel(pattern.event_type, locale)}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {pattern.channels_used.join(" + ")} · {pattern.confidence}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <ValidationButton
+                          label={t("xrk.braking.confirm")}
+                          active={validated[pattern.pattern_id] === "confirmed"}
+                          disabled={!canSubmit}
+                          onClick={() => void validatePattern(target, pattern, "confirmed")}
+                          icon={<Check size={14} />}
+                        />
+                        <ValidationButton
+                          label={t("xrk.braking.reject")}
+                          active={validated[pattern.pattern_id] === "rejected"}
+                          disabled={!canSubmit}
+                          onClick={() => void validatePattern(target, pattern, "rejected")}
+                          icon={<X size={14} />}
+                        />
+                        <ValidationButton
+                          label={t("xrk.braking.uncertain")}
+                          active={validated[pattern.pattern_id] === "uncertain"}
+                          disabled={!canSubmit}
+                          onClick={() => void validatePattern(target, pattern, "uncertain")}
+                          icon={<CircleHelp size={14} />}
+                        />
+                      </div>
+                      {validated[pattern.pattern_id] ? (
+                        <p className="w-full text-xs text-emerald-300">{t("xrk.braking.validationThanks")}</p>
+                      ) : null}
+                    </div>
+                  )) : (
+                    <p className="text-sm text-slate-400">{t("xrk.braking.noPatterns")}</p>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="text-sm leading-6 text-slate-400">{t("xrk.braking.noPairs")}</p>
+      )}
+      {validationError ? <p className="mt-3 text-xs text-rose-300">{validationError}</p> : null}
+    </Panel>
+  );
+}
+
+function ValidationButton({
+  label,
+  active,
+  disabled,
+  onClick,
+  icon,
+}: {
+  label: string;
+  active: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  icon: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={`flex items-center gap-1.5 rounded-md border px-2.5 py-2 text-xs disabled:opacity-40 ${
+        active
+          ? "border-[#35d6d0] bg-[#35d6d0]/10 text-cyan-100"
+          : "border-slate-700 text-slate-300 hover:border-slate-500"
+      }`}
+    >
+      {icon}<span>{label}</span>
+    </button>
   );
 }
 
@@ -2731,6 +2987,15 @@ function eventColor(type: string) {
 
 function humanEvent(type: string) {
   return type.toLowerCase().replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function brakingPatternLabel(type: XrkBrakingPattern["event_type"], locale: "zh" | "en") {
+  const labels = {
+    BRAKE_LATE_REINFORCEMENT: ["后段二次加压", "Late brake reinforcement"],
+    BRAKE_RELEASE_ABRUPT: ["突然松刹", "Abrupt brake release"],
+    BRAKE_STEERING_OVERLAP: ["制动与转向重叠", "Brake and steering overlap"],
+  } as const;
+  return labels[type][locale === "zh" ? 0 : 1];
 }
 
 function eventChannels(event: XrkEvent) {

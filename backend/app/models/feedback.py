@@ -17,3 +17,19 @@ class NarrativeFeedbackRequest(DemoModel):
     source: Literal["llm", "structured", "storyboard", "coach"]
     locale: Literal["zh", "en"]
     thumbs_up: bool
+
+
+class CoachValidationRequest(DemoModel):
+    """Coach review of one evidence-bounded braking pattern."""
+
+    inspection_id: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]+$")
+    episode_id: str = Field(min_length=1, max_length=200)
+    pattern_id: str = Field(min_length=1, max_length=240)
+    pattern_type: Literal[
+        "BRAKE_LATE_REINFORCEMENT",
+        "BRAKE_RELEASE_ABRUPT",
+        "BRAKE_STEERING_OVERLAP",
+    ]
+    verdict: Literal["confirmed", "rejected", "uncertain"]
+    locale: Literal["zh", "en"]
+    notes: str | None = Field(default=None, max_length=500)

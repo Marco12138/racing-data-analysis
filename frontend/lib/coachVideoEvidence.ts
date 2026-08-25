@@ -6,6 +6,11 @@ export type CoachVideoWindow = {
   focus_distance_m: number;
 };
 
+export type CoachVideoPair = {
+  reference: CoachVideoWindow;
+  target: CoachVideoWindow;
+};
+
 /** Build a short local-video review clip around one telemetry event. */
 export function buildCoachVideoWindow(
   targetTrack: XrkTrackPoint[],
@@ -43,6 +48,33 @@ export function buildCoachVideoWindow(
     end_s: end,
     focus_distance_m: focus.distance_m,
   };
+}
+
+/** Build paired clips only when both real laps map inside the local video. */
+export function buildCoachVideoPair(
+  referenceTrack: XrkTrackPoint[],
+  targetTrack: XrkTrackPoint[],
+  referenceDistanceM: number,
+  targetDistanceM: number,
+  offsetMs: number,
+  videoDurationS: number,
+  clipDurationS = 4,
+): CoachVideoPair | null {
+  const reference = buildCoachVideoWindow(
+    referenceTrack,
+    referenceDistanceM,
+    offsetMs,
+    videoDurationS,
+    clipDurationS,
+  );
+  const target = buildCoachVideoWindow(
+    targetTrack,
+    targetDistanceM,
+    offsetMs,
+    videoDurationS,
+    clipDurationS,
+  );
+  return reference && target ? { reference, target } : null;
 }
 
 function nearestByDistance(points: XrkTrackPoint[], distanceM: number): XrkTrackPoint | null {

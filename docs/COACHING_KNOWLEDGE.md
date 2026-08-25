@@ -48,3 +48,32 @@ be presented as a production coaching rule before labelled validation.
 - Pair every instruction with a measured result and a stop condition.
 - Use a calibrated 3-5 second local video clip as the driver's location cue.
 - Keep metre-based coordinates in engineering charts and internal evidence.
+
+## Braking Episode Pilot v1
+
+The first implemented braking pilot is deliberately narrower than a driving
+technique judgement. A `Braking Episode` is created only from a varying direct
+brake channel. It records onset, first peak, release start, release completion,
+optional steering onset, minimum speed/RPM, and the channels used.
+
+The only detector labels admitted in this pilot are:
+
+- `BRAKE_LATE_REINFORCEMENT`: brake pressure falls after an initial peak and
+  rises again late in the same measured episode.
+- `BRAKE_RELEASE_ABRUPT`: a sufficiently large measured brake reduction occurs
+  within a short, session-calibrated release interval.
+- `BRAKE_STEERING_OVERLAP`: direct brake and direct steering are simultaneously
+  active. This is an overlap measurement, not a claim of good trail braking.
+
+Each target-lap episode is matched to the nearest episode on the real,
+quality-gated reference lap. The browser displays paired 3-5 second clips only
+when both mapped windows fall inside the same local video. The video is never
+uploaded. Coaches can mark each detector result `confirmed`, `rejected`, or
+`uncertain`; only the detector identifiers and label are stored, never the
+video or raw telemetry.
+
+Pilot v1 retains the existing T=D time mapping. Multi-anchor affine drift
+correction, audio-RPM quality gating, visual steering proxies, wheel lock-up,
+and chassis-roll estimation remain separate validation projects. They must not
+be used to strengthen a Braking Episode conclusion until they have independent
+ground-truth error measurements.

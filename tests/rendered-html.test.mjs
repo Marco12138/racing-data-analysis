@@ -159,6 +159,8 @@ test("keeps public imports, browser video preview, and runtime API routing expli
   assert.match(dashboard, /normalizeLapRows\(\[\]\)/);
   assert.match(dashboard, /loadDemoData/);
   assert.match(dashboard, /BrowserVideoUpload/);
+  assert.match(dashboard, /onVideoSelect=\{setPendingVideoFile\}/);
+  assert.match(dashboard, /initialVideoFile=\{activeVideoFile\}/);
   assert.match(dashboard, /canvas\.toDataURL/);
   assert.match(dashboard, /playbackFailed/);
   assert.match(dashboard, /Telemetry channel unavailable/);
