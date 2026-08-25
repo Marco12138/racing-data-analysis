@@ -64,6 +64,10 @@ import {
 } from "../lib/videoCodec";
 import { extractVideoSyncFeatures } from "../lib/videoFeatureExtraction";
 import { initialVideoState } from "../lib/videoSession";
+import {
+  buildCoachVideoWindow,
+  type CoachVideoWindow,
+} from "../lib/coachVideoEvidence";
 import { resolveApiConfig } from "../lib/config";
 import { submitNarrativeFeedback } from "../lib/feedbackApi";
 import {
@@ -287,7 +291,16 @@ export function XrkAnalysisWorkspace({
       )}
 
       {activeTab === "overview" && (
-        <Overview analysis={analysis} selectedEvent={selectedEvent} />
+        <Overview
+          analysis={analysis}
+          selectedEvent={selectedEvent}
+          onCursor={selectDistance}
+          videoUrl={videoUrl}
+          videoDurationS={videoDurationS}
+          calibration={calibration}
+          offsetMs={offsetMs}
+          llmNarrative={llmNarrative}
+        />
       )}
 
       {activeTab === "quality" && (
@@ -403,9 +416,21 @@ export function XrkAnalysisWorkspace({
 function Overview({
   analysis,
   selectedEvent,
+  onCursor,
+  videoUrl,
+  videoDurationS,
+  calibration,
+  offsetMs,
+  llmNarrative,
 }: {
   analysis: XrkAnalysis;
   selectedEvent?: XrkEvent;
+  onCursor: (distance: number) => void;
+  videoUrl: string;
+  videoDurationS: number;
+  calibration: VideoSyncCalibration | null;
+  offsetMs: number;
+  llmNarrative: { available: boolean; model: string | null };
 }) {
   const { t } = useI18n();
   const metrics = [
@@ -415,30 +440,262 @@ function Overview({
     [t("xrk.overview.trackLength"), analysis.track ? `${analysis.track.lap_length_m.toFixed(1)} m` : t("xrk.video.unavailableTime")],
   ];
   return (
-    <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
-      <Panel title={t("xrk.overview.boundaryTitle")} subtitle={t("xrk.overview.boundarySubtitle")}>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {metrics.map(([label, value]) => (
-            <div key={label} className="rounded-md border border-slate-800 bg-slate-950/60 p-4">
-              <p className="text-[11px] uppercase text-slate-500">{label}</p>
-              <p className="mt-2 text-xl font-semibold text-white">{value}</p>
-            </div>
-          ))}
+    <div className="space-y-5">
+      <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
+        <Panel title={t("xrk.overview.boundaryTitle")} subtitle={t("xrk.overview.boundarySubtitle")}>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {metrics.map(([label, value]) => (
+              <div key={label} className="rounded-md border border-slate-800 bg-slate-950/60 p-4">
+                <p className="text-[11px] uppercase text-slate-500">{label}</p>
+                <p className="mt-2 text-xl font-semibold text-white">{value}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-4 text-sm leading-6 text-slate-400">
+            {t("xrk.overview.virtualBoundary")}
+          </p>
+          <p className="mt-3 text-sm leading-6 text-slate-300">
+            {t("xrk.overview.realLapBoundary")}
+          </p>
+        </Panel>
+        <Panel title={t("xrk.overview.evidenceTitle")} subtitle={t("xrk.overview.evidenceSubtitle")}>
+          {selectedEvent ? <EventEvidence event={selectedEvent} /> : (
+            <p className="text-sm text-slate-400">{t("xrk.overview.selectEvidence")}</p>
+          )}
+        </Panel>
+      </div>
+      <CoachOverview
+        analysis={analysis}
+        onCursor={onCursor}
+        videoUrl={videoUrl}
+        videoDurationS={videoDurationS}
+        calibration={calibration}
+        offsetMs={offsetMs}
+        llmNarrative={llmNarrative}
+      />
+    </div>
+  );
+}
+
+function CoachOverview({
+  analysis,
+  onCursor,
+  videoUrl,
+  videoDurationS,
+  calibration,
+  offsetMs,
+  llmNarrative,
+}: {
+  analysis: XrkAnalysis;
+  onCursor: (distance: number) => void;
+  videoUrl: string;
+  videoDurationS: number;
+  calibration: VideoSyncCalibration | null;
+  offsetMs: number;
+  llmNarrative: { available: boolean; model: string | null };
+}) {
+  const { t, locale } = useI18n();
+  const summary = analysis.ai_coach_summary;
+  const improvement = analysis.achievable_improvement_range;
+  const priorities = summary.training_priorities.slice(0, 3);
+  const clipMappingAvailable = Boolean(
+    videoUrl
+    && videoDurationS > 0
+    && calibration
+    && calibration.target_lap === analysis.target_lap
+    && analysis.track,
+  );
+
+  return (
+    <div className="space-y-5">
+      <Panel title={t("xrk.coach.title")} subtitle={t("xrk.coach.overviewSubtitle")}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className={`llm-narrative-badge ${llmNarrative.available ? "is-on" : ""}`}>
+            {llmNarrative.available ? t("xrk.llm.enabled") : t("xrk.llm.disabled")}
+          </p>
+          <p className="text-xs text-slate-500">{t("xrk.coach.realLapOnly")}</p>
         </div>
-        <p className="mt-4 text-sm leading-6 text-slate-400">
-          {t("xrk.overview.virtualBoundary")}
-        </p>
-        <p className="mt-3 text-sm leading-6 text-slate-300">
-          {t("xrk.overview.realLapBoundary")}
+        {analysis.narrative ? (
+          <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-200">
+            {analysis.narrative}
+          </p>
+        ) : (
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <QualityFact
+              label={t("xrk.coach.primaryFocus")}
+              value={priorities[0]
+                ? localizedCorner(priorities[0].corner, locale)
+                : t("xrk.coach.noFocus")}
+            />
+            <QualityFact
+              label={t("xrk.coach.achievableRange")}
+              value={improvement.maximum_improvement_s > 0
+                ? `${improvement.minimum_improvement_s.toFixed(3)}–${improvement.maximum_improvement_s.toFixed(3)}s`
+                : t("xrk.coach.insufficient")}
+            />
+            <QualityFact
+              label={t("xrk.coach.realReferences")}
+              value={summary.top_valid_laps.slice(0, 3).map((lap) => `L${lap.lap}`).join(" / ") || "—"}
+            />
+          </div>
+        )}
+        <p className="mt-4 text-xs font-medium text-amber-200">
+          {t("xrk.coach.disclaimer")}
         </p>
       </Panel>
-      <Panel title={t("xrk.overview.evidenceTitle")} subtitle={t("xrk.overview.evidenceSubtitle")}>
-        {selectedEvent ? <EventEvidence event={selectedEvent} /> : (
-          <p className="text-sm text-slate-400">{t("xrk.overview.selectEvidence")}</p>
+
+      <Panel title={t("xrk.coach.nextPriorities")} subtitle={t("xrk.coach.overviewPrioritiesSubtitle")}>
+        {priorities.length ? (
+          <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+            {priorities.map((priority, index) => {
+              const corner = analysis.consensus_benchmark.corners.find(
+                (item) => item.corner === priority.corner,
+              );
+              const recoveryDistance = priorityRecoveryDistance(priority);
+              const clip = clipMappingAvailable && corner && analysis.track
+                ? buildCoachVideoWindow(
+                    analysis.track.target,
+                    corner.entry_distance_m,
+                    corner.exit_distance_m,
+                    offsetMs,
+                    videoDurationS,
+                  )
+                : null;
+              const cornerName = localizedCorner(priority.corner, locale);
+              return (
+                <article key={priority.corner} className="overflow-hidden rounded-md border border-slate-800 bg-slate-950/55">
+                  {clip && videoUrl ? (
+                    <CoachEvidenceClip
+                      videoUrl={videoUrl}
+                      clip={clip}
+                      label={cornerName}
+                    />
+                  ) : (
+                    <div className="flex aspect-video items-center justify-center border-b border-slate-800 bg-slate-950 px-5 text-center">
+                      <div>
+                        <Video className="mx-auto text-slate-600" size={26} />
+                        <p className="mt-2 text-xs leading-5 text-slate-500">
+                          {!videoUrl
+                            ? t("xrk.coach.videoUnavailable")
+                            : t("xrk.coach.videoCalibrationRequired")}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  <div className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase text-[#35d6d0]">
+                          {t("xrk.coach.priority", { index: index + 1 })}
+                        </p>
+                        <h3 className="mt-1 text-base font-semibold text-white">{cornerName}</h3>
+                      </div>
+                      {corner ? (
+                        <button
+                          type="button"
+                          onClick={() => onCursor((corner.entry_distance_m + corner.exit_distance_m) / 2)}
+                          className="shrink-0 rounded-md border border-slate-700 px-2.5 py-2 text-xs text-slate-200 hover:border-[#35d6d0]"
+                        >
+                          {t("xrk.coach.jump")}
+                        </button>
+                      ) : null}
+                    </div>
+                    <p className="mt-3 text-sm leading-6 text-slate-300">
+                      {corner
+                        ? t("xrk.coach.overviewWhy", {
+                            count: corner.occurrence_count,
+                            gain: corner.net_gain.toFixed(3),
+                          })
+                        : priority.why}
+                    </p>
+                    <CoachField
+                      label={t("xrk.coach.whatToTest")}
+                      value={recoveryDistance == null
+                        ? priority.what_to_test
+                        : t("xrk.coach.overviewRecoveryTest", { distance: recoveryDistance.toFixed(1) })}
+                    />
+                    <CoachField
+                      label={t("xrk.coach.trainingDrill")}
+                      value={t("xrk.coach.overviewDrill")}
+                    />
+                    <p className="mt-3 text-xs leading-5 text-slate-500">
+                      {t("xrk.coach.evidence")}: {priority.evidence.channels.join(", ")} · {t("xrk.coach.confidence")}: {priority.confidence}
+                    </p>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm leading-6 text-slate-400">{t("xrk.coach.noPriority")}</p>
         )}
       </Panel>
     </div>
   );
+}
+
+function CoachEvidenceClip({
+  videoUrl,
+  clip,
+  label,
+}: {
+  videoUrl: string;
+  clip: CoachVideoWindow;
+  label: string;
+}) {
+  const { t } = useI18n();
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  function resetToStart() {
+    const video = videoRef.current;
+    if (video && Number.isFinite(video.duration)) video.currentTime = clip.start_s;
+  }
+
+  return (
+    <div className="relative border-b border-slate-800 bg-black">
+      <video
+        ref={videoRef}
+        src={videoUrl}
+        className="aspect-video w-full bg-black object-cover"
+        controls
+        muted
+        playsInline
+        preload="metadata"
+        aria-label={`${t("xrk.coach.videoEvidence")} · ${label}`}
+        onLoadedMetadata={resetToStart}
+        onPlay={(event) => {
+          if (event.currentTarget.currentTime < clip.start_s || event.currentTarget.currentTime >= clip.end_s) {
+            event.currentTarget.currentTime = clip.start_s;
+          }
+        }}
+        onTimeUpdate={(event) => {
+          if (event.currentTarget.currentTime >= clip.end_s) {
+            event.currentTarget.pause();
+            event.currentTarget.currentTime = clip.start_s;
+          }
+        }}
+      />
+      <span className="pointer-events-none absolute left-2 top-2 rounded bg-black/75 px-2 py-1 text-[10px] font-medium text-white">
+        {t("xrk.coach.videoEvidence")} · {clip.start_s.toFixed(1)}–{clip.end_s.toFixed(1)}s
+      </span>
+    </div>
+  );
+}
+
+function priorityRecoveryDistance(priority: XrkAnalysis["ai_coach_summary"]["training_priorities"][number]): number | null {
+  const values = priority.evidence.features_by_lap
+    .map((feature) => feature.reacceleration_distance_m)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+    .sort((left, right) => left - right);
+  if (!values.length) return null;
+  const middle = Math.floor(values.length / 2);
+  return values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
+}
+
+function localizedCorner(corner: string, locale: "zh" | "en"): string {
+  const suggested = /^Suggested Zone\s+(\d+)$/i.exec(corner);
+  if (suggested && locale === "zh") return `建议区间 ${suggested[1]}`;
+  return corner;
 }
 
 function LapQualityPanel({

@@ -13,6 +13,7 @@ import {
   Flag,
   FolderOpen,
   Gauge,
+  Languages,
   LineChart,
   LoaderCircle,
   MapPin,
@@ -110,7 +111,7 @@ const demoLapRows = normalizeLapRows(parseCsv(sampleLapCsv));
 const demoTelemetryRows = normalizeTelemetryRows(parseCsv(sampleTelemetryCsv));
 
 export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean }) {
-  const { locale } = useI18n();
+  const { locale, setLocale } = useI18n();
   const [lapRows, setLapRows] = useState(() => initialDemo ? [...demoLapRows] : normalizeLapRows([]));
   const [telemetryRows, setTelemetryRows] = useState(() => initialDemo ? [...demoTelemetryRows] : normalizeTelemetryRows([]));
   const [driverName, setDriverName] = useState(initialDemo ? "Demo Driver" : "Driver");
@@ -402,7 +403,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       const result = await analyzeXrkInspection(
         {
           inspection_id: inspection.inspection_id,
-          language: locale === "zh" ? "zh" : "en",
+          language: options.language ?? (locale === "zh" ? "zh" : "en"),
           reference_lap: options.reference_lap ?? xrkAnalysis?.reference_lap ?? null,
           target_lap: options.target_lap ?? xrkAnalysis?.target_lap ?? null,
           distance_step_m: options.distance_step_m ?? 1,
@@ -560,6 +561,14 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
   const workspaceHasData = Boolean(
     lapRows.length || telemetryRows.length || aimImport || xrkInspection || xrkAnalysis || videoJob || videoModeRequested
   );
+
+  function changeWorkspaceLocale(nextLocale: "zh" | "en") {
+    if (nextLocale === locale) return;
+    setLocale(nextLocale);
+    if (xrkAnalysis && xrkInspection && !publishedDemo) {
+      void runXrkAnalysis({ language: nextLocale });
+    }
+  }
   const metrics = lapAnalysis
       ? [
         [<Flag size={20} key="laps" />, "Total Laps", String(lapRows.length), "Timed laps analyzed", "#66e38f"],
@@ -580,6 +589,11 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
         <nav className="workspace-topbar panel rounded-lg" aria-label="Workspace navigation">
           <Link href="/" className="workspace-topbar__brand"><Gauge size={18} /> Racing Data Lab</Link>
           <div className="workspace-topbar__actions">
+            <div className="language-switch" aria-label="Language">
+              <Languages size={15} aria-hidden="true" />
+              <button type="button" className={locale === "zh" ? "is-active" : ""} onClick={() => changeWorkspaceLocale("zh")}>中</button>
+              <button type="button" className={locale === "en" ? "is-active" : ""} onClick={() => changeWorkspaceLocale("en")}>EN</button>
+            </div>
             <Link href="/demo" className="nav-command">Sample Review</Link>
             <Link href="/" className="nav-command"><ArrowLeft size={15} /> Home</Link>
           </div>
@@ -1671,7 +1685,7 @@ function BehaviorPanel({ telemetryLoaded, behaviorInputsAvailable, flags }: { te
 }
 
 function SessionInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <label className="block"><span className="mb-1 block text-[11px] uppercase text-slate-500">{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} className="w-full rounded-md border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-[#35d6d0]" /></label>;
+  return <label className="block min-w-0"><span className="mb-1 block text-[11px] uppercase text-slate-500">{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} className="min-w-0 w-full rounded-md border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none focus:border-[#35d6d0]" /></label>;
 }
 
 function MetricCard({ icon, label, value, detail, accent }: { icon: React.ReactNode; label: string; value: string; detail: string; accent: string }) {
