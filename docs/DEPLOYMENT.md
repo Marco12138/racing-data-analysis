@@ -306,6 +306,10 @@ them with a `NEXT_PUBLIC_` prefix.
 
 ## Release checks
 
+For native channel provenance, private audits and the P0/P1 evidence boundary,
+see [XRK Channel Trust](XRK_CHANNEL_TRUST.md). The native Parquet artifact uses
+the same fixed inspection expiry; it must not be copied into a public image.
+
 ```bash
 python -m pytest backend/tests -q
 pnpm run lint

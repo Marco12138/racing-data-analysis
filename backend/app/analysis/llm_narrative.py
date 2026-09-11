@@ -96,6 +96,11 @@ def build_xrk_narrative_evidence(result: dict[str, Any]) -> dict[str, Any]:
         "reference_policy": consensus.get("reference_policy"),
         "capabilities": result.get("capabilities", {}),
         "evidence_catalog": result.get("evidence_catalog", {}),
+        "sensor_capabilities": result.get("sensor_capabilities", {}),
+        "channel_sources": {
+            key: _pick(row, "name", "source", "evidence_class", "unit", "unit_verified", "raw_axis", "body_frame_calibrated", "derived_from")
+            for key, row in result.get("channel_provenance", {}).items()
+        },
         "fastest_lap": _pick(result.get("fastest_lap") or {}, "lap", "lap_time"),
         "reference_lap": result.get("reference_lap"),
         "selected_lap": result.get("target_lap"),

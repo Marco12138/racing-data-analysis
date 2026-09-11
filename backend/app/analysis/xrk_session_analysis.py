@@ -411,6 +411,11 @@ def basic_response(
             },
         },
         "sectors": None,
+        "channel_provenance": manifest.get("channel_provenance", {}),
+        "sensor_capabilities": manifest.get("sensor_capabilities", {
+            "body_dynamics_available": False,
+            "calibration_status": "source_unverified",
+        }),
         "zones": {"automatic": [], "active": [], "comparisons": []},
         "evidence_catalog": evidence_catalog(manifest),
         "consensus_benchmark": {
@@ -563,19 +568,32 @@ def evidence_catalog(manifest: dict[str, Any]) -> dict[str, list[str]]:
             ("speed", "GPS speed"),
             ("gps_lat", "GPS latitude"),
             ("gps_lon", "GPS longitude"),
-            ("longitudinal_g", "Longitudinal G"),
-            ("lateral_g", "Lateral G"),
             ("brake", "Direct brake channel"),
             ("throttle", "Direct throttle channel"),
             ("steering_angle", "Direct steering angle"),
-            ("gear", "Calculated gear"),
-            ("predictive_time", "Predictive time"),
         ]
+        if key in available
+    ]
+    provenance = manifest.get("channel_provenance", {})
+    if provenance:
+        measured = [
+            f"{row['name']} ({row.get('unit') or 'unit unspecified'}; raw sensor axes are not body-calibrated)"
+            if row.get("raw_axis") else row["name"]
+            for row in provenance.values()
+            if row.get("evidence_class") == "measured"
+        ]
+    recorded_calculated = [
+        row["name"] + " (" + row["source"] + ")"
+        for row in provenance.values()
+        if row.get("evidence_class") == "calculated"
+    ] if provenance else [
+        key + " (legacy source unverified; not independent IMU evidence)"
+        for key in ("longitudinal_g", "lateral_g", "yaw_rate", "gear", "predictive_time")
         if key in available
     ]
     return {
         "measured": measured,
-        "calculated": [
+        "calculated": recorded_calculated + [
             "Local X/Y coordinates",
             "Cleaned cumulative distance",
             "Smoothed RPM",
@@ -688,6 +706,12 @@ def generate_xrk_report(result: dict[str, Any], language: str = "en") -> str:
         lines.append(t["rpm"])
     if result["capabilities"]["gps"]:
         lines.append(t["gps"])
+    if result.get("channel_provenance"):
+        lines.append(
+            "- GPS 派生 G/yaw 是计算通道；原始 IMU 轴尚未标定为车体轴。"
+            if language == "zh" else
+            "- GPS-derived G/yaw are calculated channels; raw IMU axes are not body-calibrated."
+        )
     lines.extend(
         [
             "",

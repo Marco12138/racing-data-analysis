@@ -73,8 +73,10 @@ export function XrkInspectionWorkspace({
             <Availability label="GPS position" available={inspection.has_gps} />
             <Availability label="GPS speed" available={inspection.has_gps_speed} />
             <Availability label="RPM" available={inspection.has_rpm} />
-            <Availability label="Accelerometer" available={inspection.has_accelerometer} />
-            <Availability label="Gyro / yaw" available={inspection.has_gyro} />
+            <Availability label="Raw accelerometer / 原始加速度计" available={inspection.sensor_capabilities?.accelerometer_present ?? false} />
+            <Availability label="Physical gyro / 物理陀螺仪" available={inspection.sensor_capabilities?.gyro_present ?? false} />
+            <Availability label="GPS-derived yaw / GPS 派生 yaw" available={inspection.has_gps_yaw ?? false} />
+            <Availability label="Body dynamics / 已标定车体动态" available={inspection.sensor_capabilities?.body_dynamics_available ?? false} />
             <Availability label="Official sectors" available={inspection.has_predefined_sectors} />
           </div>
           <p className="mt-4 text-xs leading-5 text-slate-500">
@@ -96,6 +98,7 @@ export function XrkInspectionWorkspace({
                 <tr>
                   <th className="px-3 py-2 font-medium">Channel</th>
                   <th className="px-3 py-2 font-medium">Normalized</th>
+                  <th className="px-3 py-2 font-medium">Source / 来源</th>
                   <th className="px-3 py-2 font-medium">Samples</th>
                   <th className="px-3 py-2 font-medium">Rate</th>
                   <th className="px-3 py-2 font-medium">Time range</th>
@@ -108,11 +111,18 @@ export function XrkInspectionWorkspace({
                     <td className="px-3 py-2.5">
                       <span className="font-medium">{channel.name}</span>
                       <span className="ml-2 text-slate-600">{channel.unit ?? "unit n/a"}</span>
+                      {channel.unit_verified === false && <span className="block text-amber-200">Unverified units · 单位未确认，不能用于动力学换算</span>}
                     </td>
                     <td className="px-3 py-2.5">{channel.canonical_name ?? channel.normalized_name}</td>
+                    <td className="px-3 py-2.5" title={channel.selection_reason}>
+                      {channel.source ?? "unverified"} · {channel.evidence_class ?? "unknown"}
+                      {channel.raw_axis && <span className="block text-amber-200">Raw {channel.raw_axis.toUpperCase()} · 未标定</span>}
+                    </td>
                     <td className="px-3 py-2.5">{channel.sample_count.toLocaleString()}</td>
                     <td className="px-3 py-2.5">
-                      {channel.sample_rate_hz ? `${channel.sample_rate_hz.toFixed(1)} Hz` : "n/a"}
+                      {(channel.native_sample_rate_hz ?? channel.sample_rate_hz) != null
+                        ? `${(channel.native_sample_rate_hz ?? channel.sample_rate_hz)!.toFixed(1)} Hz`
+                        : "n/a"}
                     </td>
                     <td className="px-3 py-2.5">
                       {channel.first_timestamp_s != null && channel.last_timestamp_s != null
@@ -120,11 +130,9 @@ export function XrkInspectionWorkspace({
                         : "n/a"}
                     </td>
                     <td className="px-3 py-2.5">
-                      {channel.available
+                      {channel.all_zero ? "present · all zero / 存在但信息不足" : channel.available
                         ? channel.analysis_usage.join(", ") || "inspection only"
-                        : channel.all_zero
-                          ? "all zero"
-                          : "unavailable"}
+                        : "unavailable"}
                     </td>
                   </tr>
                 ))}

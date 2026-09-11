@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from .xrk import XrkImportError, channel_arrays, channel_units, json_safe, load_xrk
+from .native_signals import bounded_resample, native_frame, save_native_channels, timestamp_quality
 
 
 PARSER_LICENSE = "MIT"
@@ -38,20 +39,18 @@ CHANNEL_ALIASES: dict[str, tuple[str, ...]] = {
     "longitudinal_g": (
         "GPS_InlineAcc",
         "GPS Longitudinal Acceleration",
-        "Longitudinal Acceleration",
-        "Inline Acceleration",
-        "Accel X",
     ),
     "lateral_g": (
         "GPS_LateralAcc",
         "GPS Lateral Acceleration",
-        "Lateral Acceleration",
-        "Accel Y",
     ),
-    "vertical_g": ("Vertical Acceleration", "Accel Z"),
-    "yaw_rate": ("GPS_Yaw_Rate", "Yaw Rate", "Gyro Z"),
-    "gyro_x": ("Gyro X",),
-    "gyro_y": ("Gyro Y",),
+    "accel_x": ("AccelerometerX", "Accel X", "AccX"),
+    "accel_y": ("AccelerometerY", "Accel Y", "AccY"),
+    "accel_z": ("AccelerometerZ", "Accel Z", "AccZ"),
+    "yaw_rate": ("GPS_Yaw_Rate",),
+    "gyro_x": ("Gyro X", "GyrX"),
+    "gyro_y": ("Gyro Y", "GyrY"),
+    "gyro_z": ("Gyro Z", "GyrZ"),
     "steering_angle": ("Steering Angle", "Steering"),
     "gear": ("Calculated_Gear", "Gear"),
     "predictive_time": ("Predictive Time",),
@@ -87,6 +86,16 @@ def inspect_xrk_file(source: Path, output_dir: Path) -> dict[str, Any]:
 
     telemetry_path = output_dir / "telemetry.parquet"
     normalized.to_parquet(telemetry_path, index=False)
+    native_path = output_dir / "native_channels.parquet"
+    native_rows = save_native_channels(log, channel_descriptions, native_path)
+    sensors = sensor_capabilities(channel_descriptions)
+    provenance = {
+        canonical: {
+            **next(row for row in channel_descriptions if row["name"] == source_name),
+            "display_processing": normalized.attrs.get("processing", {}).get(canonical, {}),
+        }
+        for canonical, source_name in resolved.items()
+    }
     manifest = {
         "filename": source.name,
         "file_size_bytes": source.stat().st_size,
@@ -117,12 +126,14 @@ def inspect_xrk_file(source: Path, output_dir: Path) -> dict[str, Any]:
         "excluded_laps": excluded_laps,
         "channels": channel_descriptions,
         "has_gps": {"gps_lat", "gps_lon", "speed"}.issubset(resolved),
-        "has_gps_speed": "speed" in resolved,
+        "has_gps_speed": normalize_channel_name(resolved.get("speed", "")) == "gpsspeed",
         "has_rpm": "rpm" in resolved,
-        "has_accelerometer": bool(
-            {"longitudinal_g", "lateral_g", "vertical_g"}.intersection(resolved)
-        ),
-        "has_gyro": bool({"gyro_x", "gyro_y", "yaw_rate"}.intersection(resolved)),
+        "has_accelerometer": sensors["accelerometer_present"],
+        "has_gyro": sensors["gyro_present"],
+        "has_gps_yaw": "yaw_rate" in resolved,
+        "sensor_capabilities": sensors,
+        "channel_provenance": provenance,
+        "native_data": {"schema_version": 1, "rows": native_rows, "time_unit": "ms", "value_units": "per_channel_original", "retention": "inspection_fixed_expiry"},
         "has_lap_timing": bool(valid_laps),
         "has_predefined_sectors": has_structured_sectors(log),
         "available_canonical_channels": sorted(resolved),
@@ -131,7 +142,7 @@ def inspect_xrk_file(source: Path, output_dir: Path) -> dict[str, Any]:
         "warning_codes": inspection_warning_codes(resolved, log),
         "warnings": inspection_warnings(resolved, log),
         "processing_duration_ms": round((time.monotonic() - started_at) * 1000),
-        "artifacts": {"telemetry": telemetry_path.name},
+        "artifacts": {"telemetry": telemetry_path.name, "native_channels": native_path.name},
     }
     (output_dir / "inspection.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
@@ -151,7 +162,9 @@ def inspect_channels(
 
     descriptions: list[dict[str, Any]] = []
     available_names: set[str] = set()
-    for name, table in log.channels.items():
+    for index, (name, table) in enumerate(log.channels.items()):
+        normalized_name = normalize_channel_name(name)
+        canonical = canonical_by_normalized.get(normalized_name)
         sample_count = int(getattr(table, "num_rows", 0))
         all_zero = False
         available = False
@@ -162,8 +175,8 @@ def inspect_channels(
             timecodes, values = channel_arrays(table, name)
             finite = values[np.isfinite(values)]
             available = bool(len(finite))
-            all_zero = bool(available and np.allclose(finite, 0.0))
-            available = available and not all_zero
+            all_zero = bool(available and np.all(finite == 0.0))
+            available = available and not (all_zero and canonical == "gear")
             if len(timecodes):
                 first_timestamp_s = json_number(float(timecodes[0]) / 1000.0)
                 last_timestamp_s = json_number(float(timecodes[-1]) / 1000.0)
@@ -172,16 +185,23 @@ def inspect_channels(
                     (len(timecodes) - 1)
                     / ((float(timecodes[-1]) - float(timecodes[0])) / 1000.0)
                 )
-        except XrkImportError:
+        except (XrkImportError, TypeError, ValueError, OverflowError):
             pass
         normalized_name = normalize_channel_name(name)
         canonical = canonical_by_normalized.get(normalized_name)
+        try:
+            quality = timestamp_quality(native_frame(table, name))
+        except (KeyError, TypeError, ValueError):
+            quality = {"native_sample_rate_hz": None, "readable": False}
+        source = channel_source(canonical, name)
         descriptions.append(
             {
+                "channel_id": f"c{index:04d}",
                 "name": name,
                 "normalized_name": normalized_name,
                 "canonical_name": canonical,
                 "unit": channel_units(table, name),
+                "unit_verified": units_supported(canonical, channel_units(table, name)),
                 "sample_count": sample_count,
                 "sample_rate_hz": (
                     round(sample_rate_hz, 3) if sample_rate_hz is not None else None
@@ -198,6 +218,15 @@ def inspect_channels(
                 ),
                 "available": available,
                 "all_zero": all_zero,
+                "present": True,
+                "validity": "all_zero_information_insufficient" if all_zero else "finite_samples" if available else "no_usable_numeric_samples",
+                "source": source,
+                "evidence_class": "calculated" if source in {"gps_derived", "logger_calculated"} else "measured" if source in {"raw_sensor", "gps_receiver"} else "unknown",
+                "raw_axis": canonical[-1] if canonical and canonical.startswith(("accel_", "gyro_")) else None,
+                "body_frame_calibrated": False,
+                "derived_from": ["GPS velocity/position (logger algorithm unspecified)"] if source == "gps_derived" else [],
+                "timing_quality": quality,
+                "native_sample_rate_hz": quality.get("native_sample_rate_hz"),
                 "analysis_usage": analysis_usage(canonical, available),
             }
         )
@@ -210,7 +239,7 @@ def inspect_channels(
             match = next(
                 (
                     name
-                    for name in available_names
+                    for name in sorted(available_names)
                     if normalize_channel_name(name) == normalize_channel_name(alias)
                 ),
                 None,
@@ -218,7 +247,40 @@ def inspect_channels(
             if match:
                 resolved[canonical] = match
                 break
+    for row in descriptions:
+        selected = resolved.get(row["canonical_name"]) == row["name"]
+        row["selected"] = selected
+        row["selection_reason"] = "first_usable_exact_alias" if selected else "not_selected_or_unrecognized"
+        if selected and not row["unit_verified"]:
+            row["selection_reason"] = "selected_native_only_unknown_units_normalized_unavailable"
+        if not selected or not row["unit_verified"]:
+            row["analysis_usage"] = []
     return descriptions, resolved
+
+
+def channel_source(canonical: str | None, name: str) -> str:
+    """Do not infer body axes or hardware existence from GPS-derived channels."""
+    if canonical in {"longitudinal_g", "lateral_g", "yaw_rate"}:
+        return "gps_derived"
+    if canonical in {"gear", "predictive_time", "best_run_diff"}:
+        return "logger_calculated"
+    if canonical and canonical.startswith("gps_") or normalize_channel_name(name) == "gpsspeed":
+        return "gps_receiver"
+    if canonical and (canonical.startswith(("accel_", "gyro_")) or canonical in {"rpm", "brake", "throttle", "steering_angle"}):
+        return "raw_sensor"
+    return "unknown"
+
+
+def sensor_capabilities(channels: list[dict[str, Any]]) -> dict[str, Any]:
+    """Presence is not proof of calibrated, dynamic body-frame usability."""
+    names = {row["canonical_name"] for row in channels if row.get("source") == "raw_sensor"}
+    return {
+        "accelerometer_present": bool(names & {"accel_x", "accel_y", "accel_z"}),
+        "gyro_present": bool(names & {"gyro_x", "gyro_y", "gyro_z"}),
+        "body_dynamics_available": False,
+        "calibration_status": "not_calibrated",
+        "reason": "Raw sensor axes require independent body-frame calibration and validation.",
+    }
 
 
 def normalize_lap_segments(log: Any) -> list[dict[str, int]]:
@@ -291,18 +353,25 @@ def build_normalized_telemetry(
     reference_times, _ = channel_arrays(log.channels[reference_name], reference_name)
 
     aligned: dict[str, np.ndarray] = {}
+    processing: dict[str, Any] = {}
     for canonical, source_name in resolved.items():
-        times, values = channel_arrays(log.channels[source_name], source_name)
+        raw = native_frame(log.channels[source_name], source_name)
+        times = raw["timecode_ms"].to_numpy(dtype=float)
+        values = raw["value"].to_numpy(dtype=float)
         converted = convert_units(
             canonical,
             values,
             channel_units(log.channels[source_name], source_name),
         )
-        aligned[canonical] = np.interp(
-            reference_times.astype(float),
-            times.astype(float),
-            converted.astype(float),
+        aligned[canonical], processing[canonical] = bounded_resample(
+            times / 1000.0, converted, reference_times.astype(float) / 1000.0,
+            discrete=canonical in {"gear", "gps_fix", "gps_satellites"},
         )
+        processing[canonical]["unit_conversion"] = {
+            "source_unit": channel_units(log.channels[source_name], source_name),
+            "target_unit": canonical_unit(canonical),
+            "verified": units_supported(canonical, channel_units(log.channels[source_name], source_name)),
+        }
 
     frames: list[pd.DataFrame] = []
     for lap in valid_laps:
@@ -327,12 +396,15 @@ def build_normalized_telemetry(
         return pd.DataFrame()
     normalized = pd.concat(frames, ignore_index=True)
     normalized.replace([np.inf, -np.inf], np.nan, inplace=True)
+    normalized.attrs["processing"] = processing
     return normalized
 
 
 def convert_units(canonical: str, values: np.ndarray, unit: str | None) -> np.ndarray:
     """Convert selected source units into the platform canonical units."""
     result = values.astype(float, copy=True)
+    if not units_supported(canonical, unit):
+        return np.full_like(result, np.nan)
     normalized_unit = (unit or "").strip().lower()
     if canonical == "speed":
         if normalized_unit in {"m/s", "mps", "m s-1"}:
@@ -341,7 +413,36 @@ def convert_units(canonical: str, values: np.ndarray, unit: str | None) -> np.nd
             result *= 1.609344
     if canonical in {"predictive_time", "best_run_diff"} and normalized_unit == "ms":
         result /= 1000.0
+    if canonical in {"longitudinal_g", "lateral_g", "accel_x", "accel_y", "accel_z"} and normalized_unit in {"m/s2", "m/s^2", "m/s²"}:
+        result /= 9.80665
+    if canonical in {"yaw_rate", "gyro_x", "gyro_y", "gyro_z"} and normalized_unit in {"rad/s", "radians/s"}:
+        result = np.rad2deg(result)
     return result
+
+
+def units_supported(canonical: str | None, unit: str | None) -> bool:
+    """Fail closed for quantitative dynamics when physical units are unknown."""
+    accepted = {
+        "speed": {"km/h", "kph", "kmh", "m/s", "mps", "m s-1", "mph"},
+        **{key: {"g", "m/s2", "m/s^2", "m/s²"} for key in
+           ("longitudinal_g", "lateral_g", "accel_x", "accel_y", "accel_z")},
+        **{key: {"deg/s", "rad/s", "radians/s"} for key in
+           ("yaw_rate", "gyro_x", "gyro_y", "gyro_z")},
+    }
+    return canonical not in accepted or (unit or "").strip().lower() in accepted[canonical]
+
+
+def canonical_unit(canonical: str) -> str | None:
+    """Document display units independently of the preserved native units."""
+    if canonical == "speed":
+        return "km/h"
+    if canonical in {"longitudinal_g", "lateral_g", "accel_x", "accel_y", "accel_z"}:
+        return "g"
+    if canonical in {"yaw_rate", "gyro_x", "gyro_y", "gyro_z"}:
+        return "deg/s"
+    if canonical in {"predictive_time", "best_run_diff"}:
+        return "s"
+    return {"rpm": "rpm", "gps_lat": "deg", "gps_lon": "deg"}.get(canonical)
 
 
 def has_structured_sectors(log: Any) -> bool:

@@ -20,6 +20,16 @@ export type XrkChannel = {
   available: boolean;
   all_zero: boolean;
   analysis_usage: string[];
+  source?: string;
+  unit_verified?: boolean;
+  evidence_class?: string;
+  present?: boolean;
+  selected?: boolean;
+  validity?: string;
+  native_sample_rate_hz?: number | null;
+  raw_axis?: string | null;
+  body_frame_calibrated?: boolean;
+  selection_reason?: string;
 };
 
 export type XrkInspection = {
@@ -37,6 +47,14 @@ export type XrkInspection = {
   has_rpm: boolean;
   has_accelerometer: boolean;
   has_gyro: boolean;
+  has_gps_yaw?: boolean;
+  sensor_capabilities?: {
+    accelerometer_present: boolean;
+    gyro_present: boolean;
+    body_dynamics_available: boolean;
+    calibration_status: string;
+    reason: string;
+  };
   has_lap_timing: boolean;
   has_predefined_sectors: boolean;
   parser: {

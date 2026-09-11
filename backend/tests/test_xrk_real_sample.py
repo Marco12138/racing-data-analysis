@@ -31,8 +31,11 @@ def test_private_real_xrk_acceptance(tmp_path: Path) -> None:
     assert manifest["has_gps"] is True
     assert manifest["has_gps_speed"] is True
     assert manifest["has_rpm"] is True
-    assert manifest["has_accelerometer"] is True
-    assert manifest["has_gyro"] is True
+    assert manifest["has_accelerometer"] is False
+    assert manifest["has_gyro"] is False
+    assert manifest["has_gps_yaw"] is True
+    assert manifest["sensor_capabilities"]["body_dynamics_available"] is False
+    assert (tmp_path / "inspection" / "native_channels.parquet").is_file()
     assert manifest["has_predefined_sectors"] is False
     assert manifest["telemetry_rows"] == 13_745
     by_canonical = {

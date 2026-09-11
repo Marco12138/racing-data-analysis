@@ -31,6 +31,15 @@ class InspectionRecord:
     def telemetry_path(self) -> Path:
         return self.directory / self.manifest["artifacts"]["telemetry"]
 
+    @property
+    def native_channels_path(self) -> Path | None:
+        """Resolve native data only within this opaque, fixed-expiry record."""
+        name = self.manifest.get("artifacts", {}).get("native_channels")
+        if name != "native_channels.parquet":
+            return None
+        path = self.directory / name
+        return path if path.is_file() else None
+
 
 class InspectionStore:
     """Manage opaque, fixed-expiry XRK analysis artifacts."""

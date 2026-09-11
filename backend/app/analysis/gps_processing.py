@@ -201,10 +201,21 @@ def resample_lap_by_distance(
         finite = np.isfinite(source_distance) & np.isfinite(values)
         if finite.sum() < 2:
             continue
-        result[column] = np.interp(
-            grid,
-            source_distance[finite],
-            values[finite],
-        )
+        output = np.full(len(grid), np.nan)
+        indexes = np.flatnonzero(finite)
+        breaks = np.diff(indexes) > 1
+        if "session_time_s" in ordered:
+            times = pd.to_numeric(ordered["session_time_s"], errors="coerce").to_numpy(dtype=float)
+            dt = np.diff(times)
+            positive = dt[np.isfinite(dt) & (dt > 0)]
+            limit = max(.5, 5 * float(np.median(positive))) if len(positive) else .5
+            elapsed = np.diff(times[indexes])
+            breaks |= ~np.isfinite(elapsed) | (elapsed > limit) | (elapsed <= 0)
+        for chunk in np.split(indexes, np.flatnonzero(breaks) + 1):
+            if len(chunk) < 2:
+                continue
+            mask = (grid >= source_distance[chunk[0]]) & (grid <= source_distance[chunk[-1]])
+            output[mask] = np.interp(grid[mask], source_distance[chunk], values[chunk])
+        result[column] = output
     result["lap"] = int(ordered["lap"].iloc[0])
     return result

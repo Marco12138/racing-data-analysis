@@ -13,6 +13,39 @@ from scipy.signal import find_peaks, savgol_filter
 RULES_PATH = Path(__file__).with_name("rpm_rules.json")
 
 
+def contiguous_signal_segments(values: np.ndarray, time: np.ndarray) -> list[np.ndarray]:
+    """Keep missing samples and long time gaps unavailable to signal processing."""
+    valid = np.flatnonzero(np.isfinite(values) & np.isfinite(time))
+    dt = np.diff(time)
+    positive = dt[np.isfinite(dt) & (dt > 0)]
+    limit = max(.5, 5 * float(np.median(positive))) if len(positive) else .5
+    breaks = (np.diff(valid) > 1) | (np.diff(time[valid]) > limit) | (np.diff(time[valid]) <= 0)
+    return [chunk for chunk in np.split(valid, np.flatnonzero(breaks) + 1) if len(chunk)]
+
+
+def smooth_contiguous(values: pd.Series, time: np.ndarray, window: int, *, rpm: bool) -> np.ndarray:
+    """Apply existing smoothers separately to observed contiguous segments."""
+    source = pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
+    output = np.full(len(source), np.nan)
+    for chunk in contiguous_signal_segments(source, time):
+        segment = pd.Series(source[chunk])
+        if rpm:
+            median = segment.rolling(window, center=True, min_periods=1).median()
+            output[chunk] = savgol_filter(median, window, 2, mode="interp") if len(chunk) >= window and window >= 5 else median
+        else:
+            output[chunk] = segment.rolling(window, center=True, min_periods=1).mean()
+    return output
+
+
+def derivative_contiguous(values: np.ndarray, time: np.ndarray) -> np.ndarray:
+    """Differentiate only contiguous observations, not interpolated outages."""
+    output = np.full(len(values), np.nan)
+    for chunk in contiguous_signal_segments(values, time):
+        if len(chunk) >= 3:
+            output[chunk] = np.gradient(values[chunk], time[chunk])
+    return output
+
+
 def load_rpm_rules(path: Path | None = None) -> dict[str, float]:
     """Load adjustable analysis rules from the committed JSON configuration."""
     return {
@@ -42,28 +75,9 @@ def smooth_rpm_signal(
         window += 1
     window = min(window, len(working) if len(working) % 2 else len(working) - 1)
     window = max(3, window)
-    rpm = pd.to_numeric(working["rpm"], errors="coerce").interpolate(
-        limit_direction="both"
-    )
-    median = rpm.rolling(window, center=True, min_periods=1).median()
-    if len(median) >= window and window >= 5:
-        working["rpm_smoothed"] = savgol_filter(
-            median.to_numpy(dtype=float),
-            window_length=window,
-            polyorder=min(2, window - 1),
-            mode="interp",
-        )
-    else:
-        working["rpm_smoothed"] = median
+    working["rpm_smoothed"] = smooth_contiguous(working["rpm"], time.to_numpy(), window, rpm=True)
     if "speed" in working and working["speed"].notna().sum() >= 3:
-        speed = pd.to_numeric(working["speed"], errors="coerce").interpolate(
-            limit_direction="both"
-        )
-        working["speed_smoothed"] = speed.rolling(
-            window,
-            center=True,
-            min_periods=1,
-        ).mean()
+        working["speed_smoothed"] = smooth_contiguous(working["speed"], time.to_numpy(), window, rpm=False)
     return working
 
 
@@ -77,19 +91,16 @@ def calculate_rpm_derivative(df: pd.DataFrame) -> pd.DataFrame:
         return working
     rpm_column = "rpm_smoothed" if "rpm_smoothed" in working else "rpm"
     if rpm_column in working:
-        rpm = pd.to_numeric(working[rpm_column], errors="coerce").interpolate(
-            limit_direction="both"
-        )
-        working["rpm_slope"] = np.gradient(rpm.to_numpy(dtype=float), time)
+        rpm = pd.to_numeric(working[rpm_column], errors="coerce")
+        working["rpm_slope"] = derivative_contiguous(rpm.to_numpy(dtype=float), time)
     speed_column = "speed_smoothed" if "speed_smoothed" in working else "speed"
     if speed_column in working:
         speed_mps = (
             pd.to_numeric(working[speed_column], errors="coerce")
-            .interpolate(limit_direction="both")
             .to_numpy(dtype=float)
             / 3.6
         )
-        working["speed_accel_mps2"] = np.gradient(speed_mps, time)
+        working["speed_accel_mps2"] = derivative_contiguous(speed_mps, time)
     return working
 
 
