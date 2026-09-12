@@ -24,6 +24,7 @@ def main() -> int:
     parser.add_argument("--data-dir", type=Path, default=Path(os.getenv("XRK_TEST_DATA_DIR", str(Path.home()/"racing数据"))))
     parser.add_argument("--file", type=Path, default=os.getenv("XRK_TEST_FILE_PATH"))
     parser.add_argument("--output", type=Path, default=Path("tmp/xrk-channel-audit"))
+    parser.add_argument("--xrk-only", action="store_true", help="Avoid counting XRZ copies of XRK sessions twice")
     args = parser.parse_args()
     sources = [args.file.expanduser()] if args.file else sorted(
         p for p in args.data_dir.expanduser().rglob("*")
@@ -31,6 +32,10 @@ def main() -> int:
     )
     if not sources:
         parser.error("No XRK/XRZ files found. Configure XRK_TEST_DATA_DIR or XRK_TEST_FILE_PATH.")
+    if args.xrk_only:
+        sources = [p for p in sources if p.suffix.lower() == ".xrk"]
+        if not sources:
+            parser.error("No XRK files found after --xrk-only filtering.")
     output = args.output.expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True, mode=0o700)
     rows = []
@@ -46,6 +51,7 @@ def main() -> int:
                             "valid_laps": manifest["valid_laps"], "lap_quality": analysis["lap_quality"],
                             "fastest_lap": analysis["fastest_lap"], "native_data": manifest["native_data"],
                             "parser": manifest["parser"], "warnings": manifest["warnings"],
+                            "corner_dynamics": analysis.get("corner_dynamics", {}),
                             "audit": audit_native_channels(pd.read_parquet(directory/"native_channels.parquet"), manifest)})
         except Exception as exc:
             row.update(status="failed", error_type=type(exc).__name__, message=str(exc))
@@ -61,6 +67,7 @@ def main() -> int:
         lines.append(f"| {row['filename']} | {row['status']} | {len(row.get('channels', []))} | {row.get('lap_quality', {}).get('reference_eligible_count', '-')} | {cap.get('accelerometer_present', '-')} | {cap.get('gyro_present', '-')} |")
     for row in rows:
         lines += ["", "## " + row["filename"]]
+        lines.append("- GPS 阶段覆盖（不是人工准确率）: `" + json.dumps(row.get("corner_dynamics", {}).get("coverage", {})) + "`")
         lines += ["", "### 原生通道", "",
                   "| 通道 | 来源 | 单位 | 原生 Hz | 时间范围 s | 选用 | 时间异常 |",
                   "|---|---|---|---:|---|---|---|"]

@@ -9,6 +9,7 @@ import pytest
 
 from backend.app.importers.xrk import load_xrk
 from backend.app.importers.xrk_registry import XrkParserRegistry
+from backend.app.analysis.xrk_session_analysis import analyze_xrk_session
 
 
 def private_sources():
@@ -35,6 +36,10 @@ def test_private_real_xrk_acceptance(tmp_path: Path, source: Path) -> None:
     assert manifest["channels"]
     assert manifest["sensor_capabilities"]["body_dynamics_available"] is False
     native = pd.read_parquet(tmp_path / "inspection" / "native_channels.parquet")
+    analysis = analyze_xrk_session(pd.read_parquet(tmp_path / "inspection" / "telemetry.parquet"), manifest)
+    dynamics = analysis.get("corner_dynamics", {})
+    if "eligible_laps" in dynamics:
+        assert dynamics["eligible_laps"] == sorted(row["lap"] for row in analysis["lap_quality"]["laps"] if row["analysis_eligible"])
     raw = load_xrk(source)
     for channel in manifest["channels"]:
         original = raw.channels[channel["name"]].to_pydict()

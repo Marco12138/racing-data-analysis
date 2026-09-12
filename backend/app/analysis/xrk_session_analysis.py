@@ -15,6 +15,7 @@ from .corner_consensus import (
     estimate_achievable_improvement_range,
 )
 from .lap_analysis import analyze_laps
+from .corner_dynamics import analyze_corner_dynamics
 from .lap_quality import build_lap_quality_summary, classify_lap_quality
 from .rpm_analysis import (
     compare_rpm_behavior_by_lap,
@@ -307,6 +308,15 @@ def analyze_xrk_session(
                 "active": zones,
                 "comparisons": zone_comparisons,
             },
+            "corner_dynamics": (
+                analyze_corner_dynamics(
+                    processed, zones,
+                    [int(row["lap"]) for row in quality_summary["laps"] if row["analysis_eligible"]],
+                    reference_lap, target_lap,
+                )
+                if manifest.get("channel_provenance", {}).get("speed", {}).get("source") == "gps_receiver"
+                else {"status": "unavailable", "corners": [], "reason": "GPS_speed_source_unverified"}
+            ),
             "evidence_catalog": evidence_catalog(manifest),
             "consensus_benchmark": consensus,
             "achievable_improvement_range": achievable_range,
@@ -417,6 +427,7 @@ def basic_response(
             "calibration_status": "source_unverified",
         }),
         "zones": {"automatic": [], "active": [], "comparisons": []},
+        "corner_dynamics": {"status": "unavailable", "corners": [], "reason": "eligible_GPS_laps_required"},
         "evidence_catalog": evidence_catalog(manifest),
         "consensus_benchmark": {
             "reference_policy": "real_completed_reference_eligible_laps_only",
@@ -713,6 +724,12 @@ def generate_xrk_report(result: dict[str, Any], language: str = "en") -> str:
             "- GPS 派生 G/yaw 是计算通道；原始 IMU 轴尚未标定为车体轴。"
             if language == "zh" else
             "- GPS-derived G/yaw are calculated channels; raw IMU axes are not body-calibrated."
+        )
+    if result.get("corner_dynamics", {}).get("status") == "calculated":
+        lines.append(
+            "- GPS 弯道阶段未经人工验证；逐圈均值区间不是单圈差值区间。仪器噪声未独立标定，不能据小幅速度差确认提升。"
+            if language == "zh" else
+            "- GPS phases are not manually validated. Lap-mean intervals are not single-pair effect intervals; small speed differences are not validated against independent sensor noise."
         )
     lines.extend(
         [

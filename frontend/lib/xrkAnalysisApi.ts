@@ -238,6 +238,19 @@ export type XrkZoneComparison = {
 };
 
 export type XrkAnalysis = {
+  corner_dynamics?: {
+    status: string;
+    corners: Array<{
+      zone_id: string;
+      name: string;
+      phases: Array<{ lap: number; status: string; reason?: string; events: Record<string, { distance_m: number } | null> }>;
+      comparisons: Record<string, {
+        target_minus_reference: number | null;
+        outside_observed_repeatability_band: boolean | null;
+        repeatability: { lap_count: number; mean_ci95: number[] | null };
+      }>;
+    }>;
+  };
   channel_provenance?: Record<string, { source: string; name: string }>;
   format: "aim_xrk_analysis";
   inspection_id: string;

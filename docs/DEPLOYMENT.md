@@ -309,6 +309,8 @@ them with a `NEXT_PUBLIC_` prefix.
 For native channel provenance, private audits and the P0/P1 evidence boundary,
 see [XRK Channel Trust](XRK_CHANNEL_TRUST.md). The native Parquet artifact uses
 the same fixed inspection expiry; it must not be copied into a public image.
+The GPS phase/repeatability prototype and its statistical limits are documented
+in [Corner Phases And Repeatability](CORNER_PHASES_AND_REPEATABILITY.md).
 
 ```bash
 python -m pytest backend/tests -q

@@ -1,5 +1,7 @@
 "use client";
 
+import { CornerDynamicsSummary } from "./CornerDynamicsSummary";
+
 import {
   useCallback,
   useEffect,
@@ -1314,7 +1316,7 @@ function SectorZonePanel({
   analyzing: boolean;
   readOnly: boolean;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [mapTool, setMapTool] = useState<"sector" | "zone">("sector");
   function handleMapPoint(distance: number) {
     if (mapTool === "zone") {
@@ -1408,6 +1410,7 @@ function SectorZonePanel({
           </div>
         </Panel>
       </div>
+      <CornerDynamicsSummary analysis={analysis} locale={locale} />
     </>
   );
 }
