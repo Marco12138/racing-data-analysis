@@ -49,6 +49,10 @@ export type XrkInspection = {
   has_gyro: boolean;
   has_gps_yaw?: boolean;
   sensor_capabilities?: {
+    accelerometer_channels_present?: boolean;
+    gyro_channels_present?: boolean;
+    accelerometer_informative?: boolean;
+    gyro_informative?: boolean;
     accelerometer_present: boolean;
     gyro_present: boolean;
     body_dynamics_available: boolean;
@@ -234,6 +238,7 @@ export type XrkZoneComparison = {
 };
 
 export type XrkAnalysis = {
+  channel_provenance?: Record<string, { source: string; name: string }>;
   format: "aim_xrk_analysis";
   inspection_id: string;
   expires_at: string;

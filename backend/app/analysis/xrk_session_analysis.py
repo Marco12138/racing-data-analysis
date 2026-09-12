@@ -579,8 +579,10 @@ def evidence_catalog(manifest: dict[str, Any]) -> dict[str, list[str]]:
         measured = [
             f"{row['name']} ({row.get('unit') or 'unit unspecified'}; raw sensor axes are not body-calibrated)"
             if row.get("raw_axis") else row["name"]
-            for row in provenance.values()
-            if row.get("evidence_class") == "measured"
+            for key, row in provenance.items()
+            if row.get("evidence_class") == "measured" and key not in {
+                "gps_fix", "gps_satellites", "gps_accuracy_m", "gps_velocity_accuracy"
+            }
         ]
     recorded_calculated = [
         row["name"] + " (" + row["source"] + ")"

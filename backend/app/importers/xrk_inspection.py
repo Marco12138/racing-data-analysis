@@ -264,7 +264,7 @@ def channel_source(canonical: str | None, name: str) -> str:
         return "gps_derived"
     if canonical in {"gear", "predictive_time", "best_run_diff"}:
         return "logger_calculated"
-    if canonical and canonical.startswith("gps_") or normalize_channel_name(name) == "gpsspeed":
+    if (canonical and canonical.startswith("gps_")) or normalize_channel_name(name) == "gpsspeed":
         return "gps_receiver"
     if canonical and (canonical.startswith(("accel_", "gyro_")) or canonical in {"rpm", "brake", "throttle", "steering_angle"}):
         return "raw_sensor"
@@ -273,10 +273,18 @@ def channel_source(canonical: str | None, name: str) -> str:
 
 def sensor_capabilities(channels: list[dict[str, Any]]) -> dict[str, Any]:
     """Presence is not proof of calibrated, dynamic body-frame usability."""
-    names = {row["canonical_name"] for row in channels if row.get("source") == "raw_sensor"}
+    raw = [row for row in channels if row.get("source") == "raw_sensor"]
+    names = {row["canonical_name"] for row in raw}
+    readable = {row["canonical_name"] for row in raw if row.get("available")}
+    informative = {row["canonical_name"] for row in raw if row.get("available") and not row.get("all_zero")}
     return {
-        "accelerometer_present": bool(names & {"accel_x", "accel_y", "accel_z"}),
-        "gyro_present": bool(names & {"gyro_x", "gyro_y", "gyro_z"}),
+        "accelerometer_channels_present": bool(names & {"accel_x", "accel_y", "accel_z"}),
+        "gyro_channels_present": bool(names & {"gyro_x", "gyro_y", "gyro_z"}),
+        "accelerometer_present": bool(readable & {"accel_x", "accel_y", "accel_z"}),
+        "gyro_present": bool(readable & {"gyro_x", "gyro_y", "gyro_z"}),
+        "accelerometer_informative": bool(informative & {"accel_x", "accel_y", "accel_z"}),
+        "gyro_informative": bool(informative & {"gyro_x", "gyro_y", "gyro_z"}),
+        "presence_semantics": "present_requires_readable_samples; channels_present_is_schema_only; all_zero_is_not_proof_of_failure",
         "body_dynamics_available": False,
         "calibration_status": "not_calibrated",
         "reason": "Raw sensor axes require independent body-frame calibration and validation.",

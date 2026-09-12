@@ -14,6 +14,9 @@ Gate or Top 3 consensus rules. No synthetic reference lap is generated.
   from GPS-derived longitudinal/lateral acceleration and yaw.
 - `present` means a channel exists, not that it is calibrated. Exact all-zero
   values are retained. All-zero gear remains unusable, but is not absent.
+- Sensor-family `*_present` requires readable samples; `*_channels_present`
+  records schema presence separately. `*_informative` is false for unreadable
+  or entirely zero channels. Zero is not evidence of hardware failure.
 - `sensor_capabilities.body_dynamics_available` stays false until independently
   validated calibration exists. Raw X/Y/Z are never assigned body axes here.
 - Each channel records source, evidence class, original unit, native rate,
@@ -61,17 +64,31 @@ calibrated sensor limit. Raw-axis lag scans use fixed signs and three windows;
 positive lag compares GPS(t) with gyro(t + lag). They are exploratory candidates,
 not applied synchronization or independent validation.
 
+Spectral cleanup retains the first strictly increasing timestamp subsequence
+and reports dropped counts; a duplicate does not disable the complete PSD.
+The native cache remains unchanged. Lateral identity checks report both the
+uniform-grid result and an exact shared-native-timestamp result (first duplicate
+observation, no interpolation). These methods need not have identical residuals.
+Longitudinal checks retain the largest residual timestamps for manual receiver/
+gap review; they do not automatically label GPS reacquisition as the cause.
+
 ## Evidence And Release Status
 
 The local private audit has been exercised on real files; detailed measured
 results are deliberately outside this repository. Automated tests use small
-synthetic signals only; the existing opt-in known-sample acceptance test requires
-`XRK_TEST_FILE_PATH` and does not bundle the sample.
+synthetic signals only. Private acceptance uses either `XRK_TEST_DATA_DIR` (each
+file separately) or `XRK_TEST_FILE_PATH` (takes precedence). Without either, it is
+explicitly skipped. A configured empty directory fails instead of silently skipping.
+Every native array is compared with direct libxrk output, including NaN; known
+GPS-only 0809 and six-axis IMU 0898 have separate regression assertions.
 
 Run every release check in DEPLOYMENT.md, plus:
 
 ```bash
 python -m pytest backend/tests/test_native_channels.py -q
+XRK_TEST_DATA_DIR="$HOME/racing数据" python -m pytest backend/tests -q
+# For a single private file, including an IMU file:
+XRK_TEST_FILE_PATH=/private/path/sample.xrk python -m pytest backend/tests/test_xrk_real_sample.py -q
 pnpm run test:frontend
 pnpm run test:xrk-trust
 ```

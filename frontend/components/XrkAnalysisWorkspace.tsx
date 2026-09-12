@@ -131,6 +131,11 @@ const secondaryTabs = tabs.filter(([id]) => !primaryTabIds.includes(id));
 type MapMode = "reference" | "target" | "overlay";
 type ColorChannel = "speed" | "rpm" | "time_delta_s" | "longitudinal_g" | "lateral_g";
 
+function sourceLabel(analysis: XrkAnalysis, channel: string, label: string): string {
+  const source = analysis.channel_provenance?.[channel]?.source;
+  return `${label} (${source === "gps_derived" ? "GPS-derived / GPS 派生" : source ?? "source unverified / 来源未确认"})`;
+}
+
 export function XrkAnalysisWorkspace({
   analysis,
   analyzing,
@@ -866,8 +871,8 @@ function TrackMapPanel({
             ["speed", "Speed"],
             ["rpm", "RPM"],
             ["time_delta_s", "Time delta"],
-            ["longitudinal_g", "Longitudinal G"],
-            ["lateral_g", "Lateral G"],
+            ["longitudinal_g", sourceLabel(analysis, "longitudinal_g", "Longitudinal G")],
+            ["lateral_g", sourceLabel(analysis, "lateral_g", "Lateral G")],
           ]} />
         </div>
       }
@@ -1032,7 +1037,7 @@ function ActionsPanel({
             data={analysis.comparison}
             lines={[
               ["target_rpm", "Target RPM", "#f6c945"],
-              ["target_longitudinal_g", "Longitudinal G", "#35d6d0"],
+              ["target_longitudinal_g", sourceLabel(analysis, "longitudinal_g", "Longitudinal G"), "#35d6d0"],
             ]}
             cursorDistance={cursorDistance}
             onCursor={onCursor}

@@ -73,8 +73,10 @@ export function XrkInspectionWorkspace({
             <Availability label="GPS position" available={inspection.has_gps} />
             <Availability label="GPS speed" available={inspection.has_gps_speed} />
             <Availability label="RPM" available={inspection.has_rpm} />
-            <Availability label="Raw accelerometer / 原始加速度计" available={inspection.sensor_capabilities?.accelerometer_present ?? false} />
-            <Availability label="Physical gyro / 物理陀螺仪" available={inspection.sensor_capabilities?.gyro_present ?? false} />
+            <Availability label="Raw accelerometer / 可读加速度计" available={inspection.sensor_capabilities?.accelerometer_present ?? false} />
+            <Availability label="Physical gyro / 可读物理陀螺" available={inspection.sensor_capabilities?.gyro_present ?? false} />
+            {inspection.sensor_capabilities?.accelerometer_informative === false && <p className="py-2 text-xs text-amber-200">Accelerometer data insufficient / 加速度计信息不足，不能判断硬件故障</p>}
+            {inspection.sensor_capabilities?.gyro_informative === false && <p className="py-2 text-xs text-amber-200">Gyro data insufficient / 陀螺信息不足，不能判断硬件故障</p>}
             <Availability label="GPS-derived yaw / GPS 派生 yaw" available={inspection.has_gps_yaw ?? false} />
             <Availability label="Body dynamics / 已标定车体动态" available={inspection.sensor_capabilities?.body_dynamics_available ?? false} />
             <Availability label="Official sectors" available={inspection.has_predefined_sectors} />

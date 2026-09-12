@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from backend.app.analysis.channel_audit import comparison_metrics
+from backend.app.analysis.channel_audit import audit_native_channels, comparison_metrics, spectral_summary
 from backend.app.analysis.gps_processing import resample_lap_by_distance
 from backend.app.analysis.rpm_analysis import smooth_rpm_signal, calculate_rpm_derivative
 from backend.app.analysis.llm_narrative import build_xrk_narrative_evidence
@@ -138,3 +138,57 @@ def test_derivative_does_not_cross_a_missing_time_interval():
                           "rpm": [8000., 8001., 8002., 9000., 9001., 9002.]})
     result = calculate_rpm_derivative(frame)
     assert np.allclose(result.rpm_slope, 10.)
+
+
+def test_spectrum_survives_duplicate_and_backward_timestamps():
+    """Cleanup compares to the last accepted timestamp and is observable."""
+    times = np.arange(500) * .1
+    values = np.sin(times)
+    broken_t = np.insert(times, 30, [2.9, 2.7, 2.8])
+    broken_v = np.insert(values, 30, [1, 1, 1])
+    result = spectral_summary(broken_t, broken_v, 10)
+    baseline = spectral_summary(times, values, 10)
+    assert result["status"] == "calculated"
+    assert result["nonincreasing_samples_dropped"] == 3
+    np.testing.assert_allclose(result["output_psd"], baseline["output_psd"])
+    assert not result["hardware_bandwidth_inferred"]
+
+
+def test_sensor_existence_readability_and_zero_information_are_separate():
+    """A zero axis may be stationary; unreadable channels are not usable sensors."""
+    rows = [{"canonical_name": "accel_x", "source": "raw_sensor", "available": False, "all_zero": True}]
+    result = sensor_capabilities(rows)
+    assert result["accelerometer_channels_present"]
+    assert not result["accelerometer_present"]
+    assert not result["accelerometer_informative"]
+    rows[0]["available"] = True
+    result = sensor_capabilities(rows)
+    assert result["accelerometer_present"]
+    assert not result["accelerometer_informative"]
+    assert not result["body_dynamics_available"]
+
+
+def test_native_identity_has_no_resampling_residual():
+    """An irregular shared native grid must stay exact in the identity audit."""
+    time = np.arange(200) * 100. + np.sin(np.arange(200))
+    speed = 40 + np.sin(time/1000)
+    yaw = np.cos(time/1000) * 20
+    lateral = speed/3.6 * np.deg2rad(yaw)/9.80665
+    descriptions = {}
+    frames = []
+    for name, values, unit in (("speed", speed, "km/h"), ("yaw_rate", yaw, "deg/s"), ("lateral_g", lateral, "g")):
+        descriptions[name] = {"channel_id": name, "canonical_name": name, "unit": unit,
+                              "source": "gps_receiver" if name == "speed" else "gps_derived", "native_sample_rate_hz": 10}
+        frames.append(pd.DataFrame({"channel_id": name, "timecode_ms": time, "value": values}))
+    result = audit_native_channels(pd.concat(frames), {"channel_provenance": descriptions})
+    identity = result["relations"]["gps_lateral_vs_speed_yaw_native"]
+    assert identity["valid_samples"] == 200
+    assert identity["rms"] < 1e-14
+    assert not identity["independent_validation"]
+
+
+def test_receiver_diagnostics_are_not_driver_evidence():
+    """Receiver status remains in provenance, not the coach's measured list."""
+    provenance = {key: {"name": key, "source": "gps_receiver", "evidence_class": "measured"}
+                  for key in ("gps_fix", "gps_satellites", "gps_accuracy_m", "gps_lat")}
+    assert evidence_catalog({"channel_provenance": provenance})["measured"] == ["gps_lat"]
