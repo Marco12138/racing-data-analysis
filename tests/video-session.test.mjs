@@ -141,7 +141,7 @@ function panelProps(overrides = {}) {
 
 function render(overrides = {}) {
   return renderToStaticMarkup(
-    React.createElement(VideoPanelTest, { ...panelProps(overrides), locale: "zh" }),
+    React.createElement(VideoPanelTest, { ...panelProps(overrides), locale: overrides.locale ?? "zh" }),
   );
 }
 
@@ -182,4 +182,33 @@ test("SingleLapAnalysisPanel shows lap-range and audio auto-mark controls for a 
   assert.match(html, /单圈分析/);
   assert.match(html, /音频 RPM 自动对齐/);
   assert.match(html, /实时遥测仪表盘/);
+});
+
+test("single-lap RPM controls expose actual session laps including non-reference targets", () => {
+  const analysis = analysisFixture();
+  analysis.lap_rows = [{ lap: 1, lap_time: 40.123 }, { lap: 2, lap_time: 42.567 }];
+  analysis.lap_quality.laps = [{ lap: 1, analysis_eligible: true }, { lap: 2, analysis_eligible: false }];
+  const html = render({ analysis, onAnalyze: async () => {} });
+  assert.match(html, /对应遥测圈 \/ Telemetry lap/);
+  assert.match(html, /第 1 圈 · 40\.123s/);
+  assert.match(html, /第 2 圈 · 42\.567s · 非参考圈/);
+  assert.match(html, /<option value="2" selected=""/);
+  assert.match(html, /视频段起点（秒）/);
+  assert.match(html, /视频段终点（秒）/);
+  assert.doesNotMatch(html, /第 3 圈/);
+});
+
+test("lap selection locks during analysis and RPM is disabled without a measured channel", () => {
+  const analysis = analysisFixture();
+  analysis.capabilities.rpm = false;
+  const html = render({ analysis, analyzing: true, onAnalyze: async () => {} });
+  assert.match(html, /<select aria-label="对应遥测圈 \/ Telemetry lap" disabled=""/);
+  assert.match(html, /<button[^>]*disabled=""[^>]*>(?:.|\n)*?音频 RPM 自动对齐/);
+});
+
+test("single-lap controls support English labels", () => {
+  const html = render({ locale: "en" });
+  assert.match(html, /Telemetry lap \/ 对应遥测圈/);
+  assert.match(html, /Video segment start \(s\)/);
+  assert.match(html, /Video segment end \(s\)/);
 });

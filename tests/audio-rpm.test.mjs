@@ -7,6 +7,7 @@ import {
   smoothRpmForEvents,
   stft,
   trackEngineRpm,
+  extractVideoRpmTrace,
 } from "../frontend/lib/audioRpm.ts";
 
 function harmonicAudio(seconds, sampleRate, fundamentalHz, harmonics) {
@@ -146,4 +147,37 @@ test("two persistent engine tones are flagged as ambiguous", () => {
   const result = detectEngineSourceAmbiguity(spectrum);
   assert.equal(result.ambiguous, true);
   assert.ok(result.strength_ratio >= 0.6);
+});
+
+test("RPM alignment processes only the selected video slice with original timestamps", async (t) => {
+  const sampleRate = 8000;
+  const samples = harmonicAudio(20, sampleRate, 150, [1, 2, 3, 4]);
+  t.mock.method(globalThis, "setTimeout", (fn) => { fn(); return 0; });
+  const original = globalThis.OfflineAudioContext;
+  globalThis.OfflineAudioContext = class {
+    async decodeAudioData() {
+      return { duration: 20, sampleRate, length: samples.length, numberOfChannels: 1, getChannelData: () => samples };
+    }
+  };
+  t.after(() => { globalThis.OfflineAudioContext = original; });
+  const file = new File(["test-only audio decoder stub"], "mock.mp4");
+  const whole = await extractVideoRpmTrace(file);
+  const slice = await extractVideoRpmTrace(file, { startS: 8, endS: 14 });
+  assert.equal(slice.times[0], 8);
+  assert.ok(slice.times.at(-1) < 14);
+  assert.ok(slice.times.length < whole.times.length * 0.35);
+  assert.equal(slice.times.length, slice.rpm.length);
+  for (const range of [{ startS: -1, endS: 8 }, { startS: 7, endS: 4 }, { startS: 1, endS: 30 }]) {
+    await assert.rejects(extractVideoRpmTrace(file, range), /INVALID_RPM_VIDEO_RANGE/);
+  }
+});
+
+test("cancelled RPM extraction never reads or uploads the video", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let reads = 0;
+  await assert.rejects(extractVideoRpmTrace({ arrayBuffer: async () => { reads += 1; } }, {
+    signal: controller.signal,
+  }), { name: "AbortError" });
+  assert.equal(reads, 0);
 });

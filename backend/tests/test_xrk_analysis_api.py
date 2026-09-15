@@ -141,6 +141,34 @@ def test_raw_browser_upload_reaches_xrk_parser(
     assert response.json()["laps"] == 2
 
 
+def test_detached_multipart_upload_preserves_bytes_without_custom_headers(monkeypatch, tmp_path):
+    """The public browser path uses a normal file field and keeps binary data intact."""
+    payload = b"<hCNF" + bytes(range(256))
+    original_paths = []
+
+    async def fake_inspection(source: Path, output_dir: Path, _: int) -> None:
+        assert source.read_bytes() == payload
+        original_paths.append(source)
+        write_inspection(output_dir)
+
+    monkeypatch.setattr(xrk_routes, "run_xrk_inspection", fake_inspection)
+    monkeypatch.setattr(storage, "DB_PATH", tmp_path / "sessions.sqlite3")
+    settings = Settings(app_env="test", app_mode="cloud", allowed_hosts="testserver",
+                        cors_origins="https://frontend.example", xrk_inspection_cache_dir=str(tmp_path / "cache"))
+    with TestClient(create_app(settings)) as client:
+        response = client.post("/api/v1/xrk/inspect", headers={"Origin": "https://frontend.example"},
+                               files={"file": ("车手 session.xrk", payload, "application/octet-stream")})
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "https://frontend.example"
+        assert response.json()["filename"] == "车手 session.xrk"
+        assert response.json()["laps"] == 2
+        token = response.json()["inspection_id"]
+        deleted = client.delete(f"/api/v1/xrk/inspections/{token}")
+        assert deleted.status_code == 200
+        assert deleted.json() == {"deleted": True}
+    assert original_paths and all(not path.exists() for path in original_paths)
+
+
 def test_local_xrk_library_inspects_whitelisted_file(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

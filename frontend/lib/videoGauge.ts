@@ -37,12 +37,11 @@ function interpolateChannel(
       valid.push({ time: point.session_time_s, value });
     }
   }
-  if (valid.length === 0) return null;
-  if (valid.length === 1) return valid[0].value;
+  if (valid.length === 0 || !Number.isFinite(sessionTimeS)) return null;
   valid.sort((a, b) => a.time - b.time);
-  if (sessionTimeS <= valid[0].time) return valid[0].value;
   const last = valid[valid.length - 1];
-  if (sessionTimeS >= last.time) return last.value;
+  if (sessionTimeS < valid[0].time || sessionTimeS > last.time) return null;
+  if (valid.length === 1) return valid[0].value;
   let lo = 0;
   let hi = valid.length - 1;
   while (hi - lo > 1) {
@@ -63,9 +62,10 @@ export function telemetryAtVideoTime(
   offsetMs: number,
 ): TelemetryGauge {
   const sessionTimeS = videoTimeS - offsetMs / 1000;
-  const speedMps = interpolateChannel(points, sessionTimeS, (point) => point.speed);
+  // XrkTrackPoint.speed is already normalized to km/h by the importer.
+  const speedKmh = interpolateChannel(points, sessionTimeS, (point) => point.speed);
   return {
-    speed_kmh: speedMps == null ? null : round(speedMps * 3.6, 1),
+    speed_kmh: speedKmh == null ? null : round(speedKmh, 1),
     rpm: interpolateChannel(points, sessionTimeS, (point) => point.rpm),
     longitudinal_g: interpolateChannel(points, sessionTimeS, (point) => point.longitudinal_g),
     lateral_g: interpolateChannel(points, sessionTimeS, (point) => point.lateral_g),

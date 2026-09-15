@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Clapperboard, Film, HardDrive, Play, Upload } from "lucide-react";
 
 import { useI18n } from "../lib/i18n";
-import { describeFileReadError, materializeXrkFile } from "../lib/fileUpload";
+import { describeFileReadError, exceedsUploadLimit, materializeXrkFile } from "../lib/fileUpload";
 import {
   canStartNewSession,
   isXrkFileName,
@@ -22,6 +22,8 @@ export function NewSessionCard({
   localSources = [],
   onStartLocal,
   onVideoSelect,
+  maxUploadBytes,
+  onCancel,
 }: {
   status: "idle" | "inspecting" | "inspected" | "analyzing" | "loaded";
   hasPendingVideo: boolean;
@@ -29,8 +31,10 @@ export function NewSessionCard({
   localSources?: LocalXrkSource[];
   onStartLocal?: (sourceId: string, videoFile: File | null) => void;
   onVideoSelect?: (videoFile: File | null) => void;
+  maxUploadBytes?: number;
+  onCancel?: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [xrkFile, setXrkFile] = useState<File | null>(null);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [xrkError, setXrkError] = useState("");
@@ -61,6 +65,11 @@ export function NewSessionCard({
     if (!isXrkFileName(file.name)) {
       setXrkError(t("sessionCard.xrkInvalid"));
       setXrkFile(null);
+      return;
+    }
+    if (file.size === 0 || exceedsUploadLimit(file, maxUploadBytes)) {
+      setXrkFile(null);
+      setXrkError(locale === "zh" ? `文件为空或超过上传上限${maxUploadBytes ? ` ${(maxUploadBytes / 1024 / 1024).toFixed(0)} MB` : ""}。` : `The file is empty or exceeds the upload limit${maxUploadBytes ? ` of ${(maxUploadBytes / 1024 / 1024).toFixed(0)} MB` : ""}.`);
       return;
     }
     setXrkReading(true);
@@ -136,11 +145,14 @@ export function NewSessionCard({
         <input
           type="file"
           accept=".xrk,.xrz"
+          disabled={inputLocked}
           onChange={(event) => {
-            if (!inputLocked) void chooseXrk(event.target.files?.[0] ?? null);
+            const input = event.currentTarget;
+            if (!inputLocked) void chooseXrk(input.files?.[0] ?? null).finally(() => { input.value = ""; });
           }}
         />
       </label>
+      {xrkFile && <p className="new-session-card__privacy">{(xrkFile.size / 1024 / 1024).toFixed(2)} MB · {locale === "zh" ? "已读取，可开始上传" : "Read locally, ready to upload"}</p>}
       {xrkError ? <p className="new-session-card__error">{xrkError}</p> : null}
 
       <label className="new-session-card__file">
@@ -149,6 +161,7 @@ export function NewSessionCard({
         <input
           type="file"
           accept="video/mp4,video/quicktime,.mp4,.mov"
+          disabled={inputLocked}
           onChange={(event) => {
             if (!inputLocked) {
               const nextVideo = event.target.files?.[0] ?? null;
@@ -171,6 +184,7 @@ export function NewSessionCard({
         <Play size={16} fill="currentColor" />
         {busy ? t("sessionCard.running") : t("sessionCard.start")}
       </button>
+      {busy && onCancel && <button type="button" className="nav-command mt-2" onClick={onCancel}>{locale === "zh" ? "取消导入" : "Cancel import"}</button>}
 
       {status !== "idle" ? (
         <ol className="new-session-card__steps" aria-label={t("sessionCard.stepsLabel")}>

@@ -3,15 +3,32 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+from .errors import PublicApiError
 
-from ..models.feedback import CoachValidationRequest, NarrativeFeedbackRequest
+from ..models.feedback import ClipFeedbackRequest, CoachValidationRequest, NarrativeFeedbackRequest
 from ..utils.storage import (
     narrative_feedback_stats,
     save_coach_validation,
     save_narrative_feedback,
+    save_clip_feedback,
+    clip_feedback_stats,
 )
 
 router = APIRouter(tags=["feedback"])
+
+
+@router.post("/feedback/clip-selection")
+def submit_clip_feedback(payload: ClipFeedbackRequest) -> dict:
+    """Accept only timing/selection labels; no video, filename or raw telemetry."""
+    if not save_clip_feedback(payload.model_dump()):
+        raise PublicApiError(409, "CLIP_FEEDBACK_CONFLICT", "This receipt belongs to another clip. Please reload the review.")
+    return {"received": True, "id": payload.feedback_id, "verdict": payload.verdict}
+
+
+@router.get("/feedback/clip-selection/stats")
+def selection_stats() -> dict:
+    """Summarize anonymous selection accuracy without publishing individual votes."""
+    return clip_feedback_stats()
 
 
 @router.post("/feedback")

@@ -1,7 +1,7 @@
 import type { CsvRow } from "./analysis";
 import { resolveApiUrl, resolveXrkUploadUrl } from "./config";
 import {
-  binaryFileUploadRequest,
+  multipartFileUploadRequest,
   describeFileReadError,
   exceedsUploadLimit,
   materializeUploadBlob,
@@ -247,7 +247,8 @@ export type XrkAnalysis = {
       comparisons: Record<string, {
         target_minus_reference: number | null;
         outside_observed_repeatability_band: boolean | null;
-        repeatability: { lap_count: number; mean_ci95: number[] | null };
+        repeatability: { lap_count: number; mean_ci95: number[] | null; ci_method?: string };
+        background?: { method: string; lap_count: number; source_laps: number[]; status: string };
       }>;
     }>;
   };
@@ -470,6 +471,11 @@ export type VideoSyncRpmResult = {
     search_resolution_ms: number;
     reliable_confidence_threshold: number;
     searched_offset_range_ms: [number, number];
+    search_scope?: "selected_lap" | "session";
+    selected_lap?: number | null;
+    search_candidates?: number;
+    telemetry_time_range_s?: [number, number];
+    video_time_range_s?: [number, number];
   };
   warnings: string[];
   request_id?: string;
@@ -669,7 +675,7 @@ export async function inspectXrkFile(
   try {
     response = await fetch(
       url,
-      binaryFileUploadRequest(blob, file.name, signal),
+      multipartFileUploadRequest(blob, file.name, signal),
     );
   } catch (error) {
     if ((error as Error).name === "AbortError") throw error;
@@ -760,6 +766,7 @@ export async function autoSyncVideoTelemetry(options: {
 
 export async function autoSyncVideoRpm(options: {
   inspection_id?: string;
+  lap?: number;
   video_rpm: Array<{ time_s: number; rpm: number }>;
   telemetry_rpm?: Array<{ time_s: number; rpm: number }>;
   max_offset_s?: number;

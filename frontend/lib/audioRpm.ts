@@ -460,21 +460,42 @@ export async function decodeAudioFile(file: File): Promise<AudioBuffer> {
 }
 
 /**
- * Extract a full-video RPM trace from the audio track. Used for RPM-channel
- * alignment with telemetry; the decoded audio never leaves the browser.
+ * Extract RPM from a bounded video segment. Decoding still reads the file,
+ * but only the selected slice enters STFT/tracking; timestamps remain video-relative.
  */
 export async function extractVideoRpmTrace(
   file: File,
-  options: { strokes?: 2 | 4; onProgress?: (fraction: number) => void } = {},
+  options: {
+    strokes?: 2 | 4;
+    startS?: number;
+    endS?: number;
+    signal?: AbortSignal;
+    onProgress?: (fraction: number) => void;
+  } = {},
 ): Promise<VideoRpmTrace> {
   const strokes = options.strokes ?? 2;
+  options.signal?.throwIfAborted();
   options.onProgress?.(0.05);
   const buffer = await decodeAudioFile(file);
+  options.signal?.throwIfAborted();
   if (buffer.duration > MAX_VIDEO_SECONDS) throw new Error("VIDEO_TOO_LONG");
   options.onProgress?.(0.2);
 
-  const mono = monoChannel(buffer);
+  const startS = options.startS ?? 0;
+  const endS = options.endS ?? buffer.duration;
+  if (!Number.isFinite(startS) || !Number.isFinite(endS)
+    || startS < 0 || endS > buffer.duration + 0.1 || endS - startS < 5) {
+    throw new Error("INVALID_RPM_VIDEO_RANGE");
+  }
   const sampleRate = buffer.sampleRate;
+  const from = Math.floor(startS * sampleRate);
+  const to = Math.min(buffer.length, Math.ceil(endS * sampleRate));
+  const left = buffer.getChannelData(0).subarray(from, to);
+  const mono = buffer.numberOfChannels < 2 ? left : Float32Array.from(
+    left, (value, index) => (value + buffer.getChannelData(1)[from + index]) / 2,
+  );
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  options.signal?.throwIfAborted();
   let hopSize = DEFAULT_HOP_SIZE;
   const approxFrames = mono.length / hopSize;
   if (approxFrames > MAX_FRAMES) {
@@ -486,14 +507,15 @@ export async function extractVideoRpmTrace(
     hopSize,
   });
   options.onProgress?.(0.78);
-
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  options.signal?.throwIfAborted();
   const trace = trackEngineRpm(spectrum, { strokes });
   const smoothed = smoothRpmForEvents(trace.rpm);
   const ambiguity = detectEngineSourceAmbiguity(spectrum);
   options.onProgress?.(1);
 
   return {
-    times: spectrum.times.map((value) => round(value, 3)),
+    times: spectrum.times.map((value) => round(value + from / sampleRate, 3)),
     rpm: smoothed.map((value) => Math.round(value)),
     source_ambiguity: ambiguity,
   };

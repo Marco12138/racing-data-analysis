@@ -101,6 +101,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         response.headers["X-API-Version"] = active_settings.app_version
+        if request.method == "OPTIONS" and response.status_code >= 400:
+            logger.warning(json.dumps({
+                "event": "cors_preflight_rejected", "request_id": request_id,
+                "path": request.url.path[:200], "status": response.status_code,
+                "origin": request.headers.get("origin", "")[:300],
+                "requested_method": request.headers.get("access-control-request-method", "")[:20],
+                "requested_headers": request.headers.get("access-control-request-headers", "")[:300],
+            }))
         return response
 
     @application.exception_handler(PublicApiError)

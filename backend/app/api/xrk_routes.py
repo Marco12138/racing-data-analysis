@@ -132,6 +132,7 @@ class VideoSyncRpmAutoRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     inspection_id: str | None = Field(default=None, min_length=32, max_length=32)
+    lap: int | None = Field(default=None, ge=0, le=100_000)
     video_rpm: list[VideoRpmPoint] = Field(min_length=8, max_length=5_000)
     telemetry_rpm: list[VideoRpmPoint] | None = Field(
         default=None,
@@ -628,7 +629,7 @@ async def auto_sync_video_rpm(
     candidate_count = int(
         (2 * payload.max_offset_s) // payload.search_step_s
     ) + 1
-    if candidate_count > MAX_SEARCH_CANDIDATES:
+    if payload.lap is None and candidate_count > MAX_SEARCH_CANDIDATES:
         raise PublicApiError(
             status_code=422,
             error_code="VIDEO_SYNC_SEARCH_LIMIT_EXCEEDED",
@@ -671,14 +672,21 @@ async def auto_sync_video_rpm(
                 error_type="video_sync_data",
             ) from exc
         try:
-            telemetry_rpm = telemetry_rpm_summary(telemetry)
+            telemetry_rpm = telemetry_rpm_summary(telemetry, lap=payload.lap)
         except ValueError as exc:
             raise PublicApiError(
                 status_code=422,
-                error_code="XRK_RPM_UNAVAILABLE",
+                error_code="VIDEO_SYNC_LAP_UNAVAILABLE" if payload.lap is not None else "XRK_RPM_UNAVAILABLE",
                 message=str(exc),
                 error_type="video_sync_data",
             ) from exc
+    elif payload.lap is not None:
+        raise PublicApiError(
+            status_code=422,
+            error_code="VIDEO_SYNC_INSPECTION_REQUIRED",
+            message="Selecting a lap requires a valid inspection_id; unlabelled summaries cannot verify a lap.",
+            error_type="video_sync_data",
+        )
     elif payload.telemetry_rpm:
         telemetry_rpm = [point.model_dump() for point in payload.telemetry_rpm]
     else:
@@ -697,6 +705,7 @@ async def auto_sync_video_rpm(
             max_offset_s=payload.max_offset_s,
             search_step_s=payload.search_step_s,
             min_overlap_s=payload.min_overlap_s,
+            selected_lap=payload.lap,
         )
     except ValueError as exc:
         raise PublicApiError(

@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
+import { SiteNavigation } from "./SiteNavigation";
 import {
   Activity,
   AlertTriangle,
-  ArrowLeft,
   BarChart3,
   CirclePlay,
   Database,
@@ -13,7 +12,6 @@ import {
   Flag,
   FolderOpen,
   Gauge,
-  Languages,
   LineChart,
   LoaderCircle,
   MapPin,
@@ -584,26 +582,14 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
       ];
 
   return (
-    <main className="dashboard-shell engineering-grid">
+    <><SiteNavigation onLocaleChange={changeWorkspaceLocale} /><main className="dashboard-shell engineering-grid">
       <section className="mx-auto flex max-w-[1680px] flex-col gap-5 px-5 py-5 lg:px-8">
-        <nav className="workspace-topbar panel rounded-lg" aria-label="Workspace navigation">
-          <Link href="/" className="workspace-topbar__brand"><Gauge size={18} /> Racing Data Lab</Link>
-          <div className="workspace-topbar__actions">
-            <div className="language-switch" aria-label="Language">
-              <Languages size={15} aria-hidden="true" />
-              <button type="button" className={locale === "zh" ? "is-active" : ""} onClick={() => changeWorkspaceLocale("zh")}>中</button>
-              <button type="button" className={locale === "en" ? "is-active" : ""} onClick={() => changeWorkspaceLocale("en")}>EN</button>
-            </div>
-            <Link href="/demo" className="nav-command">Sample Review</Link>
-            <Link href="/" className="nav-command"><ArrowLeft size={15} /> Home</Link>
-          </div>
-        </nav>
-        <header className="panel flex flex-col gap-5 rounded-lg px-5 py-5 lg:flex-row lg:items-end lg:justify-between">
+        <header className="flex flex-col gap-5 border-b border-slate-800 pb-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <div className="mb-3 flex items-center gap-3 text-xs font-semibold uppercase text-[#35d6d0]">
-              <Gauge size={18} /> Motorsport engineering dashboard
+              <Gauge size={18} /> {locale === "zh" ? "遥测分析 / TELEMETRY" : "TELEMETRY / 遥测分析"}
             </div>
-            <h1 className="text-2xl font-semibold text-white md:text-3xl">Session Workspace</h1>
+            <h1 className="text-2xl font-semibold text-white md:text-3xl">{locale === "zh" ? "Session 分析工作台" : "Session Workspace"}</h1>
           </div>
           {workspaceHasData && <div className="grid gap-2 text-sm text-slate-300 sm:grid-cols-2 xl:min-w-[720px] xl:grid-cols-4">
             <SessionInput label="Driver" value={driverName} onChange={setDriverName} />
@@ -616,12 +602,14 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
         {!workspaceHasData ? (
           <section className="workspace-start" aria-labelledby="workspace-start-title">
             <div className="workspace-start__intro">
-              <p className="hero-kicker">Start a session</p>
-              <h2 id="workspace-start-title">Import telemetry, then inspect the evidence</h2>
-              <p>Upload an AiM logger file with optional onboard video, use CSV exports, or open the reviewed sample.</p>
+              <p className="hero-kicker">{locale === "zh" ? "导入数据" : "Start a session"}</p>
+              <h2 id="workspace-start-title">{locale === "zh" ? "导入遥测，查看真实圈间差异" : "Import telemetry, then inspect the evidence"}</h2>
+              <p>{locale === "zh" ? "支持 AiM XRK / XRZ 和 CSV。车载视频可选，仅在浏览器本地播放。" : "Upload an AiM logger file with optional onboard video, use CSV exports, or open the reviewed sample."}</p>
             </div>
             <div className="workspace-start__grid">
               <NewSessionCard
+                maxUploadBytes={deploymentCapabilities?.xrk_server_import.max_upload_bytes}
+                onCancel={() => xrkAbortRef.current?.abort()}
                 status={aimImportStatus}
                 hasPendingVideo={Boolean(pendingVideoFile)}
                 onStart={handleNewSession}
@@ -657,7 +645,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
                 setVideoModeRequested(true);
               }}
             >
-              <Video size={17} /> Review video without telemetry
+              <Video size={17} /> {locale === "zh" ? "仅复盘视频，无需遥测" : "Review video without telemetry"}
             </button>
           </section>
         ) : <section className="grid gap-5 xl:grid-cols-[320px_1fr]">
@@ -673,6 +661,8 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
             <details className="workspace-disclosure">
               <summary>Import another session</summary>
               <NewSessionCard
+                maxUploadBytes={deploymentCapabilities?.xrk_server_import.max_upload_bytes}
+                onCancel={() => xrkAbortRef.current?.abort()}
                 status={aimImportStatus}
                 hasPendingVideo={Boolean(pendingVideoFile)}
                 onStart={handleNewSession}
@@ -890,7 +880,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
           onExpire={expireTemporarySessions}
         />
       </section>
-    </main>
+    </main></>
   );
 }
 

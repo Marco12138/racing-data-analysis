@@ -182,11 +182,18 @@ def telemetry_rpm_summary(
     telemetry: pd.DataFrame,
     *,
     max_points: int = 5_000,
+    lap: int | None = None,
 ) -> list[dict[str, float]]:
     """Extract a bounded real RPM summary from normalized telemetry."""
     required = {"session_time_s", "rpm"}
     if not required.issubset(telemetry.columns):
         raise ValueError("RPM is unavailable for this inspection.")
+    if lap is not None:
+        if "lap" not in telemetry.columns:
+            raise ValueError("Lap timing is unavailable for this inspection.")
+        telemetry = telemetry[pd.to_numeric(telemetry["lap"], errors="coerce") == lap]
+        if telemetry.empty:
+            raise ValueError("The selected lap has no telemetry samples.")
     frame = telemetry[["session_time_s", "rpm"]].copy()
     frame.columns = ["time_s", "rpm"]
     frame = frame.replace([np.inf, -np.inf], np.nan).dropna()
@@ -207,6 +214,7 @@ def estimate_video_telemetry_rpm_offset(
     max_offset_s: float = 300.0,
     search_step_s: float = 0.25,
     min_overlap_s: float = 5.0,
+    selected_lap: int | None = None,
 ) -> dict[str, Any]:
     """Search the offset that best aligns audio-derived RPM with telemetry RPM.
 
@@ -229,16 +237,30 @@ def estimate_video_telemetry_rpm_offset(
         telemetry_times, _rpm_drop_signal(telemetry)
     )
 
-    candidate_count = int(np.floor((2 * max_offset_s) / search_step_s)) + 1
+    # A lap late in a session can require an offset well outside +/-300 s.
+    # Search only shifts with sufficient overlap of this lap and video segment.
+    lower, upper = -float(max_offset_s), float(max_offset_s)
+    if selected_lap is not None:
+        common_span = min(video_times[-1] - video_times[0], telemetry_times[-1] - telemetry_times[0])
+        min_overlap_s = max(min_overlap_s, 0.7 * common_span)
+        if common_span < min_overlap_s:
+            raise ValueError("The selected video segment or lap is shorter than the required overlap.")
+        lower = float(video_times[0] - telemetry_times[-1] + min_overlap_s)
+        upper = float(video_times[-1] - telemetry_times[0] - min_overlap_s)
+    if upper < lower:
+        raise ValueError("The selected video segment and lap are shorter than the required overlap.")
+    if not np.isfinite(search_step_s) or search_step_s <= 0:
+        raise ValueError("Search step must be positive and finite.")
+    # Anchor the grid to the two observed starts, avoiding a phase-dependent grid.
+    origin = float(video_times[0] - telemetry_times[0]) if selected_lap is not None else 0.0
+    first = int(np.ceil((lower - origin) / search_step_s))
+    last = int(np.floor((upper - origin) / search_step_s))
+    candidate_count = last - first + 1
     if candidate_count > MAX_SEARCH_CANDIDATES:
         raise ValueError(
             f"Offset search exceeds the {MAX_SEARCH_CANDIDATES:,}-candidate limit."
         )
-    offsets = np.arange(
-        -float(max_offset_s),
-        float(max_offset_s) + search_step_s * 0.5,
-        float(search_step_s),
-    )
+    offsets = origin + np.arange(first, last + 1) * search_step_s
     candidates: list[dict[str, float]] = []
     for offset in offsets:
         query_times = telemetry_times + offset
@@ -342,9 +364,15 @@ def estimate_video_telemetry_rpm_offset(
             "search_resolution_ms": int(round(search_step_s * 1000)),
             "reliable_confidence_threshold": RELIABLE_CONFIDENCE,
             "searched_offset_range_ms": [
-                -int(round(max_offset_s * 1000)),
-                int(round(max_offset_s * 1000)),
+                int(round(lower * 1000)),
+                int(round(upper * 1000)),
             ],
+            "search_scope": "selected_lap" if selected_lap is not None else "session",
+            "selected_lap": selected_lap,
+            "search_candidates": candidate_count,
+            "required_overlap_s": round(float(min_overlap_s), 3),
+            "telemetry_time_range_s": [float(telemetry_times[0]), float(telemetry_times[-1])],
+            "video_time_range_s": [float(video_times[0]), float(video_times[-1])],
         },
         "warnings": warnings,
     }

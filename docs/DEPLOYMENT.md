@@ -306,6 +306,31 @@ them with a `NEXT_PUBLIC_` prefix.
 
 ## Release checks
 
+### Single-lap RPM synchronization
+
+The Single Lap Analysis synchronization panel selects an actual session lap
+and a video start/end segment. It changes the workspace target lap (not the
+reference eligibility policy). `POST /api/v1/xrk/video-sync/rpm` accepts optional
+`lap`; with that field it requires an inspection token and filters server RPM
+by lap **before** the 5,000-point summary. An absent lap returns 422 rather than
+silently searching the full session. Omitting `lap` retains the legacy API.
+
+Selected-lap offsets use the actual session timestamps and only search shifts
+with at least 70% of the shorter signal span (and the requested minimum overlap).
+This also supports late-session laps outside the old +/-300s window. The result
+records selected lap, time ranges, candidate count and search resolution. The
+UI uses a 0.1s grid; that is search resolution, not a measured accuracy guarantee.
+
+Video/audio bytes stay in the browser. Audio decoding still reads the whole
+file, while STFT/RPM tracking runs only on the chosen segment. One extracted
+trace is retained in component memory for reuse with another lap; it is never
+uploaded as a video or persisted. Cancellation discards stale results, but
+synchronous FFT work and native audio decoding may not stop immediately.
+Manual anchors remain authoritative and low-confidence/multiple-engine results
+are not auto-applied. Verify a visible shared event before trusting synchronization.
+Video gauges use the API's km/h units unchanged and return unavailable outside
+the chosen lap's actual time coverage, rather than repeating its endpoint values.
+
 For native channel provenance, private audits and the P0/P1 evidence boundary,
 see [XRK Channel Trust](XRK_CHANNEL_TRUST.md). The native Parquet artifact uses
 the same fixed inspection expiry; it must not be copied into a public image.
@@ -396,6 +421,24 @@ FastAPI remains responsible for validating chunked uploads.
 
 ### XRK upload transport troubleshooting
 
+The browser now sends a standard multipart `file` field made from a detached
+in-memory Blob. It must NOT set `Content-Type` or a multipart boundary manually,
+and must NOT attach `X-XRK-Filename` on this path. This avoids depending on a
+custom-header preflight while preserving bytes after Safari file-picker cleanup.
+The legacy octet-stream endpoint remains supported. CORS origins, TLS validation,
+file size limits and server-side signature validation are unchanged.
+
+Capability/health success does not prove a file can be uploaded. Verify a
+multipart upload separately and distinguish transport/signature rejection from
+successful native parsing. Rejected OPTIONS requests now log
+`cors_preflight_rejected`, request ID, origin, requested method and header NAMES
+(not authorization values or file contents). Do not add `*` to fix a rejection.
+
+Primary public navigation is `/workspace` (telemetry), `/video-coach` (local
+video), `/methods` (methods and capability status), and `/about` (project and
+workflows). Navigation labels are bilingual; content follows the saved locale.
+Run `node --test tests/rendered-html.test.mjs` after a Sites build to check routes.
+
 When the UI reports an XRK transport error, verify the chain in this order:
 
 ```text
@@ -420,6 +463,64 @@ POST <worker>/api/v1/xrk/inspect
 After changing `wrangler.jsonc`, run the proxy tests and deploy the Worker. A
 Vercel redeploy is needed only when `NEXT_PUBLIC_API_URL` or another build-time
 frontend variable changes.
+
+## Coach review clips and selection feedback
+
+The XRK workspace's **AI Coach Summary** now contains real Top 3 sector
+comparisons, cumulative time deltas, and up to three rule-selected corner
+reviews. Candidates compare the target against one real eligible Top 3 lap
+over the complete corner plus downstream interval. They are not synthesized
+laps, verified driving diagnoses, or guaranteed gains. Lap Quality Gate,
+consensus and LLM generation rules are unchanged.
+
+Confirm video synchronization for the selected lap in **Single Lap Analysis**,
+then return to **AI Coach Summary**. The default preview is four seconds;
+the full-context toggle uses actual corner/downstream crossing times. Both
+clip bounds must fall within available lap/video timing. Missing edge samples
+are not extrapolated. Each reference lap needs its own matching calibration;
+without it the real telemetry comparison remains but no reference video is
+invented. The left reference and right target each offer **Add / Adjust clip**,
+including independent local files, start/end marks, seek/micro-adjustment, and
+preview. Explicit reference selection remains quality-gated; target changes use
+the existing analysis endpoint. Pair playback starts each clip together; it does
+not claim frame-by-frame distance locking or stretch either video's timeline.
+
+A manual crop alone never establishes synchronization. A matching actual-lap
+anchor and explicit human confirmation are required before telemetry values or
+the shared cursor are enabled; the complete crop must remain in continuous
+telemetry coverage. Unconfirmed clips remain preview-only. Crop durations do
+not replace the displayed common-track-interval time deltas. Independent files
+and their corrections remain bound to each side's lap, with at most ten metadata
+revisions retained locally. After refresh, reselect the same local video; no
+video bytes or filenames are stored in the revision history. A single anchor
+does not estimate clock drift. **Restore automatic clip** retains both sources.
+
+After playing each clip, select Accurate / Partly accurate / Inaccurate /
+Cannot judge and optionally specify timing, corner, relevance, or synchronization
+issues. The form confirms success only after server acknowledgement and keeps
+failed submissions available for retry. Changing a lap, calibration or clip
+range creates a different feedback identity. The same receipt can be revised
+without creating duplicate votes.
+
+- `POST /api/v1/feedback/clip-selection`: strict bounded feedback schema; no
+  filename, video bytes or raw telemetry accepted.
+- `GET /api/v1/feedback/clip-selection/stats`: grouped verdict/locale/reason/source/side
+  counts only; no individual session identifiers or clip timings returned.
+- SQLite creates `clip_selection_feedback` additively at startup on the
+  existing Railway persistent volume. Deploy the backend before the frontend.
+- Feedback records selection accuracy, not confirmed driving behavior; it
+  never automatically trains a model or changes analysis rules.
+- Manual correction feedback uses a separate receipt and question, with original
+  clip linkage and optional anchor times/distance. A receipt cannot change source
+  or side. Unconfirmed manual previews accept only `uncertain`. Corrected clips
+  never count as successful automatic selections; legacy clients stay compatible.
+- Video remains in browser memory. Calibration/receipt state is local to the
+  browser, and the normalized XRK session retains its existing expiry.
+
+Local release verification uses private XRK/video files only locally. A test
+anchor exercises playback and feedback but is **not** evidence that those
+files depict the same lap. Public smoke tests use the reviewed public demo.
+See `docs/COACH_REVIEW_FEEDBACK.md` for the user workflow and limits.
 
 ## Provider references
 

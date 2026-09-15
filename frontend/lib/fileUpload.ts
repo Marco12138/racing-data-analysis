@@ -59,7 +59,7 @@ export function describeFileReadError(error: unknown): string {
       ? error.name
       : "";
   if (name === "NotReadableError" || name === "SecurityError") {
-    return "系统拒绝了浏览器读取该文件。若文件位于外置磁盘或 iCloud，请优先使用左侧“本机 XRK 文件库”直接分析；也可以先把文件完整复制到桌面或下载目录，再重新选择。";
+    return "系统拒绝了浏览器读取该文件。若文件位于外置磁盘或 iCloud，请先把文件完整复制到桌面或下载目录，确认可读取后重新选择。";
   }
   if (error instanceof TypeError) {
     return "当前浏览器不支持直接读取 XRK 文件，请升级 Safari，或改用 Chrome / Edge 后重试。";
@@ -82,6 +82,13 @@ export function binaryFileUploadRequest(
     body: blob,
     signal,
   };
+}
+
+/** Browser supplies the multipart boundary; detached bytes survive Safari picker cleanup. */
+export function multipartFileUploadRequest(blob: Blob, filename: string, signal?: AbortSignal): RequestInit {
+  const body = new FormData();
+  body.append("file", blob, filename);
+  return { method: "POST", body, signal };
 }
 
 export function exceedsUploadLimit(file: File, maxBytes?: number | null): boolean {

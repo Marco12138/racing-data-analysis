@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { Activity, ArrowRight, BarChart3, Gauge, Languages, Play, ShieldCheck, Upload, Zap } from "lucide-react";
+import { Activity, ArrowRight, BarChart3, Play, ShieldCheck, Upload, Zap } from "lucide-react";
 
 import type { PublicDemoSummary } from "../lib/publicDemo";
 import { useI18n, type TranslationKey } from "../lib/i18n";
 import { MiniTrackMap } from "./PublicDemoDashboard";
+import { SiteNavigation } from "./SiteNavigation";
 
 const capabilities = [
   [Activity, "capabilities.telemetry.title", "capabilities.telemetry.description"],
@@ -14,22 +15,10 @@ const capabilities = [
 ] satisfies Array<[typeof Activity, TranslationKey, TranslationKey]>;
 
 export function LandingPageClient({ demo }: { demo: PublicDemoSummary | null }) {
-  const { locale, setLocale, t } = useI18n();
+  const { t } = useI18n();
   return (
-    <main className="public-demo-page">
+    <><SiteNavigation /><main className="public-demo-page">
       <section className="public-hero" aria-labelledby="platform-title">
-        <nav className="public-nav" aria-label={t("nav.primary")}>
-          <span className="public-brand"><Gauge size={19} /> {t("brand.name")}</span>
-          <div className="public-nav-actions">
-            <div className="language-switch" aria-label="Language">
-              <Languages size={15} aria-hidden="true" />
-              <button type="button" className={locale === "zh" ? "is-active" : ""} onClick={() => setLocale("zh")}>中</button>
-              <button type="button" className={locale === "en" ? "is-active" : ""} onClick={() => setLocale("en")}>EN</button>
-            </div>
-            <Link href="/demo" className="nav-command">{t("nav.demo")}</Link>
-            <Link href="/workspace" className="nav-command">{t("nav.openDashboard")}</Link>
-          </div>
-        </nav>
         <div className="hero-content">
           <p className="hero-kicker">{t("hero.kicker")}</p>
           <h1 id="platform-title">{t("hero.title")}</h1>
@@ -76,6 +65,6 @@ export function LandingPageClient({ demo }: { demo: PublicDemoSummary | null }) 
           ))}
         </div>
       </section>
-    </main>
+    </main></>
   );
 }

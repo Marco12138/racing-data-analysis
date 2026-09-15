@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from backend.app.analysis.video_telemetry_sync import (
     estimate_video_telemetry_offset,
     estimate_video_telemetry_rpm_offset,
+    telemetry_rpm_summary,
 )
 from backend.app.core.config import Settings
 from backend.app.main import create_app
@@ -137,6 +138,91 @@ def test_rpm_estimator_rejects_missing_rpm_data() -> None:
             [{"time_s": 0, "rpm": 9_000}],
             [{"time_s": 0, "rpm": 9_000}],
         )
+
+
+def test_rpm_summary_filters_lap_before_sampling_and_keeps_session_clock() -> None:
+    """Selecting a lap must never rebase time or sample neighbouring laps."""
+    frame = pd.DataFrame({
+        "lap": [1] * 100 + [7] * 100,
+        "session_time_s": np.arange(200) + 500,
+        "rpm": [12000] * 100 + [8000] * 100,
+    })
+    rows = telemetry_rpm_summary(frame, lap=7, max_points=10)
+    assert len(rows) == 10
+    assert {row["rpm"] for row in rows} == {8000}
+    assert rows[0]["time_s"] == 600
+    assert rows[-1]["time_s"] == 699
+    with pytest.raises(ValueError, match="selected lap"):
+        telemetry_rpm_summary(frame, lap=9)
+
+
+def test_selected_lap_search_handles_late_session_and_reduces_work() -> None:
+    """Known clocks recover a late lap without a whole-session +/- search."""
+    video, telemetry = rpm_synchronized_fixture(offset_s=7.5)
+    telemetry = [{**row, "time_s": row["time_s"] + 600} for row in telemetry]
+    result = estimate_video_telemetry_rpm_offset(
+        video, telemetry, selected_lap=13, search_step_s=0.1,
+    )
+    assert result["offset_ms"] == pytest.approx(-592500, abs=100)
+    assert result["evidence"]["selected_lap"] == 13
+    assert result["evidence"]["telemetry_time_range_s"][0] == 600
+    assert result["evidence"]["search_candidates"] < 400
+    assert result["evidence"]["required_overlap_s"] >= 0.7 * 59.75
+    assert result["reliable"] is True
+
+
+def test_selected_lap_does_not_accept_an_unrelated_short_fragment() -> None:
+    """A tiny coincidental peak must not beat broad lap coverage."""
+    video, telemetry = rpm_synchronized_fixture()
+    result = estimate_video_telemetry_rpm_offset(video, telemetry, selected_lap=1)
+    assert result["evidence"]["matched_overlap_s"] >= result["evidence"]["required_overlap_s"]
+    with pytest.raises(ValueError, match="shorter"):
+        estimate_video_telemetry_rpm_offset(video[:8], telemetry, selected_lap=1)
+
+
+def test_rpm_api_selects_exact_lap_from_multiple_similar_laps(monkeypatch, tmp_path) -> None:
+    """A repeated engine pattern in a different lap cannot win the match."""
+    client = build_client(monkeypatch, tmp_path)
+    video, rows = rpm_synchronized_fixture()
+    first = pd.DataFrame(rows).rename(columns={"time_s": "session_time_s"}).assign(lap=1)
+    late = first.assign(lap=13, session_time_s=first.session_time_s + 600)
+    with client:
+        token = seed_inspection(client, pd.concat([first, late]))
+        response = client.post("/api/v1/xrk/video-sync/rpm", json={
+            "inspection_id": token, "lap": 13, "video_rpm": video, "search_step_s": 0.1,
+        })
+    assert response.status_code == 200
+    body = response.json()
+    assert body["offset_ms"] == pytest.approx(-592500, abs=100)
+    assert body["evidence"]["selected_lap"] == 13
+    assert body["evidence"]["telemetry_rpm_points"] == len(late)
+
+
+@pytest.mark.parametrize("lap", [2, 99])
+def test_rpm_api_never_falls_back_to_session_for_missing_lap(monkeypatch, tmp_path, lap) -> None:
+    """Wrong lap selection is a readable failure, not a wider automatic search."""
+    client = build_client(monkeypatch, tmp_path)
+    video, rows = rpm_synchronized_fixture()
+    frame = pd.DataFrame(rows).rename(columns={"time_s": "session_time_s"}).assign(lap=1)
+    with client:
+        token = seed_inspection(client, frame)
+        response = client.post("/api/v1/xrk/video-sync/rpm", json={
+            "inspection_id": token, "lap": lap, "video_rpm": video,
+        })
+    assert response.status_code == 422
+    assert response.json()["error_code"] == "VIDEO_SYNC_LAP_UNAVAILABLE"
+
+
+def test_rpm_lap_selection_requires_server_verified_lap_labels(monkeypatch, tmp_path) -> None:
+    """A caller-provided unlabelled summary cannot prove which lap it contains."""
+    client = build_client(monkeypatch, tmp_path)
+    video, rows = rpm_synchronized_fixture()
+    with client:
+        response = client.post("/api/v1/xrk/video-sync/rpm", json={
+            "lap": 1, "video_rpm": video, "telemetry_rpm": rows,
+        })
+    assert response.status_code == 422
+    assert response.json()["error_code"] == "VIDEO_SYNC_INSPECTION_REQUIRED"
 
 
 def test_estimator_marks_unrelated_features_unreliable() -> None:

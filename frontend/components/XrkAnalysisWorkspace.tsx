@@ -1,6 +1,7 @@
 "use client";
 
 import { CornerDynamicsSummary } from "./CornerDynamicsSummary";
+import { CoachReviewPanel } from "./CoachReviewPanel";
 
 import {
   useCallback,
@@ -48,6 +49,7 @@ import {
   analyzeLapAudio,
   extractVideoRpmTrace,
   type LapAudioAnalysis,
+  type VideoRpmTrace,
 } from "../lib/audioRpm";
 import {
   buildManualCorner,
@@ -79,7 +81,6 @@ import {
 import { extractVideoSyncFeatures } from "../lib/videoFeatureExtraction";
 import { initialVideoState } from "../lib/videoSession";
 import {
-  buildCoachVideoWindow,
   buildCoachVideoPair,
   type CoachVideoWindow,
 } from "../lib/coachVideoEvidence";
@@ -201,8 +202,13 @@ export function XrkAnalysisWorkspace({
   useEffect(() => {
     if (calibration) {
       window.localStorage.setItem(videoStorageKey, JSON.stringify(calibration));
+      try {
+        const key = `racing-review-calibrations:${analysis.file_fingerprint}`;
+        const previous = JSON.parse(localStorage.getItem(key) ?? "{}");
+        localStorage.setItem(key, JSON.stringify({ ...previous, [calibration.target_lap]: calibration }));
+      } catch { /* Review history is optional; the active calibration remains usable. */ }
     }
-  }, [calibration, videoStorageKey]);
+  }, [calibration, videoStorageKey, analysis.file_fingerprint]);
 
   useEffect(() => {
     if (publishedDemo) return;
@@ -318,13 +324,7 @@ export function XrkAnalysisWorkspace({
         <Overview
           analysis={analysis}
           selectedEvent={selectedEvent}
-          onCursor={selectDistance}
-          videoUrl={videoUrl}
-          videoFile={videoFile}
-          videoDurationS={videoDurationS}
-          calibration={calibration}
-          offsetMs={offsetMs}
-          llmNarrative={llmNarrative}
+          onCoach={() => setActiveTab("coach")}
         />
       )}
 
@@ -403,6 +403,9 @@ export function XrkAnalysisWorkspace({
       {activeTab === "video" && (
         <SingleLapAnalysisPanel
           analysis={analysis}
+          analyzing={analyzing}
+          onAnalyze={onAnalyze}
+          readOnly={publishedDemo}
           cursorDistance={cursorDistance}
           seekRequest={seekRequest}
           onCursor={setCursorDistance}
@@ -435,7 +438,12 @@ export function XrkAnalysisWorkspace({
       )}
 
       {activeTab === "coach" && (
-        <CoachSummaryPanel analysis={analysis} onCursor={selectDistance} llmNarrative={llmNarrative} />
+        <CoachSummaryPanel analysis={analysis} onCursor={selectDistance} llmNarrative={llmNarrative}>
+          <CoachReviewPanel analysis={analysis} videoUrl={videoUrl} videoFile={videoFile}
+            videoDurationS={videoDurationS} calibration={calibration}
+            onSync={() => setActiveTab("video")} onCursor={selectDistance}
+            onAnalyze={onAnalyze} analyzing={analyzing} readOnly={publishedDemo} />
+        </CoachSummaryPanel>
       )}
 
       {activeTab === "report" && <ReportPanel analysis={analysis} />}
@@ -446,23 +454,11 @@ export function XrkAnalysisWorkspace({
 function Overview({
   analysis,
   selectedEvent,
-  onCursor,
-  videoUrl,
-  videoFile,
-  videoDurationS,
-  calibration,
-  offsetMs,
-  llmNarrative,
+  onCoach,
 }: {
   analysis: XrkAnalysis;
   selectedEvent?: XrkEvent;
-  onCursor: (distance: number) => void;
-  videoUrl: string;
-  videoFile: File | null;
-  videoDurationS: number;
-  calibration: VideoSyncCalibration | null;
-  offsetMs: number;
-  llmNarrative: { available: boolean; model: string | null };
+  onCoach: () => void;
 }) {
   const { t } = useI18n();
   const metrics = [
@@ -496,180 +492,13 @@ function Overview({
           )}
         </Panel>
       </div>
-      <CoachOverview
-        analysis={analysis}
-        onCursor={onCursor}
-        videoUrl={videoUrl}
-        videoFile={videoFile}
-        videoDurationS={videoDurationS}
-        calibration={calibration}
-        offsetMs={offsetMs}
-        llmNarrative={llmNarrative}
-      />
+      <button type="button" onClick={onCoach} className="flex items-center gap-2 rounded-md border border-cyan-500/40 px-4 py-3 text-sm text-cyan-200">
+        <Target size={18} />{t("xrk.tab.coach")}
+      </button>
     </div>
   );
 }
 
-function CoachOverview({
-  analysis,
-  onCursor,
-  videoUrl,
-  videoFile,
-  videoDurationS,
-  calibration,
-  offsetMs,
-  llmNarrative,
-}: {
-  analysis: XrkAnalysis;
-  onCursor: (distance: number) => void;
-  videoUrl: string;
-  videoFile: File | null;
-  videoDurationS: number;
-  calibration: VideoSyncCalibration | null;
-  offsetMs: number;
-  llmNarrative: { available: boolean; model: string | null };
-}) {
-  const { t, locale } = useI18n();
-  const summary = analysis.ai_coach_summary;
-  const improvement = analysis.achievable_improvement_range;
-  const priorities = summary.training_priorities.slice(0, 3);
-  const clipMappingAvailable = Boolean(
-    videoUrl
-    && videoFile
-    && videoDurationS > 0
-    && calibration
-    && calibrationMatchesVideo(calibration, videoFile, videoDurationS)
-    && calibration.target_lap === analysis.target_lap
-    && analysis.track,
-  );
-
-  return (
-    <div className="space-y-5">
-      <Panel title={t("xrk.coach.title")} subtitle={t("xrk.coach.overviewSubtitle")}>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className={`llm-narrative-badge ${llmNarrative.available ? "is-on" : ""}`}>
-            {llmNarrative.available ? t("xrk.llm.enabled") : t("xrk.llm.disabled")}
-          </p>
-          <p className="text-xs text-slate-500">{t("xrk.coach.realLapOnly")}</p>
-        </div>
-        {analysis.narrative ? (
-          <p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-200">
-            {analysis.narrative}
-          </p>
-        ) : (
-          <div className="mt-4 grid gap-4 sm:grid-cols-3">
-            <QualityFact
-              label={t("xrk.coach.primaryFocus")}
-              value={priorities[0]
-                ? localizedCorner(priorities[0].corner, locale)
-                : t("xrk.coach.noFocus")}
-            />
-            <QualityFact
-              label={t("xrk.coach.achievableRange")}
-              value={improvement.maximum_improvement_s > 0
-                ? `${improvement.minimum_improvement_s.toFixed(3)}–${improvement.maximum_improvement_s.toFixed(3)}s`
-                : t("xrk.coach.insufficient")}
-            />
-            <QualityFact
-              label={t("xrk.coach.realReferences")}
-              value={summary.top_valid_laps.slice(0, 3).map((lap) => `L${lap.lap}`).join(" / ") || "—"}
-            />
-          </div>
-        )}
-        <p className="mt-4 text-xs font-medium text-amber-200">
-          {t("xrk.coach.disclaimer")}
-        </p>
-      </Panel>
-
-      <Panel title={t("xrk.coach.nextPriorities")} subtitle={t("xrk.coach.overviewPrioritiesSubtitle")}>
-        {priorities.length ? (
-          <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-            {priorities.map((priority, index) => {
-              const corner = analysis.consensus_benchmark.corners.find(
-                (item) => item.corner === priority.corner,
-              );
-              const recoveryDistance = priorityRecoveryDistance(priority);
-              const clipFocusDistance = recoveryDistance
-                ?? (corner ? (corner.entry_distance_m + corner.exit_distance_m) / 2 : null);
-              const clip = clipMappingAvailable && corner && analysis.track
-                && clipFocusDistance != null
-                ? buildCoachVideoWindow(
-                    analysis.track.target,
-                    clipFocusDistance,
-                    offsetMs,
-                    videoDurationS,
-                  )
-                : null;
-              const cornerName = localizedCorner(priority.corner, locale);
-              return (
-                <article key={priority.corner} className="overflow-hidden rounded-md border border-slate-800 bg-slate-950/55">
-                  {clip && videoUrl ? (
-                    <CoachEvidenceClip
-                      videoUrl={videoUrl}
-                      clip={clip}
-                      label={cornerName}
-                    />
-                  ) : (
-                    <div className="flex aspect-video items-center justify-center border-b border-slate-800 bg-slate-950 px-5 text-center">
-                      <div>
-                        <Video className="mx-auto text-slate-600" size={26} />
-                        <p className="mt-2 text-xs leading-5 text-slate-500">
-                          {!videoUrl
-                            ? t("xrk.coach.videoUnavailable")
-                            : t("xrk.coach.videoCalibrationRequired")}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                  <div className="p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase text-[#35d6d0]">
-                          {t("xrk.coach.priority", { index: index + 1 })}
-                        </p>
-                        <h3 className="mt-1 text-base font-semibold text-white">{cornerName}</h3>
-                      </div>
-                      {corner ? (
-                        <button
-                          type="button"
-                          onClick={() => onCursor((corner.entry_distance_m + corner.exit_distance_m) / 2)}
-                          className="shrink-0 rounded-md border border-slate-700 px-2.5 py-2 text-xs text-slate-200 hover:border-[#35d6d0]"
-                        >
-                          {t("xrk.coach.jump")}
-                        </button>
-                      ) : null}
-                    </div>
-                    <p className="mt-3 text-sm leading-6 text-slate-300">
-                      {corner
-                        ? t("xrk.coach.overviewWhy", {
-                            count: corner.occurrence_count,
-                            gain: corner.net_gain.toFixed(3),
-                          })
-                        : priority.why}
-                    </p>
-                    <CoachField
-                      label={t("xrk.coach.whatToTest")}
-                      value={t("xrk.coach.overviewRecoveryTest")}
-                    />
-                    <CoachField
-                      label={t("xrk.coach.trainingDrill")}
-                      value={t("xrk.coach.overviewDrill")}
-                    />
-                    <p className="mt-3 text-xs leading-5 text-slate-500">
-                      {t("xrk.coach.evidence")}: {priority.evidence.channels.join(", ")} · {t("xrk.coach.confidence")}: {priority.confidence}
-                    </p>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        ) : (
-          <p className="text-sm leading-6 text-slate-400">{t("xrk.coach.noPriority")}</p>
-        )}
-      </Panel>
-    </div>
-  );
-}
 
 function CoachEvidenceClip({
   videoUrl,
@@ -719,21 +548,6 @@ function CoachEvidenceClip({
   );
 }
 
-function priorityRecoveryDistance(priority: XrkAnalysis["ai_coach_summary"]["training_priorities"][number]): number | null {
-  const values = priority.evidence.features_by_lap
-    .map((feature) => feature.reacceleration_distance_m)
-    .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
-    .sort((left, right) => left - right);
-  if (!values.length) return null;
-  const middle = Math.floor(values.length / 2);
-  return values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
-}
-
-function localizedCorner(corner: string, locale: "zh" | "en"): string {
-  const suggested = /^Suggested Zone\s+(\d+)$/i.exec(corner);
-  if (suggested && locale === "zh") return `建议区间 ${suggested[1]}`;
-  return corner;
-}
 
 function LapQualityPanel({
   analysis,
@@ -1417,6 +1231,9 @@ function SectorZonePanel({
 
 export function SingleLapAnalysisPanel({
   analysis,
+  analyzing = false,
+  onAnalyze,
+  readOnly = false,
   cursorDistance,
   seekRequest,
   onCursor,
@@ -1434,6 +1251,9 @@ export function SingleLapAnalysisPanel({
   setOffsetMs,
 }: {
   analysis: XrkAnalysis;
+  analyzing?: boolean;
+  onAnalyze?: (options: Partial<XrkAnalyzeOptions>) => Promise<void>;
+  readOnly?: boolean;
   cursorDistance: number;
   seekRequest: SeekRequest | null;
   onCursor: (distance: number) => void;
@@ -1491,6 +1311,16 @@ export function SingleLapAnalysisPanel({
   const [rpmSyncing, setRpmSyncing] = useState(false);
   const [rpmSyncProgress, setRpmSyncProgress] = useState(0);
   const [rpmAmbiguous, setRpmAmbiguous] = useState(false);
+  const rpmSyncAbortRef = useRef<AbortController | null>(null);
+  const rpmTraceCache = useRef<{
+    file: File; start: number; end: number; strokes: number; trace: VideoRpmTrace;
+  } | null>(null);
+  // Target laps may be slower than the reference quality window; reference
+  // eligibility remains controlled by the existing Lap Quality Gate.
+  const syncLaps = analysis.lap_rows;
+  const selectedLapRow = analysis.lap_rows.find((row) => Number(row.lap) === analysis.target_lap);
+  const rpmRangeValid = Number.isFinite(lapStart) && Number.isFinite(lapEnd)
+    && lapStart >= 0 && lapEnd <= videoDurationS && lapEnd - lapStart >= 5;
   const [detectedCodec, setDetectedCodec] = useState<DetectedVideoCodec>("unknown");
   const codecProbeRef = useRef<File | null>(null);
 
@@ -1702,7 +1532,19 @@ export function SingleLapAnalysisPanel({
 
   useEffect(() => () => {
     autoSyncAbortRef.current?.abort();
+    rpmSyncAbortRef.current?.abort();
   }, []);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setPendingAutoResult(null);
+      setAutoConfidence(null);
+      setRpmAmbiguous(false);
+      setSyncMessage("");
+      setSyncError("");
+    });
+    return () => { rpmSyncAbortRef.current?.abort(); };
+  }, [analysis.target_lap, analysis.inspection_id, videoFile, lapStart, lapEnd, rpmStrokes]);
 
   useEffect(() => {
     if (!videoRef.current || !seekRequest || !analysis.track) return;
@@ -1897,34 +1739,60 @@ export function SingleLapAnalysisPanel({
       setSyncError(t("xrk.video.activeInspectionRequired"));
       return;
     }
+    if (!rpmRangeValid) {
+      setSyncError(t("xrk.video.rpmRangeInvalid"));
+      return;
+    }
+    rpmSyncAbortRef.current?.abort();
+    const controller = new AbortController();
+    rpmSyncAbortRef.current = controller;
     setRpmSyncing(true);
     setRpmSyncProgress(0);
     setRpmAmbiguous(false);
     setSyncError("");
     setSyncMessage(t("xrk.video.rpmAutoRunning"));
     try {
-      const trace = await extractVideoRpmTrace(videoFile, {
-        strokes: rpmStrokes,
-        onProgress: (fraction) => setRpmSyncProgress(fraction),
-      });
+      const cached = rpmTraceCache.current;
+      const trace = cached?.file === videoFile && cached.start === lapStart
+        && cached.end === lapEnd && cached.strokes === rpmStrokes ? cached.trace
+        : await extractVideoRpmTrace(videoFile, {
+          strokes: rpmStrokes,
+          startS: lapStart,
+          endS: lapEnd,
+          signal: controller.signal,
+          onProgress: (fraction) => setRpmSyncProgress(fraction),
+        });
+      controller.signal.throwIfAborted();
+      rpmTraceCache.current = { file: videoFile, start: lapStart, end: lapEnd, strokes: rpmStrokes, trace };
       setRpmAmbiguous(trace.source_ambiguity?.ambiguous ?? false);
       setSyncMessage(t("xrk.video.comparing"));
       const result = await autoSyncVideoRpm({
         inspection_id: analysis.inspection_id,
+        lap: analysis.target_lap,
         video_rpm: trace.times.map((time_s, index) => ({
           time_s,
           rpm: trace.rpm[index],
         })),
-        search_step_s: 0.25,
-      });
-      considerAutoResult(result, t("xrk.video.rpmChannelLabel"));
+        search_step_s: 0.1,
+      }, controller.signal);
+      controller.signal.throwIfAborted();
+      if (result.evidence.selected_lap !== analysis.target_lap) {
+        throw new Error(t("xrk.video.rpmLapMismatch"));
+      }
+      considerAutoResult(
+        trace.source_ambiguity?.ambiguous ? { ...result, reliable: false, confidence: Math.min(result.confidence, 0.65) } : result,
+        t("xrk.video.rpmLapResult", { lap: analysis.target_lap }),
+      );
     } catch (error) {
+      setSyncMessage("");
       if ((error as Error).name !== "AbortError") {
-        setSyncMessage("");
         setSyncError((error as Error).message || t("xrk.video.autoFailed"));
       }
     } finally {
-      setRpmSyncing(false);
+      if (rpmSyncAbortRef.current === controller) {
+        rpmSyncAbortRef.current = null;
+        setRpmSyncing(false);
+      }
     }
   }
 
@@ -1938,6 +1806,8 @@ export function SingleLapAnalysisPanel({
   }
 
   function replaceVideo() {
+    rpmSyncAbortRef.current?.abort();
+    rpmTraceCache.current = null;
     if (videoUrl && typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
       URL.revokeObjectURL(videoUrl);
     }
@@ -2045,7 +1915,7 @@ export function SingleLapAnalysisPanel({
           <button
             type="button"
             onClick={() => setLapStart(videoRef.current?.currentTime ?? lapStart)}
-            disabled={!videoUrl || videoDurationS <= 0}
+            disabled={rpmSyncing || !videoUrl || videoDurationS <= 0}
             className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:opacity-45 hover:border-[#35d6d0]"
           >
             {t("videoCoach.setStart")} {lapStart.toFixed(2)}s
@@ -2053,7 +1923,7 @@ export function SingleLapAnalysisPanel({
           <button
             type="button"
             onClick={() => setLapEnd(videoRef.current?.currentTime ?? lapEnd)}
-            disabled={!videoUrl || videoDurationS <= 0}
+            disabled={rpmSyncing || !videoUrl || videoDurationS <= 0}
             className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:opacity-45 hover:border-[#35d6d0]"
           >
             {t("videoCoach.setEnd")} {lapEnd.toFixed(2)}s
@@ -2061,7 +1931,7 @@ export function SingleLapAnalysisPanel({
           <select
             value={rpmStrokes}
             onChange={(event) => setRpmStrokes(event.target.value === "4" ? 4 : 2)}
-            disabled={rpmAnalyzing}
+            disabled={rpmAnalyzing || rpmSyncing}
             aria-label={t("videoCoach.strokes")}
             className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
           >
@@ -2071,7 +1941,7 @@ export function SingleLapAnalysisPanel({
           <button
             type="button"
             onClick={onAudioMarkClick}
-            disabled={rpmAnalyzing || !videoUrl || videoDurationS <= 0}
+            disabled={rpmAnalyzing || rpmSyncing || !videoUrl || videoDurationS <= 0}
             className="flex min-h-10 items-center gap-2 rounded-md border border-cyan-500/60 bg-cyan-500/10 px-4 text-sm font-semibold text-cyan-100 disabled:cursor-not-allowed disabled:opacity-45"
           >
             <Play size={15} />
@@ -2289,6 +2159,46 @@ export function SingleLapAnalysisPanel({
         </Panel>
         <Panel title={t("xrk.video.syncTitle")} subtitle={t("xrk.video.syncSubtitle")}>
           <label className="block text-xs text-slate-400">
+            {t("xrk.video.telemetryLap")}
+            <select
+              aria-label={t("xrk.video.telemetryLap")}
+              value={analysis.target_lap}
+              disabled={readOnly || !onAnalyze || analyzing || rpmSyncing || autoSyncing}
+              onChange={(event) => void onAnalyze?.({ target_lap: Number(event.target.value) })}
+              className="mt-2 min-h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white disabled:opacity-50"
+            >
+              {!syncLaps.some((row) => Number(row.lap) === analysis.target_lap) && (
+                <option value={analysis.target_lap} disabled>Lap {analysis.target_lap}</option>
+              )}
+              {syncLaps.map((row) => (
+                <option key={Number(row.lap)} value={Number(row.lap)}>
+                  {t("xrk.video.lapOption", { lap: Number(row.lap), time: Number(row.lap_time).toFixed(3) })}
+                  {analysis.lap_quality.laps.find((lap) => lap.lap === Number(row.lap))?.analysis_eligible === false ? ` · ${t("xrk.video.targetOnly")}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="my-3 grid grid-cols-2 gap-2">
+            <label className="text-xs text-slate-400">
+              {t("xrk.video.segmentStart")}
+              <input type="number" min={0} max={videoDurationS} step={0.1} value={lapStart}
+                disabled={rpmSyncing || rpmAnalyzing}
+                onChange={(event) => setLapStart(Number(event.target.value))}
+                className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white" />
+            </label>
+            <label className="text-xs text-slate-400">
+              {t("xrk.video.segmentEnd")}
+              <input type="number" min={0} max={videoDurationS} step={0.1} value={lapEnd}
+                disabled={rpmSyncing || rpmAnalyzing}
+                onChange={(event) => setLapEnd(Number(event.target.value))}
+                className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white" />
+            </label>
+          </div>
+          {selectedLapRow && <p className="mb-3 text-xs text-slate-400">
+            {t("xrk.video.rpmScope", { lap: analysis.target_lap, time: Number(selectedLapRow.lap_time).toFixed(3) })}
+          </p>}
+          {videoDurationS > 0 && !rpmRangeValid && <p role="alert" className="mb-3 text-xs text-amber-300">{t("xrk.video.rpmRangeInvalid")}</p>}
+          <label className="block text-xs text-slate-400">
             {t("xrk.video.offset")}
             <input
               type="number"
@@ -2314,7 +2224,7 @@ export function SingleLapAnalysisPanel({
           <button
             type="button"
             onClick={runAutomaticAlignment}
-            disabled={autoSyncing || !videoUrl || videoDurationS <= 0 || !analysis.inspection_id || analysis.inspection_id.startsWith("public-demo")}
+            disabled={analyzing || rpmSyncing || autoSyncing || !videoUrl || videoDurationS <= 0 || !analysis.inspection_id || analysis.inspection_id.startsWith("public-demo")}
             className="mt-4 flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-cyan-500/60 bg-cyan-500/10 px-4 text-sm font-semibold text-cyan-100 disabled:cursor-not-allowed disabled:opacity-45"
           >
             <WandSparkles size={16} /> {autoSyncing ? t("xrk.video.autoRunning") : t("xrk.video.auto")}
@@ -2322,7 +2232,7 @@ export function SingleLapAnalysisPanel({
           <button
             type="button"
             onClick={runAudioRpmAlignment}
-            disabled={rpmSyncing || !videoUrl || videoDurationS <= 0 || !analysis.inspection_id || analysis.inspection_id.startsWith("public-demo")}
+            disabled={analyzing || rpmAnalyzing || autoSyncing || rpmSyncing || !rpmRangeValid || !analysis.capabilities.rpm || !videoUrl || !analysis.inspection_id || analysis.inspection_id.startsWith("public-demo")}
             className="mt-3 flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-fuchsia-500/60 bg-fuchsia-500/10 px-4 text-sm font-semibold text-fuchsia-100 disabled:cursor-not-allowed disabled:opacity-45"
           >
             <Activity size={16} />
@@ -2330,6 +2240,11 @@ export function SingleLapAnalysisPanel({
               ? `${t("xrk.video.rpmAutoRunning")} ${Math.round(rpmSyncProgress * 100)}%`
               : t("xrk.video.rpmAuto")}
           </button>
+          {rpmSyncing && <button type="button" onClick={() => rpmSyncAbortRef.current?.abort()}
+            className="mt-2 flex min-h-10 items-center gap-2 text-sm text-slate-300">
+            <X size={16} />{t("xrk.video.cancelRpm")}
+          </button>}
+          {!analysis.capabilities.rpm && <p className="mt-2 text-xs text-amber-300">{t("xrk.unavailable.rpm")}</p>}
           <p className="mt-2 text-xs leading-5 text-slate-500">
             {t("xrk.video.privacy")}
           </p>
@@ -2508,10 +2423,12 @@ function CoachSummaryPanel({
   analysis,
   onCursor,
   llmNarrative = { available: false, model: null },
+  children,
 }: {
   analysis: XrkAnalysis;
   onCursor: (distance: number) => void;
   llmNarrative?: { available: boolean; model: string | null };
+  children?: ReactNode;
 }) {
   const { t, locale } = useI18n();
   const [feedbackSent, setFeedbackSent] = useState<{ corner: string; thumbsUp: boolean } | null>(null);
@@ -2579,6 +2496,10 @@ function CoachSummaryPanel({
         </p>
       </Panel>
 
+      {children}
+
+      <details className="border-t border-slate-700 pt-4">
+      <summary className="mb-4 cursor-pointer text-sm text-slate-300">{t("xrk.coach.nextPriorities")}</summary>
       <Panel title={t("xrk.coach.nextPriorities")} subtitle={t("xrk.coach.nextSubtitle")}>
         {summary.training_priorities.length ? (
           <div>
@@ -2653,6 +2574,8 @@ function CoachSummaryPanel({
           </p>
         )}
       </Panel>
+
+      </details>
 
       <div className="grid gap-5 xl:grid-cols-2">
         <Panel title={t("xrk.coach.stableTitle")} subtitle={t("xrk.coach.stableSubtitle")}>

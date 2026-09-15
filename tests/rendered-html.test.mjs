@@ -51,8 +51,23 @@ test("server-renders the reviewed sample on its own demo route", async () => {
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Anonymized sample XRK session/);
-  assert.match(html, /Open Dashboard/);
+  assert.match(html, /href="\/workspace"/);
   assert.doesNotMatch(html, /Import telemetry, then inspect the evidence/);
+});
+
+test("all primary routes share bilingual functional navigation and real destinations", async () => {
+  for (const path of ["/", "/workspace", "/video-coach", "/methods", "/about"]) {
+    const response = await render(undefined, "en-US", "", path);
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    for (const label of ["遥测分析", "Telemetry", "视频分析", "Video", "模型介绍", "Methods", "项目介绍", "About"]) assert.ok(html.includes(label), `${path} missing ${label}`);
+    for (const href of ["/workspace", "/video-coach", "/methods", "/about"]) assert.ok(html.includes(`href="${href}"`));
+    if (path === "/methods") {
+      assert.match(html, /Measured/);
+      assert.match(html, /Inferred/);
+      assert.match(html, /Structured evidence only/);
+    }
+  }
 });
 
 test("server and client share the Accept-Language locale on first render", async () => {

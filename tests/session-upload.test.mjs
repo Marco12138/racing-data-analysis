@@ -9,6 +9,7 @@ import {
 } from "../frontend/lib/sessionUpload.ts";
 import {
   binaryFileUploadRequest,
+  multipartFileUploadRequest,
   describeFileReadError,
   exceedsUploadLimit,
   materializeXrkFile,
@@ -67,7 +68,7 @@ test("file read errors are explained without raw internals", () => {
   );
   assert.match(
     describeFileReadError(new DOMException("blocked", "NotReadableError")),
-    /本机 XRK 文件库/
+    /复制到桌面或下载目录/
   );
   assert.match(
     describeFileReadError(new DOMException("blocked", "SecurityError")),
@@ -162,6 +163,23 @@ test("XRK browser upload uses a raw body and encoded filename header", () => {
   assert.equal(request.body, selected);
   assert.equal(request.headers["Content-Type"], "application/octet-stream");
   assert.equal(request.headers["X-XRK-Filename"], "driver%20session.xrk");
+});
+
+test("standard browser upload preserves detached bytes and lets the browser set its boundary", async () => {
+  const source = new File([new Uint8Array([0, 255, 60, 104, 67, 78, 70])], "车手 session.xrk");
+  const detached = await materializeUploadBlob(source);
+  const controller = new AbortController();
+  const options = multipartFileUploadRequest(detached, source.name, controller.signal);
+  assert.equal(options.headers, undefined);
+  assert.equal(options.signal, controller.signal);
+  assert.ok(options.body instanceof FormData);
+  const wire = new Request("https://backend.example/api/v1/xrk/inspect", options);
+  assert.match(wire.headers.get("Content-Type"), /^multipart\/form-data; boundary=/);
+  const decoded = await wire.formData();
+  const uploaded = decoded.get("file");
+  assert.equal(uploaded.name, source.name);
+  assert.equal(uploaded.size, source.size);
+  assert.deepEqual(new Uint8Array(await uploaded.arrayBuffer()), new Uint8Array(await source.arrayBuffer()));
 });
 
 test("selected file remains available until an async upload settles", async () => {

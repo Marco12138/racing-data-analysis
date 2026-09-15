@@ -105,6 +105,17 @@ def init_db() -> None:
             """
         )
         _ensure_owner_column(conn, "sessions")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS clip_selection_feedback (
+                feedback_id TEXT PRIMARY KEY,
+                clip_id TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
         _ensure_owner_column(conn, "video_jobs")
         _ensure_owner_column(conn, "video_markers")
         conn.execute(
@@ -459,6 +470,43 @@ def save_coach_validation(
             ),
         )
         return int(cursor.lastrowid)
+
+
+def save_clip_feedback(payload: dict) -> bool:
+    """Upsert an opaque receipt, allowing safe retries without duplicate votes."""
+    init_db()
+    now = _now()
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute(
+            "INSERT INTO clip_selection_feedback VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(feedback_id) DO UPDATE SET "
+            "payload_json=excluded.payload_json, updated_at=excluded.updated_at "
+            "WHERE clip_selection_feedback.clip_id=excluded.clip_id "
+            "AND COALESCE(json_extract(clip_selection_feedback.payload_json, '$.selection_source'), 'automatic') "
+            "=COALESCE(json_extract(excluded.payload_json, '$.selection_source'), 'automatic') "
+            "AND COALESCE(json_extract(clip_selection_feedback.payload_json, '$.side'), 'target') "
+            "=COALESCE(json_extract(excluded.payload_json, '$.side'), 'target')",
+            (payload["feedback_id"], payload["clip_id"], json.dumps(payload), now, now),
+        )
+        return cursor.rowcount == 1
+
+
+def clip_feedback_stats() -> dict:
+    """Return aggregate selection labels, never private clip times or session IDs."""
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT json_extract(payload_json, '$.verdict'), "
+            "json_extract(payload_json, '$.locale'), "
+            "json_extract(payload_json, '$.reason'), COUNT(*), "
+            "COALESCE(json_extract(payload_json, '$.selection_source'), 'automatic'), "
+            "COALESCE(json_extract(payload_json, '$.side'), 'target') "
+            "FROM clip_selection_feedback GROUP BY 1, 2, 3, 5, 6"
+        ).fetchall()
+    return {"total": sum(row[3] for row in rows), "groups": [
+        {"verdict": row[0], "locale": row[1], "reason": row[2], "count": row[3], "selection_source": row[4], "side": row[5]}
+        for row in rows
+    ], "verified_driving_labels": False}
 
 
 def _decode_json(value: str | None, default: object) -> object:

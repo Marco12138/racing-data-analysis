@@ -10,6 +10,26 @@ from fastapi.testclient import TestClient
 from backend.app.core.config import Settings
 from backend.app.main import create_app
 from backend.app.utils import storage
+import json
+
+
+def test_rejected_preflight_has_diagnostic_without_weakening_cors(tmp_path, monkeypatch, caplog):
+    """Record rejection context, never grant an arbitrary origin or log credentials."""
+    monkeypatch.setattr(storage, "DB_PATH", tmp_path / "sessions.sqlite3")
+    settings = Settings(app_env="test", app_mode="cloud", allowed_hosts="testserver",
+                        cors_origins="https://frontend.example", xrk_inspection_cache_dir=str(tmp_path / "cache"))
+    with TestClient(create_app(settings)) as client:
+        response = client.options("/api/v1/xrk/inspect", headers={
+            "Origin": "https://untrusted.example", "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "x-unexpected", "Authorization": "secret-not-for-logs",
+        })
+    assert response.status_code == 400
+    assert "access-control-allow-origin" not in response.headers
+    record = next(json.loads(row.message) for row in caplog.records if "cors_preflight_rejected" in row.message)
+    assert record["origin"] == "https://untrusted.example"
+    assert record["requested_headers"] == "x-unexpected"
+    assert record["request_id"] == response.headers["X-Request-ID"]
+    assert "secret-not-for-logs" not in caplog.text
 
 
 def test_cloud_mode_disables_local_video_library(

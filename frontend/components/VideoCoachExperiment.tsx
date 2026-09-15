@@ -14,6 +14,7 @@ import {
 } from "recharts";
 
 import { useI18n } from "../lib/i18n";
+import { SiteNavigation } from "./SiteNavigation";
 import {
   analyzeLapAudio,
   type LapAudioAnalysis,
@@ -504,7 +505,7 @@ export function VideoCoachExperiment() {
         : t("videoCoach.markExit");
 
   return (
-    <main className="video-coach">
+    <><SiteNavigation /><main className="video-coach">
       <header className="video-coach__header">
         <div>
           <p className="hero-kicker"><Scissors size={15} /> {t("videoCoach.kicker")}</p>
@@ -514,9 +515,7 @@ export function VideoCoachExperiment() {
             {t("videoCoach.privacy")}{" "}
             <a
               className="video-coach__external"
-              href="https://ai-racing-telemetry-platform.vercel.app"
-              target="_blank"
-              rel="noreferrer"
+              href="/workspace"
             >
               {t("videoCoach.openTelemetry")}
             </a>
@@ -819,6 +818,6 @@ export function VideoCoachExperiment() {
         <p className="video-coach__hint">{t("videoCoach.uploadHint")}</p>
       )}
       <canvas ref={sampleRef} className="hidden" />
-    </main>
+    </main></>
   );
 }

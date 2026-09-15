@@ -31,14 +31,14 @@ const points = [
 test("telemetryAtVideoTime interpolates readings using the alignment offset", () => {
   // video 25s with offset 5000ms => session 20s (exact second point)
   const gauge = telemetryAtVideoTime(points, 25, 5000);
-  assert.equal(gauge.speed_kmh, 72); // 20 m/s
+  assert.equal(gauge.speed_kmh, 20); // Already km/h from the XRK API.
   assert.equal(gauge.rpm, 8000);
   assert.equal(gauge.longitudinal_g, 0.3);
   assert.equal(gauge.lateral_g, -0.4);
 
   // video 22.5s with offset 5000ms => session 17.5s (75% between points)
   const midway = telemetryAtVideoTime(points, 22.5, 5000);
-  assert.equal(midway.speed_kmh, 63); // 17.5 m/s
+  assert.equal(midway.speed_kmh, 17.5);
   assert.equal(midway.rpm, 7250);
 });
 
@@ -52,8 +52,18 @@ test("telemetryAtVideoTime returns nulls when no telemetry is available", () => 
     10,
     0
   );
-  assert.equal(partial.speed_kmh, 36);
+  assert.equal(partial.speed_kmh, 10);
   assert.equal(partial.rpm, null);
+});
+
+test("gauges never extrapolate another lap's endpoints outside the selected timeline", () => {
+  for (const time of [0, 9.99, 30.01, 600, NaN]) {
+    assert.deepEqual(telemetryAtVideoTime(points, time, 0), {
+      speed_kmh: null, rpm: null, longitudinal_g: null, lateral_g: null,
+    });
+  }
+  assert.equal(telemetryAtVideoTime(points, 10, 0).rpm, 5000);
+  assert.equal(telemetryAtVideoTime(points, 30, 0).speed_kmh, 30);
 });
 
 test("buildVideoDeltaCurve maps comparison rows onto the video timeline", () => {
