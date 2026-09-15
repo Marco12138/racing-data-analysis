@@ -50,6 +50,17 @@
 - 真实文件本地验收只证明解析、播放和反馈流程工作；测试锚点不等于视频/遥测配对真值。
 - 首批收集反馈后，应由教练复核错选原因，再决定规则调整。不得把点赞比例直接当检测准确率。
 
+## 人工双侧选片发布记录（2026-09-15）
+
+- 功能提交：`979592f`；此前已完成的统计修复单独提交为 `81cd286`，保留原开发历史。
+- Railway：`81edafee-fa90-493a-bac5-f5bb88bd3f3f`，SUCCESS；真实 Linux Docker 构建、持久卷挂载及 readiness 通过。
+- Vercel：`dpl_3RJj2YURBTgATXVjej8fKuR1xHTY`，READY；公网别名 https://ai-racing-telemetry-platform.vercel.app。
+- 发布后 health / database readiness / libxrk 0.12.0 / LLM capability / runtime-config 检查通过。LLM capability 是配置状态，本轮没有额外评估生成质量。
+- Railway 反馈统计和 CORS 返回 200；未确认同步的人工“准确”评价返回 422，确认新版门控生效。没有往公网写入测试投票。
+- 公网真实样例的 AI 教练摘要已检查：左右人工入口出现；右侧可使用本地 `blob:` 视频播放人工选定范围，中英文可切换；未确认时速度/RPM 不可用且仅允许“无法判断”。没有上传私人 XRK 或视频，没有把演示配对当作真实同步证据。
+- 公网页面浏览器未记录错误；Vercel 最近十分钟 error 日志查询未返回记录。Railway 日志只有预期的校验拒绝，以及探测已关闭的 OpenAPI 页面产生的 404，无启动失败。
+- 代码与文档同步 GitHub；真实素材、缓存、凭据不在提交中。本轮未发布另一个 Sites 域名，已验证其构建兼容性。
+
 ## 人工双侧选片本地验收（2026-09-15）
 
 - 后端完整测试：219 passed（包含私有样本目录验收）；一条现有 Starlette/httpx 弃用警告。
