@@ -16,6 +16,7 @@ export function CornerDynamicsSummary({ analysis, locale }: { analysis: XrkAnaly
   return <section className="min-w-0 border-t border-slate-800 py-5">
     <h3 className="text-sm font-semibold text-white">{zh ? "弯道阶段与圈间重复性" : "Corner phases and repeatability"}</h3>
     <p className="mt-2 text-xs text-amber-200">{zh ? "GPS 运动学阶段，未经人工验证；不确认踏板或转向操作。仪器噪声尚未独立标定。" : "GPS kinematic phases, not manually validated or confirmed driver inputs. Sensor noise is uncalibrated."}</p>
+    <p className="mt-1 text-xs text-amber-200">{zh ? "均值区间假设各圈独立且近似正态；连续圈相关或趋势可能使区间覆盖不足。经验背景排除目标和参考圈，不是显著性检验。" : "Mean intervals assume independent, approximately normal lap metrics; serial correlation or drift can cause undercoverage. Background excludes both selected laps and is not a significance test."}</p>
     {data.status !== "calculated" && <p className="mt-3 text-sm text-slate-400">{zh ? "合格 GPS 圈或弯道数据不足" : "Insufficient eligible GPS laps or zones"}</p>}
     {data.corners.map((corner) => {
       const phase = corner.phases.find((row) => row.lap === analysis.target_lap);
@@ -32,12 +33,18 @@ export function CornerDynamicsSummary({ analysis, locale }: { analysis: XrkAnaly
             </tr></thead>
             <tbody className="text-slate-300">{Object.entries(corner.comparisons).map(([key, row]) => {
               const unit = key === "elapsed_time_s" ? "s" : "km/h";
+              const currentInterval = row.repeatability.ci_method === "student_t_iid_mean";
+              const currentBackground = row.background?.method === "leave_two_out";
+              const interval = currentInterval ? row.repeatability.mean_ci95 : null;
+              const outside = currentBackground && row.background?.status === "calculated" ? row.outside_observed_repeatability_band : null;
               return <tr className="border-t border-slate-800" key={key}>
                 <td className="py-2 pr-4">{labels[key] ?? key}</td>
                 <td>{row.target_minus_reference == null ? "—" : `${row.target_minus_reference.toFixed(3)} ${unit}`}</td>
                 <td>{row.repeatability.lap_count}</td>
-                <td>{row.repeatability.mean_ci95?.map((n) => n.toFixed(3)).join(" .. ") ?? (zh ? "少于 5 圈" : "Fewer than 5 laps")} {unit}</td>
-                <td>{row.outside_observed_repeatability_band == null ? "—" : row.outside_observed_repeatability_band ? (zh ? "超出经验区间，待验证" : "Outside empirical band; unvalidated") : (zh ? "未超出经验区间" : "Within empirical band")}</td>
+                <td>{interval ? `${interval.map((n) => n.toFixed(3)).join(" .. ")} ${unit}` : row.repeatability.lap_count < 5 ? (zh ? "少于 5 圈" : "Fewer than 5 laps") : (zh ? "请重新分析" : "Reanalysis required")}</td>
+                <td>{outside == null ? (row.target_minus_reference == null ? (zh ? "比较圈不可用" : "Comparison lap unavailable") : currentBackground ? (zh ? "背景圈不足，无法判断" : "Insufficient background laps") : (zh ? "请重新分析" : "Reanalysis required")) : outside ? (zh ? "超出经验区间，待验证" : "Outside empirical band; unvalidated") : (zh ? "未超出经验区间" : "Within empirical band")}
+                  {currentBackground && <span className="block text-slate-500">{zh ? "背景圈" : "Background laps"}: {row.background!.lap_count}</span>}
+                </td>
                 <td>{zh ? "尚不能判断" : "Unknown"}</td>
               </tr>;
             })}</tbody>

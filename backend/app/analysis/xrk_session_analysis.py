@@ -727,9 +727,9 @@ def generate_xrk_report(result: dict[str, Any], language: str = "en") -> str:
         )
     if result.get("corner_dynamics", {}).get("status") == "calculated":
         lines.append(
-            "- GPS 弯道阶段未经人工验证；逐圈均值区间不是单圈差值区间。仪器噪声未独立标定，不能据小幅速度差确认提升。"
+            "- GPS 弯道阶段未经人工验证；逐圈均值区间不是单圈差值区间。均值区间假设圈间独立且近似正态，序列相关可能导致覆盖不足。经验背景排除参考与目标圈，不是显著性检验。仪器噪声未独立标定，不能据小幅速度差确认提升。"
             if language == "zh" else
-            "- GPS phases are not manually validated. Lap-mean intervals are not single-pair effect intervals; small speed differences are not validated against independent sensor noise."
+            "- GPS phases are not manually validated. Lap-mean intervals assume independent, approximately normal lap metrics; serial correlation can cause undercoverage. They are not single-pair effect intervals. The empirical background excludes both selected laps and is not a significance test; small speed differences are not validated against independent sensor noise."
         )
     lines.extend(
         [

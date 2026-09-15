@@ -40,6 +40,17 @@ def test_private_real_xrk_acceptance(tmp_path: Path, source: Path) -> None:
     dynamics = analysis.get("corner_dynamics", {})
     if "eligible_laps" in dynamics:
         assert dynamics["eligible_laps"] == sorted(row["lap"] for row in analysis["lap_quality"]["laps"] if row["analysis_eligible"])
+        for corner in dynamics["corners"]:
+            for phase in corner["phases"]:
+                if phase["status"] == "calculated":
+                    assert phase["thresholds"] == corner["calibration"]["thresholds"]
+                    assert phase["metrics"]["minimum_speed_kmh"] == phase["events"]["minimum_speed"]["speed_kmh"]
+            for comparison in corner["comparisons"].values():
+                assert comparison["repeatability"]["ci_method"] == "student_t_iid_mean"
+                background = comparison["background"]
+                assert not set(background["source_laps"]) & {dynamics["reference_lap"], dynamics["target_lap"]}
+                if background["lap_count"] < 5:
+                    assert comparison["outside_observed_repeatability_band"] is None
     raw = load_xrk(source)
     for channel in manifest["channels"]:
         original = raw.channels[channel["name"]].to_pydict()

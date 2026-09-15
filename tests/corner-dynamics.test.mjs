@@ -30,3 +30,35 @@ test("corner summary distinguishes mean intervals and unknown sensor noise in bo
 test("old responses do not acquire invented phase results", () => {
   assert.equal(renderToStaticMarkup(React.createElement(CornerDynamicsSummary, { analysis: {}, locale: "en" })), "");
 });
+
+test("legacy bootstrap intervals and self-containing comparison flags are hidden", () => {
+  const analysis = { target_lap: 1, corner_dynamics: { status: "calculated", corners: [{ zone_id: "test", name: "Test",
+    phases: [], comparisons: { minimum_speed_kmh: { target_minus_reference: .1,
+      outside_observed_repeatability_band: true, repeatability: { lap_count: 8, mean_ci95: [48.123, 48.456],
+        ci_method: "moving_block_bootstrap_lap_means_block2_1000_seed0" } } } }] } };
+  const html = renderToStaticMarkup(React.createElement(CornerDynamicsSummary, { analysis, locale: "en" }));
+  assert.match(html, /Reanalysis required/);
+  assert.doesNotMatch(html, /48\.123|48\.456|Outside empirical band/);
+});
+
+test("current intervals expose assumptions and excluded-pair background count", () => {
+  const analysis = { target_lap: 1, corner_dynamics: { status: "calculated", corners: [{ zone_id: "test", name: "Test",
+    phases: [], comparisons: { minimum_speed_kmh: { target_minus_reference: .1,
+      outside_observed_repeatability_band: false, repeatability: { lap_count: 8, mean_ci95: [47.5, 49.5], ci_method: "student_t_iid_mean" },
+      background: { method: "leave_two_out", status: "calculated", lap_count: 6, source_laps: [2, 3, 4, 5, 6, 7] } } } }] } };
+  const html = renderToStaticMarkup(React.createElement(CornerDynamicsSummary, { analysis, locale: "en" }));
+  assert.match(html, /47\.500/);
+  assert.match(html, /Background laps.*6/);
+  assert.match(html, /serial correlation or drift can cause undercoverage/);
+  assert.match(html, /Within empirical band/);
+});
+
+test("unavailable selected laps do not get mislabeled as insufficient background", () => {
+  const analysis = { target_lap: 1, corner_dynamics: { status: "calculated", corners: [{ zone_id: "test", name: "Test",
+    phases: [], comparisons: { minimum_speed_kmh: { target_minus_reference: null,
+      outside_observed_repeatability_band: null, repeatability: { lap_count: 8, mean_ci95: [47.5, 49.5], ci_method: "student_t_iid_mean" },
+      background: { method: "leave_two_out", status: "calculated", lap_count: 6, source_laps: [2, 3, 4, 5, 6, 7] } } } }] } };
+  const html = renderToStaticMarkup(React.createElement(CornerDynamicsSummary, { analysis, locale: "en" }));
+  assert.match(html, /Comparison lap unavailable/);
+  assert.doesNotMatch(html, /Insufficient background laps/);
+});
