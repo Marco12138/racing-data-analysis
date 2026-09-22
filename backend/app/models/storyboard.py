@@ -108,6 +108,7 @@ class StoryboardResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: int
+    data_origin: Literal["real", "unknown"] = "unknown"
     token: str
     watermark: str
     created_at: str

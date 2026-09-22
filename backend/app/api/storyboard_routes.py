@@ -115,6 +115,7 @@ async def create_storyboard(
     now = datetime.now(UTC)
     payload_dict = {
         **storyboard,
+        "data_origin": "real",
         "token": token,
         "created_at": now.isoformat(),
         "expires_at": (now + timedelta(seconds=DEFAULT_TTL_SECONDS)).isoformat(),

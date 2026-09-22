@@ -1,4 +1,5 @@
 export type NarrativeFeedbackInput = {
+  data_origin?: "real" | "demo" | "unknown";
   node_id: string;
   token: string | null;
   source: "llm" | "structured" | "storyboard" | "coach";
@@ -9,6 +10,7 @@ export type NarrativeFeedbackInput = {
 export type FeedbackFetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
 export type ClipFeedbackInput = {
+  data_origin?: "real" | "demo" | "unknown"; inspection_id?: string;
   feedback_id: string; clip_id: string; session_fingerprint: string; zone_id: string;
   reference_lap: number; target_lap: number; start_s: number; end_s: number;
   verdict: "accurate" | "partly_accurate" | "inaccurate" | "uncertain";
@@ -21,6 +23,7 @@ export type ClipFeedbackInput = {
 
 export async function submitClipFeedback(apiOrigin: string, apiPrefix: string, input: ClipFeedbackInput,
   fetcher: FeedbackFetcher = fetch): Promise<boolean> {
+  if (input.data_origin === "demo" || input.session_fingerprint === "redacted") return false;
   try {
     const response = await fetcher(`${apiOrigin.replace(/\/+$/, "")}/${apiPrefix.replace(/^\/+|\/+$/g, "")}/feedback/clip-selection`, {
       method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify(input),
@@ -32,6 +35,7 @@ export async function submitClipFeedback(apiOrigin: string, apiPrefix: string, i
 }
 
 export type CoachValidationInput = {
+  data_origin?: "real" | "demo" | "unknown";
   inspection_id: string;
   episode_id: string;
   pattern_id: string;
@@ -50,6 +54,7 @@ export async function submitNarrativeFeedback(
   input: NarrativeFeedbackInput,
   fetcher: FeedbackFetcher = fetch,
 ): Promise<boolean> {
+  if (input.data_origin === "demo" || input.token === "published-demo") return false;
   try {
     const origin = apiOrigin.replace(/\/+$/, "");
     const prefix = `/${apiPrefix.replace(/^\/+|\/+$/g, "")}`;
@@ -70,6 +75,7 @@ export async function submitCoachValidation(
   input: CoachValidationInput,
   fetcher: FeedbackFetcher = fetch,
 ): Promise<boolean> {
+  if (input.data_origin === "demo") return false;
   try {
     const origin = apiOrigin.replace(/\/+$/, "");
     const prefix = `/${apiPrefix.replace(/^\/+|\/+$/g, "")}`;

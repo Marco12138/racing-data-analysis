@@ -336,9 +336,24 @@ see [XRK Channel Trust](XRK_CHANNEL_TRUST.md). The native Parquet artifact uses
 the same fixed inspection expiry; it must not be copied into a public image.
 The GPS phase/repeatability prototype and its statistical limits are documented
 in [Corner Phases And Repeatability](CORNER_PHASES_AND_REPEATABILITY.md).
+The opt-in native-GPS track reference, directed gates, private audit and manual
+acceptance steps are documented in [Observed Track Reference](TRACK_REFERENCE.md).
+Release the backward-compatible Railway routes before the frontend workspace.
+Do not publish private track configs or audit artifacts with the site.
+
+Feedback provenance migration is additive: `narrative_feedback` and
+`coach_validations` receive `data_origin`, defaulting existing rows to `unknown`.
+Historical clip JSON without an origin remains untouched and excluded. Back up
+SQLite before release. Only server-resolved live inspections or server-created
+real storyboards enter feedback statistics. Explicit demo submissions return
+`DEMO_FEEDBACK_DISABLED`; older unverifiable clients remain quarantined rather
+than being promoted retrospectively. `excluded_unverified_count` explains changes
+in aggregate totals. This verifies data source, not coach identity, synchronization
+accuracy or driving truth. Demo controls must remain disabled even with local video.
 
 ```bash
 python -m pytest backend/tests -q
+pnpm run test:frontend
 pnpm run lint
 pnpm run build
 pnpm run build:vercel

@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { after, test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-const root = fileURLToPath(new URL("..", import.meta.url)), dir = `${root}/.tmp-manual-review-test`;
-mkdirSync(dir, { recursive: true });
+const root = fileURLToPath(new URL("..", import.meta.url));
+mkdirSync(`${root}/tmp`, { recursive: true });
+const dir = mkdtempSync(`${root}/tmp/manual-review-test-`);
 execFileSync(`${root}/node_modules/.bin/esbuild`, [`${root}/tests/fixtures/manual-review-entry.tsx`, "--bundle", "--format=esm", "--platform=node", "--jsx=automatic",
   "--external:react", "--external:react-dom", "--external:lucide-react", `--outfile=${dir}/entry.mjs`], { stdio: "pipe" });
 const { ManualReviewTest, validateManualReview, restoreManualReview, reviewDistanceAtTime, manualReviewWindow, selectCoachReviews } = await import(pathToFileURL(`${dir}/entry.mjs`).href);

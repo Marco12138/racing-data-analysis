@@ -41,10 +41,12 @@ def load_feedback_rows(database: Path) -> tuple[list[dict[str, Any]], dict[str, 
         }
         if "narrative_feedback" not in tables:
             raise ValueError("SQLite 中不存在 narrative_feedback 表。")
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(narrative_feedback)")}
+        provenance_column = "data_origin" if "data_origin" in columns else "'unknown' AS data_origin"
         rows = [
             dict(row)
             for row in conn.execute(
-                "SELECT node_id, token, source, locale, thumbs_up, created_at "
+                f"SELECT node_id, token, source, locale, thumbs_up, created_at, {provenance_column} "
                 "FROM narrative_feedback ORDER BY id"
             ).fetchall()
         ]
@@ -73,6 +75,8 @@ def aggregate_feedback(
 ) -> dict[str, Any]:
     """Aggregate by source/locale/node and identify the ten most disliked nodes."""
     grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
+    excluded = sum(row.get("data_origin") != "real" for row in rows)
+    rows = [row for row in rows if row.get("data_origin") == "real"]
     patterns: dict[str, dict[str, int]] = defaultdict(lambda: {"up": 0, "down": 0})
     for row in rows:
         key = (str(row["source"]), str(row["locale"]), str(row["node_id"]))
@@ -129,6 +133,7 @@ def aggregate_feedback(
     return {
         "generated_at": datetime.now(UTC).isoformat(),
         "total_feedback": len(rows),
+        "excluded_unverified_count": excluded,
         "aggregates": aggregates,
         "top_disliked_nodes": aggregates[:10],
         "top_disliked_patterns": pattern_rows[:10],
@@ -156,7 +161,8 @@ def write_feedback_report(result: dict[str, Any], output_dir: Path) -> tuple[Pat
         "# Narrative Feedback Statistics",
         "",
         f"- 生成时间：{result['generated_at']}",
-        f"- 反馈总数：{result['total_feedback']}",
+        f"- 来源验证通过的反馈数：{result['total_feedback']}",
+        f"- 隔离的历史或未知来源反馈：{result['excluded_unverified_count']}",
         "- 聚合口径：source / locale / node_id。旧数据中的 storyboard/coach source 会原样保留。",
         "",
         "## 被点踩最多的前 10 个节点",

@@ -105,6 +105,10 @@ def init_db() -> None:
             """
         )
         _ensure_owner_column(conn, "sessions")
+        for table in ("narrative_feedback", "coach_validations"):
+            columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+            if "data_origin" not in columns:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN data_origin TEXT NOT NULL DEFAULT 'unknown'")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS clip_selection_feedback (
@@ -407,13 +411,14 @@ def save_narrative_feedback(
     source: str,
     locale: str,
     thumbs_up: bool,
+    data_origin: str = "unknown",
 ) -> int:
     """Persist one AI-advice thumbs up/down record."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.execute(
-            "INSERT INTO narrative_feedback (node_id, token, source, locale, thumbs_up, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (node_id, token, source, locale, 1 if thumbs_up else 0, _now()),
+            "INSERT INTO narrative_feedback (node_id, token, source, locale, thumbs_up, created_at, data_origin) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (node_id, token, source, locale, 1 if thumbs_up else 0, _now(), data_origin),
         )
         return int(cursor.lastrowid)
 
@@ -422,20 +427,23 @@ def narrative_feedback_stats(limit: int = 50) -> dict:
     """Return aggregate counts and the most recent feedback rows."""
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
-        total = conn.execute("SELECT COUNT(*) AS count FROM narrative_feedback").fetchone()["count"]
+        total = conn.execute("SELECT COUNT(*) AS count FROM narrative_feedback WHERE data_origin='real'").fetchone()["count"]
+        excluded = conn.execute("SELECT COUNT(*) FROM narrative_feedback WHERE data_origin!='real'").fetchone()[0]
         thumbs_up = conn.execute(
-            "SELECT COUNT(*) AS count FROM narrative_feedback WHERE thumbs_up = 1"
+            "SELECT COUNT(*) AS count FROM narrative_feedback WHERE thumbs_up = 1 AND data_origin='real'"
         ).fetchone()["count"]
         recent = [
             dict(row)
             for row in conn.execute(
                 "SELECT id, node_id, token, source, locale, thumbs_up, created_at "
-                "FROM narrative_feedback ORDER BY id DESC LIMIT ?",
+                "FROM narrative_feedback WHERE data_origin='real' ORDER BY id DESC LIMIT ?",
                 (max(1, limit),),
             ).fetchall()
         ]
     return {
         "total": total,
+        "excluded_unverified_count": excluded,
+        "scope": "server_verified_real_sources_only_not_verified_driving_labels",
         "thumbs_up_count": thumbs_up,
         "thumbs_down_count": total - thumbs_up,
         "recent": recent,
@@ -450,14 +458,15 @@ def save_coach_validation(
     verdict: str,
     locale: str,
     notes: str = "",
+    data_origin: str = "unknown",
 ) -> int:
     """Persist one coach-confirmed detector label without telemetry payloads."""
     init_db()
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.execute(
             "INSERT INTO coach_validations ("
-            "inspection_id, episode_id, pattern_id, pattern_type, verdict, locale, notes, created_at"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "inspection_id, episode_id, pattern_id, pattern_type, verdict, locale, notes, created_at, data_origin"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 inspection_id,
                 episode_id,
@@ -467,6 +476,7 @@ def save_coach_validation(
                 locale,
                 notes,
                 _now(),
+                data_origin,
             ),
         )
         return int(cursor.lastrowid)
@@ -501,9 +511,10 @@ def clip_feedback_stats() -> dict:
             "json_extract(payload_json, '$.reason'), COUNT(*), "
             "COALESCE(json_extract(payload_json, '$.selection_source'), 'automatic'), "
             "COALESCE(json_extract(payload_json, '$.side'), 'target') "
-            "FROM clip_selection_feedback GROUP BY 1, 2, 3, 5, 6"
+            "FROM clip_selection_feedback WHERE json_extract(payload_json, '$.data_origin')='real' GROUP BY 1, 2, 3, 5, 6"
         ).fetchall()
-    return {"total": sum(row[3] for row in rows), "groups": [
+        excluded = conn.execute("SELECT COUNT(*) FROM clip_selection_feedback WHERE COALESCE(json_extract(payload_json, '$.data_origin'), 'unknown')!='real'").fetchone()[0]
+    return {"total": sum(row[3] for row in rows), "excluded_unverified_count": excluded, "groups": [
         {"verdict": row[0], "locale": row[1], "reason": row[2], "count": row[3], "selection_source": row[4], "side": row[5]}
         for row in rows
     ], "verified_driving_labels": False}

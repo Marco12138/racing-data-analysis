@@ -2,6 +2,7 @@
 
 import { CornerDynamicsSummary } from "./CornerDynamicsSummary";
 import { CoachReviewPanel } from "./CoachReviewPanel";
+import { TrackReferencePanel } from "./TrackReferencePanel";
 
 import {
   useCallback,
@@ -154,8 +155,9 @@ export function XrkAnalysisWorkspace({
   initialVideoFile?: File | null;
   llmNarrative?: { available: boolean; model: string | null };
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [trackView, setTrackView] = useState<"session" | "reference">("session");
   const [cursorDistance, setCursorDistance] = useState(0);
   const [seekRequest, setSeekRequest] = useState<SeekRequest | null>(null);
   const [sectorCount, setSectorCount] = useState(analysis.sectors?.count ?? 3);
@@ -338,7 +340,13 @@ export function XrkAnalysisWorkspace({
       )}
 
       {activeTab === "track" && (
-        analysis.track ? (
+        <div className="space-y-5">
+          <div className="flex flex-wrap gap-2" role="group" aria-label={locale === "zh" ? "赛道视图" : "Track view"}>
+            {(["session", "reference"] as const).map(view => <button key={view} aria-pressed={trackView === view}
+              className={`rounded px-3 py-2 text-sm ${trackView === view ? "bg-white/10 text-white" : "text-slate-400"}`}
+              onClick={() => setTrackView(view)}>{view === "session" ? (locale === "zh" ? "当前 Session" : "Current session") : (locale === "zh" ? "固定赛道参考图" : "Fixed track reference")}</button>)}
+          </div>
+          {trackView === "reference" ? <TrackReferencePanel key={analysis.inspection_id} inspectionId={analysis.inspection_id} referenceLap={analysis.reference_lap} readOnly={publishedDemo} /> : analysis.track ? (
           <TrackMapPanel
             analysis={analysis}
             cursorDistance={cursorDistance}
@@ -346,7 +354,8 @@ export function XrkAnalysisWorkspace({
           />
         ) : (
           <Unavailable reason={t("xrk.unavailable.gps")} />
-        )
+        )}
+        </div>
       )}
 
       {activeTab === "comparison" && (
@@ -438,7 +447,7 @@ export function XrkAnalysisWorkspace({
       )}
 
       {activeTab === "coach" && (
-        <CoachSummaryPanel analysis={analysis} onCursor={selectDistance} llmNarrative={llmNarrative}>
+        <CoachSummaryPanel analysis={analysis} onCursor={selectDistance} llmNarrative={llmNarrative} readOnly={publishedDemo}>
           <CoachReviewPanel analysis={analysis} videoUrl={videoUrl} videoFile={videoFile}
             videoDurationS={videoDurationS} calibration={calibration}
             onSync={() => setActiveTab("video")} onCursor={selectDistance}
@@ -946,6 +955,7 @@ function BrakingEpisodePanel({
     const ok = await submitCoachValidation(config.apiOrigin, config.apiPrefix, {
       inspection_id: analysis.inspection_id,
       episode_id: episode.episode_id,
+      data_origin: "real",
       pattern_id: pattern.pattern_id,
       pattern_type: pattern.event_type,
       verdict,
@@ -2424,11 +2434,13 @@ function CoachSummaryPanel({
   onCursor,
   llmNarrative = { available: false, model: null },
   children,
+  readOnly = false,
 }: {
   analysis: XrkAnalysis;
   onCursor: (distance: number) => void;
   llmNarrative?: { available: boolean; model: string | null };
   children?: ReactNode;
+  readOnly?: boolean;
 }) {
   const { t, locale } = useI18n();
   const [feedbackSent, setFeedbackSent] = useState<{ corner: string; thumbsUp: boolean } | null>(null);
@@ -2437,6 +2449,7 @@ function CoachSummaryPanel({
   const rangeAvailable = improvement.maximum_improvement_s > 0;
 
   async function sendFeedback(corner: string, index: number, thumbsUp: boolean) {
+    if (readOnly || !/^[0-9a-f]{32}$/.test(analysis.inspection_id)) return;
     try {
       const config = await resolveApiConfig();
       const ok = await submitNarrativeFeedback(
@@ -2444,6 +2457,7 @@ function CoachSummaryPanel({
         config.apiPrefix,
         {
           node_id: `priority-${index + 1}`,
+          data_origin: "real",
           token: analysis.inspection_id,
           source: analysis.narrative ? "llm" : "structured",
           locale: locale === "zh" ? "zh" : "en",
@@ -2527,7 +2541,7 @@ function CoachSummaryPanel({
                       <button
                         type="button"
                         aria-label={t("xrk.coach.feedbackHelpful")}
-                        disabled={feedbackSent?.corner === priority.corner}
+                        disabled={readOnly || feedbackSent?.corner === priority.corner}
                         onClick={() => void sendFeedback(priority.corner, index, true)}
                         className="rounded-md border border-slate-700 px-2.5 py-2 text-slate-200 hover:border-[#66e38f] disabled:opacity-50"
                       >
@@ -2536,7 +2550,7 @@ function CoachSummaryPanel({
                       <button
                         type="button"
                         aria-label={t("xrk.coach.feedbackNotHelpful")}
-                        disabled={feedbackSent?.corner === priority.corner}
+                        disabled={readOnly || feedbackSent?.corner === priority.corner}
                         onClick={() => void sendFeedback(priority.corner, index, false)}
                         className="rounded-md border border-slate-700 px-2.5 py-2 text-slate-200 hover:border-[#ff5964] disabled:opacity-50"
                       >

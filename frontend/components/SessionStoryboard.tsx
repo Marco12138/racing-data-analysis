@@ -198,6 +198,7 @@ export function SessionStoryboard({
   }, [storyboard.token, wechatQrDataUrl]);
 
   const sendFeedback = useCallback(async (nodeId: string, thumbsUp: boolean) => {
+    if (storyboard.data_origin !== "real") return;
     try {
       const config = await resolveApiConfig();
       const ok = await submitNarrativeFeedback(
@@ -205,6 +206,7 @@ export function SessionStoryboard({
         config.apiPrefix,
         {
           node_id: nodeId,
+          data_origin: "real",
           token: storyboard.token,
           source: node.source,
           locale: locale === "zh" ? "zh" : "en",
@@ -215,7 +217,7 @@ export function SessionStoryboard({
     } catch {
       // Feedback is optional; failures should not block the review.
     }
-  }, [storyboard.token, node.source, locale]);
+  }, [storyboard.token, storyboard.data_origin, node.source, locale]);
 
   if (storyboard.nodes.length === 0) return null;
 
@@ -282,7 +284,7 @@ export function SessionStoryboard({
           videoRef={videoRef}
           onTogglePlayback={togglePlayback}
           onTimeUpdate={onTimeUpdate}
-          onFeedback={(thumbsUp) => void sendFeedback(node.id, thumbsUp)}
+          onFeedback={storyboard.data_origin === "real" ? (thumbsUp) => void sendFeedback(node.id, thumbsUp) : undefined}
           feedbackSent={feedbackSent?.nodeId === node.id}
           feedbackWasHelpful={feedbackSent?.nodeId === node.id ? feedbackSent.thumbsUp : null}
         />

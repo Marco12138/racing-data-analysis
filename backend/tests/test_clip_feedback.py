@@ -1,6 +1,7 @@
 """Clip relevance feedback is not a driving label; retries must be idempotent."""
 import json
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,12 +18,14 @@ def feedback_client(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "DB_PATH", database)
     settings = Settings(app_env="test", database_url=f"sqlite:///{database}", allowed_hosts="testserver")
     with TestClient(create_app(settings)) as client:
+        monkeypatch.setattr(client.app.state.xrk_inspection_store, "load", lambda token: SimpleNamespace(manifest={"fingerprint": "test-session"}))
         yield client, database, settings
 
 
 def payload(**changes):
     """Small anonymous timing label, not synthetic telemetry presented to users."""
     return {"feedback_id": "a" * 32, "clip_id": "b" * 64,
+            "inspection_id": "e" * 32, "data_origin": "real",
             "session_fingerprint": "test-session", "zone_id": "zone-1",
             "reference_lap": 1, "target_lap": 2, "start_s": 3.0, "end_s": 7.0,
             "verdict": "accurate", "reason": None, "locale": "zh", **changes}

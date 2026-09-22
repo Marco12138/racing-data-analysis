@@ -45,6 +45,8 @@ next-env.d.ts
 /work/
 /tmp/
 /.tmp-xrk-test/
+/.tmp-coach-review-test/
+/.tmp-manual-review-test/
 /storage/
 /data/
 __pycache__/

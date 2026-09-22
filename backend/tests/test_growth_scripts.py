@@ -58,7 +58,7 @@ def test_feedback_stats_aggregate_source_locale_node_and_copy(tmp_path: Path) ->
         conn.execute(
             "CREATE TABLE narrative_feedback ("
             "id INTEGER PRIMARY KEY, node_id TEXT, token TEXT, source TEXT, "
-            "locale TEXT, thumbs_up INTEGER, created_at TEXT)"
+            "locale TEXT, thumbs_up INTEGER, created_at TEXT, data_origin TEXT DEFAULT 'real')"
         )
         conn.execute(
             "CREATE TABLE storyboards (token TEXT, payload_json TEXT)"

@@ -27,7 +27,9 @@ def _prepare_corner(frame: pd.DataFrame, zone: dict[str, Any]) -> dict[str, Any]
         return {**base, "reason": "missing_speed_curvature_or_time"}
     ordered = frame.sort_values("lap_time_s")
     entry, exit_distance = float(zone["entry_distance_m"]), float(zone["exit_distance_m"])
-    window = ordered[ordered.distance_m.between(entry - 30, exit_distance + 30)]
+    window = ordered[ordered.distance_m.between(
+        zone.get("window_start_distance_m", entry - 30),
+        zone.get("window_end_distance_m", exit_distance + 30))]
     if len(window) < 7:
         return {**base, "reason": "insufficient_samples"}
     values = window[list(required)].apply(pd.to_numeric, errors="coerce")
@@ -57,9 +59,10 @@ def _prepare_corner(frame: pd.DataFrame, zone: dict[str, Any]) -> dict[str, Any]
             "median_sample_interval_s": float(np.median(dt))}
 
 
-def fit_zone_thresholds(by_lap: dict[int, pd.DataFrame], zone: dict[str, Any]) -> dict[str, Any]:
+def fit_zone_thresholds(by_lap: dict[int, pd.DataFrame], zone: dict[str, Any],
+                        zones_by_lap: dict[int, dict] | None = None) -> dict[str, Any]:
     """Freeze detector thresholds on an internal median profile, never a reference lap."""
-    prepared = {lap: _prepare_corner(frame, zone) for lap, frame in sorted(by_lap.items())}
+    prepared = {lap: _prepare_corner(frame, (zones_by_lap or {}).get(lap, zone)) for lap, frame in sorted(by_lap.items())}
     valid = {lap: row for lap, row in prepared.items() if row["status"] == "prepared"}
     base = {"status": "unavailable", "source_laps": list(valid),
             "method": "session_zone_median_distance_profiles_v_dv_dd",
@@ -122,7 +125,9 @@ def segment_corner_phases(frame: pd.DataFrame, zone: dict[str, Any],
     return {**base, "status": "calculated", "events": events, "metrics": metrics,
             "complete": all(value is not None for value in events.values()),
             "missing_phases": [key for key, value in events.items() if value is None],
-            "method": "5-sample median; real-time gradient; frozen session-zone thresholds; +/-30m context; minimum metric/event use smoothed speed",
+            "method": "5-sample median; real-time gradient; frozen session-zone thresholds; "
+                      + ("explicit spatial-gate window" if "window_start_distance_m" in zone else "+/-30m context")
+                      + "; minimum metric/event use smoothed speed",
             "thresholds": {"acceleration_mps2": threshold, "curvature_per_m": curve_threshold, "duration_s": duration},
             "calibration_source_laps": calibration["source_laps"],
             "median_sample_interval_s": prepared["median_sample_interval_s"], "manually_validated": False}

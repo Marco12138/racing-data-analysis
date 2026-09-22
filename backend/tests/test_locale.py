@@ -347,11 +347,11 @@ def test_narrative_feedback_api(
         assert storyboard_feedback.status_code == 200
 
         stats = client.get("/api/v1/feedback/stats").json()
-        assert stats["total"] == 2
-        assert stats["thumbs_up_count"] == 1
-        assert stats["thumbs_down_count"] == 1
-        assert len(stats["recent"]) == 2
-        assert stats["recent"][0]["source"] == "storyboard"
+        assert stats["total"] == 0
+        assert stats["excluded_unverified_count"] == 2
+        assert stats["thumbs_up_count"] == 0
+        assert stats["thumbs_down_count"] == 0
+        assert stats["recent"] == []
 
         invalid = client.post(
             "/api/v1/feedback",

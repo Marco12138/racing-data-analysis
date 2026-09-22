@@ -9,7 +9,13 @@ from pydantic import Field, model_validator
 from .demo_session import DemoModel
 
 
-class NarrativeFeedbackRequest(DemoModel):
+class FeedbackContext(DemoModel):
+    """Client context is a hint; the server verifies real inspection provenance."""
+
+    data_origin: Literal["real", "demo", "unknown"] = "unknown"
+
+
+class NarrativeFeedbackRequest(FeedbackContext):
     """One thumbs up/down on a coach or storyboard teaching point."""
 
     node_id: str = Field(min_length=1, max_length=200)
@@ -19,7 +25,7 @@ class NarrativeFeedbackRequest(DemoModel):
     thumbs_up: bool
 
 
-class CoachValidationRequest(DemoModel):
+class CoachValidationRequest(FeedbackContext):
     """Coach review of one evidence-bounded braking pattern."""
 
     inspection_id: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]+$")
@@ -59,10 +65,11 @@ class ClipCorrection(DemoModel):
         return self
 
 
-class ClipFeedbackRequest(DemoModel):
+class ClipFeedbackRequest(FeedbackContext):
     """Selection accuracy, separate from advice quality or a confirmed driving action."""
 
     feedback_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    inspection_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
     clip_id: str = Field(pattern=r"^[0-9a-f]{64}$")
     session_fingerprint: str = Field(min_length=8, max_length=128)
     zone_id: str = Field(min_length=1, max_length=100)

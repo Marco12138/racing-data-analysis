@@ -25,6 +25,7 @@ export type StoryboardNode = {
 };
 
 export type StoryboardResponse = {
+  data_origin?: "real" | "unknown";
   schema_version: 1;
   token: string;
   watermark: string;
@@ -136,6 +137,7 @@ export function parseStoryboardResponse(value: unknown): StoryboardResponse | nu
   }
   return {
     schema_version: 1,
+    data_origin: value.data_origin === "real" ? "real" : "unknown",
     token: value.token,
     watermark: value.watermark,
     created_at: value.created_at,

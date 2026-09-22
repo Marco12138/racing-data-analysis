@@ -1,18 +1,27 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { after, test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-const root = fileURLToPath(new URL("..", import.meta.url)), dir = `${root}/.tmp-coach-review-test`;
-mkdirSync(dir, { recursive: true });
+const root = fileURLToPath(new URL("..", import.meta.url));
+mkdirSync(`${root}/tmp`, { recursive: true });
+const dir = mkdtempSync(`${root}/tmp/coach-review-test-`);
 execFileSync(`${root}/node_modules/.bin/esbuild`, [`${root}/tests/fixtures/coach-review-entry.tsx`, "--bundle", "--format=esm", "--platform=node", "--jsx=automatic",
   "--external:react", "--external:react-dom", "--external:recharts", "--external:lucide-react", `--outfile=${dir}/entry.mjs`], { stdio: "pipe" });
 const { CoachReviewTest } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
 after(() => rmSync(dir, { recursive: true, force: true }));
-const { analysis } = JSON.parse(readFileSync(`${root}/public/demo/reviewed-real-session.json`));
+const { analysis: demoAnalysis } = JSON.parse(readFileSync(`${root}/public/demo/reviewed-real-session.json`));
+const analysis = { ...demoAnalysis, inspection_id: "a".repeat(32), file_fingerprint: "b".repeat(64) };
+
+test("demo reviews never offer a vote, including with a local video attached", () => {
+  const html = renderToStaticMarkup(createElement(CoachReviewTest, { analysis: demoAnalysis, locale: "zh", readOnly: true,
+    videoUrl: "blob:local-only", videoFile: null, videoDurationS: 50, calibration: null, onSync() {}, onCursor() {} }));
+  assert.match(html, /演示模式不收集复核投票/);
+  assert.doesNotMatch(html, /<fieldset/);
+});
 
 test("Chinese coach review includes real Top 3 and all four selection choices, disabled without video", () => {
   const html = renderToStaticMarkup(createElement(CoachReviewTest, { analysis, locale: "zh", videoUrl: "", videoFile: null, videoDurationS: 0, calibration: null, onSync() {}, onCursor() {} }));

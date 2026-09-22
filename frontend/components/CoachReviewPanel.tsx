@@ -121,7 +121,7 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
     {reviews.map(review => <ReviewCard key={`${analysis.file_fingerprint}:${review.id}`}
       review={review} analysis={analysis} videoUrl={videoUrl} file={videoFile} duration={videoDurationS}
       targetCalibration={mappings[review.targetLap] ?? null} referenceCalibration={mappings[review.referenceLap] ?? null}
-      onCursor={onCursor} c={c} />)}
+      onCursor={onCursor} c={c} readOnly={readOnly} />)}
   </div>;
 }
 
@@ -157,10 +157,11 @@ function TopThreeCharts({ analysis, c }: { analysis: XrkAnalysis; c: Copy }) {
   </div>;
 }
 
-function ReviewCard({ review, analysis, videoUrl, file, duration, targetCalibration, referenceCalibration, onCursor, c }: {
+function ReviewCard({ review, analysis, videoUrl, file, duration, targetCalibration, referenceCalibration, onCursor, c, readOnly }: {
   review: ReviewSelection; analysis: XrkAnalysis; videoUrl: string; file: File | null; duration: number;
   targetCalibration: VideoSyncCalibration | null; referenceCalibration: VideoSyncCalibration | null;
   onCursor: (distance: number) => void; c: Copy;
+  readOnly: boolean;
 }) {
   const { locale } = useI18n();
   const [context, setContext] = useState(false), [cursor, setCursor] = useState(review.focus);
@@ -181,7 +182,9 @@ function ReviewCard({ review, analysis, videoUrl, file, duration, targetCalibrat
     <ManualReviewVideo review={review} fingerprint={analysis.file_fingerprint} defaultFile={file} defaultUrl={videoUrl}
       defaultDuration={duration} targetCalibration={targetCalibration} referenceCalibration={referenceCalibration} context={context}
       onCursor={distance => { setCursor(distance); onCursor(distance); }}
-      feedback={state => <ClipAccuracyFeedback key={state.clipId || state.side} clipId={state.clipId} analysis={analysis} review={review}
+      feedback={state => readOnly || !/^[0-9a-f]{32}$/.test(analysis.inspection_id)
+        ? <p className="mt-3 text-xs text-slate-400">{locale === "zh" ? "演示模式不收集复核投票。" : "Review voting is disabled for demo data."}</p>
+        : <ClipAccuracyFeedback key={state.clipId || state.side} clipId={state.clipId} analysis={analysis} review={review}
         clip={state.clip} enabled={state.enabled} c={c} source={state.source} side={state.side} syncConfirmed={state.syncConfirmed} correction={state.correction} />} />
     <p className="mt-4 text-sm leading-6 text-slate-200">{c.review}</p>
     <p className="mt-2 text-sm leading-6 text-slate-300">{c.drill}</p>
@@ -240,6 +243,7 @@ function ClipAccuracyFeedback({ clipId, analysis, review, clip, enabled, c, sour
     if (!verdict || !clip || !clipId || !enabled || status === "saving") return;
     setStatus("saving");
     const payload: ClipFeedbackInput = { feedback_id: id.current, clip_id: clipId, session_fingerprint: analysis.file_fingerprint,
+      inspection_id: analysis.inspection_id, data_origin: "real",
       zone_id: review.id, reference_lap: review.referenceLap, target_lap: review.targetLap, start_s: clip.start_s, end_s: clip.end_s,
       verdict, reason, locale, selection_version: REVIEW_VERSION, selection_source: source, side, sync_confirmed: syncConfirmed, correction };
     try {
