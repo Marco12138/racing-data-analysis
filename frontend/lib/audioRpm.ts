@@ -43,6 +43,9 @@ export type VideoRpmTrace = {
   rpm: number[];
   /** Optional multi-engine-source warning from the audio spectrum. */
   source_ambiguity?: EngineSourceAmbiguity;
+  method?: "dominant_band" | "harmonic_product";
+  alternative_rpm?: number[];
+  processing?: { sample_rate_hz: number; window_s: number; hop_s: number; timestamp: "window_center" };
 };
 
 export type EngineSourceAmbiguity = {
@@ -114,15 +117,17 @@ function hannWindow(size: number): Float32Array {
  */
 export function stft(
   audio: Float32Array | number[],
-  options: { sampleRate?: number; windowSize?: number; hopSize?: number } = {},
+  options: { sampleRate?: number; windowSize?: number; hopSize?: number; fftSize?: number } = {},
 ): StftResult {
   const sampleRate = options.sampleRate ?? 0;
   const windowSize = options.windowSize ?? DEFAULT_WINDOW_SIZE;
   const hopSize = options.hopSize ?? DEFAULT_HOP_SIZE;
+  const fftSize = options.fftSize ?? windowSize;
   if (sampleRate <= 0) throw new Error("Sample rate must be positive.");
   if (windowSize <= 0 || (windowSize & (windowSize - 1)) !== 0) {
     throw new Error("STFT window size must be a power of two.");
   }
+  if (fftSize < windowSize || (fftSize & (fftSize - 1)) !== 0) throw new Error("Invalid FFT size.");
   const samples = audio instanceof Float32Array ? audio : Float32Array.from(audio);
   const frameCount =
     samples.length >= windowSize
@@ -130,28 +135,94 @@ export function stft(
       : 0;
   const window = hannWindow(windowSize);
   const frequencies: number[] = [];
-  for (let bin = 0; bin <= windowSize / 2; bin += 1) {
-    frequencies.push((bin * sampleRate) / windowSize);
+  for (let bin = 0; bin <= fftSize / 2; bin += 1) {
+    frequencies.push((bin * sampleRate) / fftSize);
   }
   const times: number[] = [];
   const magnitude: Float32Array[] = [];
-  const re = new Float32Array(windowSize);
-  const im = new Float32Array(windowSize);
+  const re = new Float32Array(fftSize);
+  const im = new Float32Array(fftSize);
   for (let frame = 0; frame < frameCount; frame += 1) {
     const offset = frame * hopSize;
+    re.fill(0);
+    im.fill(0);
     for (let i = 0; i < windowSize; i += 1) {
       re[i] = samples[offset + i] * window[i];
       im[i] = 0;
     }
     fftInPlace(re, im);
-    const row = new Float32Array(windowSize / 2 + 1);
-    for (let bin = 0; bin <= windowSize / 2; bin += 1) {
+    const row = new Float32Array(fftSize / 2 + 1);
+    for (let bin = 0; bin <= fftSize / 2; bin += 1) {
       row[bin] = Math.hypot(re[bin], im[bin]);
     }
     magnitude.push(row);
     times.push(offset / sampleRate);
   }
   return { times, frequencies, magnitude };
+}
+
+/** Dominant frequency is a timing proxy, not a replacement for measured RPM. */
+export function trackDominantRpm(spectrum: StftResult, strokes: 2 | 4 = 2): number[] {
+  const minimum = strokes === 2 ? 100 : 40;
+  const maximum = strokes === 2 ? 300 : 150;
+  const bins = spectrum.frequencies.map((hz, index) => ({ hz, index }))
+    .filter(({ hz }) => hz >= minimum && hz <= maximum);
+  if (!bins.length) return [];
+  return medianSmooth(spectrum.magnitude.map((frame) => {
+    const best = bins.reduce((a, b) => frame[b.index] > frame[a.index] ? b : a);
+    return best.hz * (strokes === 2 ? 60 : 120);
+  }), 5);
+}
+
+/** Web Audio resampling performs anti-alias filtering before 8 kHz analysis. */
+async function resampleSyncAudio(mono: Float32Array, rate: number): Promise<Float32Array> {
+  if (rate === 8000) return mono;
+  const context = new OfflineAudioContext(1, Math.ceil(mono.length * 8000 / rate), 8000);
+  const buffer = context.createBuffer(1, mono.length, rate);
+  buffer.getChannelData(0).set(mono);
+  const source = context.createBufferSource();
+  source.buffer = buffer;
+  source.connect(context.destination);
+  source.start();
+  return (await context.startRendering()).getChannelData(0);
+}
+
+/** Yield between spectral blocks so cancellation and UI updates remain usable. */
+async function extractSyncCandidates(
+  mono: Float32Array, rate: number, startS: number, strokes: 2 | 4,
+  signal?: AbortSignal, onProgress?: (fraction: number) => void,
+): Promise<VideoRpmTrace> {
+  const audio = await resampleSyncAudio(mono, rate);
+  signal?.throwIfAborted();
+  const hop = Math.max(800, Math.ceil((audio.length - 2048) / (MAX_FRAMES - 1)));
+  const frames = Math.max(0, Math.floor((audio.length - 2048) / hop) + 1);
+  const spectrum: StftResult = { times: [], frequencies: [], magnitude: [] };
+  for (let frame = 0; frame < frames; frame += 80) {
+    const count = Math.min(80, frames - frame);
+    const part = stft(audio.subarray(frame * hop, (frame + count - 1) * hop + 2048), {
+      sampleRate: 8000, windowSize: 2048, fftSize: 4096, hopSize: hop,
+    });
+    spectrum.frequencies = part.frequencies;
+    spectrum.times.push(...part.times.map((t) => t + frame * hop / 8000 + .128 + startS));
+    spectrum.magnitude.push(...part.magnitude);
+    onProgress?.(.2 + .5 * (frame + count) / frames);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    signal?.throwIfAborted();
+  }
+  // Both candidates use the same centered clock; do not shift one by half a window.
+  const dominant = trackDominantRpm(spectrum, strokes);
+  const harmonic: number[] = [];
+  for (let frame = 0; frame < frames; frame += 80) {
+    harmonic.push(...trackEngineRpm({ ...spectrum, magnitude: spectrum.magnitude.slice(frame, frame + 80) }, { strokes, smoothWindow: 1 }).rpm);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    signal?.throwIfAborted();
+    onProgress?.(.7 + .3 * Math.min(1, (frame + 80) / frames));
+  }
+  return {
+    times: spectrum.times.map((value) => round(value, 6)), rpm: dominant,
+    alternative_rpm: medianSmooth(harmonic, 7), method: "dominant_band",
+    processing: { sample_rate_hz: 8000, window_s: .256, hop_s: hop / 8000, timestamp: "window_center" },
+  };
 }
 
 function interpolateSpectrum(
@@ -471,10 +542,13 @@ export async function extractVideoRpmTrace(
     endS?: number;
     signal?: AbortSignal;
     onProgress?: (fraction: number) => void;
+    verification?: boolean;
   } = {},
 ): Promise<VideoRpmTrace> {
   const strokes = options.strokes ?? 2;
   options.signal?.throwIfAborted();
+  // Full-file browser decoding is memory intensive; LRV proxies keep it bounded.
+  if (options.verification && file.size > 512 * 1024 * 1024) throw new Error("RPM_AUDIO_FILE_TOO_LARGE");
   options.onProgress?.(0.05);
   const buffer = await decodeAudioFile(file);
   options.signal?.throwIfAborted();
@@ -494,6 +568,9 @@ export async function extractVideoRpmTrace(
   const mono = buffer.numberOfChannels < 2 ? left : Float32Array.from(
     left, (value, index) => (value + buffer.getChannelData(1)[from + index]) / 2,
   );
+  if (options.verification) {
+    return extractSyncCandidates(mono, sampleRate, from / sampleRate, strokes, options.signal, options.onProgress);
+  }
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
   options.signal?.throwIfAborted();
   let hopSize = DEFAULT_HOP_SIZE;

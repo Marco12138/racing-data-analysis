@@ -161,7 +161,7 @@ test("initialVideoState builds the player state from an initial file", () => {
 test("SingleLapAnalysisPanel shows the player and hides the upload area when a video is loaded", () => {
   const html = render();
   assert.match(html, /<video/);
-  assert.doesNotMatch(html, /accept="video\/\*"/);
+  assert.doesNotMatch(html, /accept="video\/\*/);
   assert.match(html, /更换视频/);
   assert.match(html, /onboard\.MOV/);
 });
@@ -169,7 +169,7 @@ test("SingleLapAnalysisPanel shows the player and hides the upload area when a v
 test("SingleLapAnalysisPanel shows the upload area when no video is loaded", () => {
   const html = render({ videoUrl: "", videoName: "", videoFile: null });
   assert.doesNotMatch(html, /<video/);
-  assert.match(html, /accept="video\/\*"/);
+  assert.match(html, /accept="video\/\*,\.lrv,\.LRV"/);
   assert.doesNotMatch(html, /更换视频/);
 });
 

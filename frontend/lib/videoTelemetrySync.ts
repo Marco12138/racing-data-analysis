@@ -18,6 +18,7 @@ export type VideoSyncCalibration = {
   video_time_s: number;
   target_lap: number;
   calibrated_at: string;
+  review?: { method: "audio_rpm_multi_window_v1"; verdict: "confirmed"; scope: "session" | "selected_lap"; checked_points: number };
   video: {
     duration_s: number;
     size_bytes: number;
@@ -99,6 +100,25 @@ export function telemetrySessionTimeBounds(
     .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
   return { start_s: Math.min(...values), end_s: Math.max(...values) };
+}
+
+/** Review a whole target lap only when the proposed mapping covers its bounds. */
+export function rpmReviewPoints(
+  points: TelemetrySyncPoint[], offsetMs: number, videoDurationS: number,
+  analyzedRange: [number, number] | undefined,
+): Array<{ session_time_s: number; video_time_s: number; distance_m: number }> {
+  const bounds = telemetrySessionTimeBounds(points);
+  if (!bounds || !analyzedRange || !Number.isFinite(offsetMs)) return [];
+  const first = telemetryToVideoTimeS(bounds.start_s, offsetMs);
+  const last = telemetryToVideoTimeS(bounds.end_s, offsetMs);
+  if (first < 0 || last > videoDurationS || first < analyzedRange[0] - .3 || last > analyzedRange[1] + .3) return [];
+  return [.05, .5, .95].flatMap((fraction) => {
+    const point = nearestPointBySessionTime(points, bounds.start_s + fraction * (bounds.end_s - bounds.start_s));
+    return point?.session_time_s != null ? [{
+      session_time_s: point.session_time_s, distance_m: point.distance_m,
+      video_time_s: telemetryToVideoTimeS(point.session_time_s, offsetMs),
+    }] : [];
+  });
 }
 
 export function nextSeekRequest(

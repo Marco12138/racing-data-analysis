@@ -455,6 +455,8 @@ export type VideoSyncRpmResult = {
   offset_ms: number;
   confidence: number;
   reliable: boolean;
+  status?: "candidate" | "ambiguous" | "weak";
+  requires_manual_confirmation?: boolean;
   source: "temporary_xrk_inspection" | "request_summary";
   evidence: {
     method: string;
@@ -476,6 +478,14 @@ export type VideoSyncRpmResult = {
     search_candidates?: number;
     telemetry_time_range_s?: [number, number];
     video_time_range_s?: [number, number];
+    selected_method?: string;
+    window_offset_spread_s?: number | null;
+    windows?: Array<{ telemetry_center_s: number; video_center_s: number; offset_s: number; correlation: number }>;
+    reason_codes?: string[];
+    distant_alternative?: { offset_s: number; correlation: number } | null;
+    alternatives?: Array<{ method: string; offset_ms: number; correlation: number }>;
+    preview?: Array<{ session_time_s: number; audio_rpm: number | null; telemetry_rpm: number | null }>;
+    telemetry_timebase?: string;
   };
   warnings: string[];
   request_id?: string;
@@ -772,6 +782,10 @@ export async function autoSyncVideoRpm(options: {
   max_offset_s?: number;
   search_step_s?: number;
   min_overlap_s?: number;
+  verification?: boolean;
+  audio_method?: "dominant_band" | "harmonic_product";
+  alternative_video_rpm?: Array<{ time_s: number; rpm: number }>;
+  source_ambiguous?: boolean;
 }, signal?: AbortSignal): Promise<VideoSyncRpmResult> {
   const response = await fetch(await resolveApiUrl("/xrk/video-sync/rpm"), {
     method: "POST",

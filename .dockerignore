@@ -9,6 +9,11 @@ storage
 work
 outputs
 tmp
+.tmp-*
+*.MP4
+*.mp4
+*.LRV
+*.lrv
 __pycache__
 *.pyc
 *.xrk

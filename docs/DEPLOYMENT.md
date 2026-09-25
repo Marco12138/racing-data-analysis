@@ -306,6 +306,48 @@ them with a `NEXT_PUBLIC_` prefix.
 
 ## Release checks
 
+### Multi-window RPM synchronization review
+
+New clients opt in with `verification: true` on the existing
+`POST /api/v1/xrk/video-sync/rpm` route; legacy payloads remain unchanged.
+The browser extracts a dominant-band candidate and a harmonic-product candidate
+on the same 8 kHz, 256 ms **window-center** clock. Audio resampling is
+anti-aliased; spectral blocks yield for cancellation. At most 4,000 points per
+method leave the browser, never video/audio bytes. Full-file browser decoding
+still occurs: the verified path rejects originals over 512 MB before reading
+them. Select a same-recording GoPro `.LRV` proxy or a locally trimmed clip.
+Proxy and original are not automatically interchangeable without a timing check.
+
+The backend prefers the inspection's native RPM and logger lap boundaries;
+older caches explicitly report `normalized_legacy`. Search uses overlap-specific
+Pearson statistics, bounded FFT work, no extrapolation, and no interpolation
+across gaps over 0.5 seconds. Selected-lap mode retains its actual session clock;
+whole-session UI search is bounded to +/-150 seconds. The best candidate is
+refined at 25 ms increments and checked in up to five disjoint windows. Repeated
+lap peaks, method disagreement, short/sparse evidence and inconsistent windows
+are exposed as reason codes. Thresholds are exploratory, not calibrated success
+probabilities; window spread and search increments are not accuracy guarantees.
+No drift correction, driver-action inference or multi-session identity claim is
+made by this synchronizer.
+
+Whole-session location is the default. In selected-lap mode, a video interval
+longer than 1.5 times that lap is explicitly ambiguous: another lap can score
+higher than the correct one. First locate the session, then restrict the video
+to the known lap before refining. A high correlation alone cannot identify a lap.
+
+The UI never auto-applies verified results. It shows real RPM/audio curves,
+alternatives and three target-lap review locations. Confirmation requires all
+three checks, preserves the real lap clock and creates a local calibration
+receipt. Reject/uncertain leave prior calibration intact. Review playback does
+not display potentially misaligned gauges. This local judgement is not submitted
+as a model-training label. All three checks must be repeated after changing the
+lap, video, segment or search mode. Demo inspections cannot request server sync.
+
+Run `pnpm run test:rpm-sync` in addition to the checks below. Private regression
+artifacts stay under ignored `tmp/`; no private XRK/video is uploaded for public
+smoke tests. Deploy the backward-compatible Railway API before pushing the
+frontend release to the production GitHub branch.
+
 ### Single-lap RPM synchronization
 
 The Single Lap Analysis synchronization panel selects an actual session lap

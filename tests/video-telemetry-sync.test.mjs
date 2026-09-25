@@ -12,6 +12,7 @@ import {
   telemetryToVideoTimeS,
   validateVideoSeek,
   videoToTelemetryTimeS,
+  rpmReviewPoints,
 } from "../frontend/lib/videoTelemetrySync.ts";
 import {
   summarizeVideoFrame,
@@ -23,6 +24,15 @@ const points = [
   { distance_m: 50, session_time_s: 102.5 },
   { distance_m: 100, session_time_s: 105 },
 ];
+
+test("RPM review requires actual target-lap coverage and never clamps missing edges", () => {
+  const review = rpmReviewPoints(points, -90000, 60, [0, 60]);
+  assert.equal(review.length, 3);
+  assert.equal(review[1].video_time_s, 12.5);
+  assert.equal(rpmReviewPoints(points, -103000, 60, [0, 60]).length, 0);
+  assert.equal(rpmReviewPoints(points, -90000, 60, [11, 14]).length, 0);
+  assert.equal(rpmReviewPoints([], 0, 60, [0, 60]).length, 0);
+});
 
 test("video offset uses an explicit and reversible sign convention", () => {
   assert.equal(calculateVideoOffsetMs(14.25, 10), 4250);

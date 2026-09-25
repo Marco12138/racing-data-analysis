@@ -3,6 +3,7 @@
 import { CornerDynamicsSummary } from "./CornerDynamicsSummary";
 import { CoachReviewPanel } from "./CoachReviewPanel";
 import { TrackReferencePanel } from "./TrackReferencePanel";
+import { RpmSyncReview, type SyncReviewPoint, type SyncReviewVerdict } from "./RpmSyncReview";
 
 import {
   useCallback,
@@ -66,6 +67,7 @@ import type {
   XrkBrakingPattern,
   XrkEvent,
   XrkTrackPoint,
+  VideoSyncRpmResult,
 } from "../lib/xrkAnalysisApi";
 import {
   autoSyncVideoRpm,
@@ -93,6 +95,7 @@ import {
 } from "../lib/feedbackApi";
 import {
   createVideoSyncCalibration,
+  rpmReviewPoints,
   nearestPointByDistance,
   nearestPointBySessionTime,
   nextSeekRequest,
@@ -1319,6 +1322,11 @@ export function SingleLapAnalysisPanel({
     source: string;
   } | null>(null);
   const [rpmSyncing, setRpmSyncing] = useState(false);
+  const [rpmScope, setRpmScope] = useState<"selected_lap" | "session">("session");
+  const [rpmReview, setRpmReview] = useState<VideoSyncRpmResult | null>(null);
+  const [rpmVerdict, setRpmVerdict] = useState<SyncReviewVerdict | null>(null);
+  const [rpmPreviewing, setRpmPreviewing] = useState(false);
+  const rpmPreviewEnd = useRef<number | null>(null);
   const [rpmSyncProgress, setRpmSyncProgress] = useState(0);
   const [rpmAmbiguous, setRpmAmbiguous] = useState(false);
   const rpmSyncAbortRef = useRef<AbortController | null>(null);
@@ -1365,6 +1373,10 @@ export function SingleLapAnalysisPanel({
     const video = videoRef.current;
     if (!video) return;
     setCurrentTime(video.currentTime);
+    if (rpmPreviewing) {
+      if (rpmPreviewEnd.current != null && video.currentTime >= rpmPreviewEnd.current) video.pause();
+      return;
+    }
     if (loopCorner != null) {
       const corner = corners[loopCorner];
       if (corner && video.currentTime > corner.end) {
@@ -1550,11 +1562,14 @@ export function SingleLapAnalysisPanel({
       setPendingAutoResult(null);
       setAutoConfidence(null);
       setRpmAmbiguous(false);
+      setRpmReview(null);
+      setRpmVerdict(null);
+      setRpmPreviewing(false);
       setSyncMessage("");
       setSyncError("");
     });
     return () => { rpmSyncAbortRef.current?.abort(); };
-  }, [analysis.target_lap, analysis.inspection_id, videoFile, lapStart, lapEnd, rpmStrokes]);
+  }, [analysis.target_lap, analysis.inspection_id, videoFile, lapStart, lapEnd, rpmStrokes, rpmScope]);
 
   useEffect(() => {
     if (!videoRef.current || !seekRequest || !analysis.track) return;
@@ -1639,6 +1654,8 @@ export function SingleLapAnalysisPanel({
         fileMimeType: videoFile.type,
       });
       setCalibration(next);
+      setRpmPreviewing(false);
+      setRpmReview(null);
       setOffsetMs(next.offset_ms);
       setManualAnchorActive(true);
       setPendingAutoResult(null);
@@ -1654,6 +1671,8 @@ export function SingleLapAnalysisPanel({
   }
 
   function updateManualOffset(value: number) {
+    setRpmReview(null);
+    setRpmPreviewing(false);
     setOffsetMs(value);
     setCalibration(null);
     window.localStorage.removeItem(storageKey);
@@ -1664,6 +1683,8 @@ export function SingleLapAnalysisPanel({
   }
 
   function applyOffsetResult(offsetMsValue: number, label: string) {
+    setRpmReview(null);
+    setRpmPreviewing(false);
     setOffsetMs(offsetMsValue);
     setCalibration(null);
     window.localStorage.removeItem(storageKey);
@@ -1757,6 +1778,9 @@ export function SingleLapAnalysisPanel({
     const controller = new AbortController();
     rpmSyncAbortRef.current = controller;
     setRpmSyncing(true);
+    setRpmReview(null);
+    setRpmVerdict(null);
+    setRpmPreviewing(false);
     setRpmSyncProgress(0);
     setRpmAmbiguous(false);
     setSyncError("");
@@ -1766,6 +1790,7 @@ export function SingleLapAnalysisPanel({
       const trace = cached?.file === videoFile && cached.start === lapStart
         && cached.end === lapEnd && cached.strokes === rpmStrokes ? cached.trace
         : await extractVideoRpmTrace(videoFile, {
+          verification: true,
           strokes: rpmStrokes,
           startS: lapStart,
           endS: lapEnd,
@@ -1778,31 +1803,79 @@ export function SingleLapAnalysisPanel({
       setSyncMessage(t("xrk.video.comparing"));
       const result = await autoSyncVideoRpm({
         inspection_id: analysis.inspection_id,
-        lap: analysis.target_lap,
+        lap: rpmScope === "selected_lap" ? analysis.target_lap : undefined,
+        verification: true,
+        audio_method: trace.method ?? "dominant_band",
+        alternative_video_rpm: trace.alternative_rpm?.map((rpm, index) => ({ time_s: trace.times[index], rpm })),
         video_rpm: trace.times.map((time_s, index) => ({
           time_s,
           rpm: trace.rpm[index],
         })),
         search_step_s: 0.1,
+        max_offset_s: 150,
+        min_overlap_s: 15,
       }, controller.signal);
       controller.signal.throwIfAborted();
-      if (result.evidence.selected_lap !== analysis.target_lap) {
+      if ((rpmScope === "selected_lap" && result.evidence.selected_lap !== analysis.target_lap)
+        || result.evidence.method !== "audio_rpm_multi_window_v1") {
         throw new Error(t("xrk.video.rpmLapMismatch"));
       }
-      considerAutoResult(
-        trace.source_ambiguity?.ambiguous ? { ...result, reliable: false, confidence: Math.min(result.confidence, 0.65) } : result,
-        t("xrk.video.rpmLapResult", { lap: analysis.target_lap }),
-      );
+      setRpmReview(result);
+      setSyncMessage("");
     } catch (error) {
       setSyncMessage("");
       if ((error as Error).name !== "AbortError") {
-        setSyncError((error as Error).message || t("xrk.video.autoFailed"));
+        setSyncError((error as Error).message === "RPM_AUDIO_FILE_TOO_LARGE"
+          ? t("xrk.video.rpmFileLarge") : (error as Error).message || t("xrk.video.autoFailed"));
       }
     } finally {
       if (rpmSyncAbortRef.current === controller) {
         rpmSyncAbortRef.current = null;
         setRpmSyncing(false);
       }
+    }
+  }
+
+  function previewRpmCandidate(point: SyncReviewPoint) {
+    const video = videoRef.current;
+    if (!video) return;
+    setLoopCorner(null);
+    setRpmPreviewing(true);
+    rpmPreviewEnd.current = Math.min(videoDurationS, point.video_time_s + 2);
+    video.currentTime = Math.max(0, point.video_time_s - 1);
+    onCursor(point.distance_m);
+    void video.play().catch(() => setSyncError(t("videoCoach.loadFailed")));
+  }
+
+  function reviewRpmCandidate(verdict: SyncReviewVerdict, point?: SyncReviewPoint) {
+    if (!rpmReview || !videoFile || readOnly) return;
+    try {
+      if (verdict === "confirmed") {
+        if (!point) return;
+        const next = createVideoSyncCalibration({
+          videoTimeS: point.video_time_s, telemetryPoint: point, targetLap: analysis.target_lap,
+          videoDurationS, fileSizeBytes: videoFile.size, fileLastModifiedMs: videoFile.lastModified,
+          fileMimeType: videoFile.type,
+        });
+        next.review = { method: "audio_rpm_multi_window_v1", verdict: "confirmed", scope: rpmScope, checked_points: 3 };
+        // Save before reporting success; this is a local judgement, not a training label.
+        window.localStorage.setItem(storageKey, JSON.stringify(next));
+        setCalibration(next);
+        setOffsetMs(next.offset_ms);
+        setManualAnchorActive(true);
+        setPendingAutoResult(null);
+      }
+      window.localStorage.setItem(`${storageKey}:rpm-review`, JSON.stringify({
+        verdict, lap: analysis.target_lap, scope: rpmScope, offset_ms: rpmReview.offset_ms,
+        method: rpmReview.evidence.selected_method, reviewed_at: new Date().toISOString(),
+        video: { size_bytes: videoFile.size, last_modified_ms: videoFile.lastModified, duration_s: videoDurationS },
+      }));
+      setRpmVerdict(verdict);
+      setRpmPreviewing(false);
+      videoRef.current?.pause();
+      setSyncError("");
+    } catch {
+      setSyncError(t("xrk.video.calibrationFailed"));
     }
   }
 
@@ -1877,11 +1950,11 @@ export function SingleLapAnalysisPanel({
           <label className="flex aspect-video cursor-pointer flex-col items-center justify-center border border-dashed border-slate-700 bg-slate-950/70 text-slate-400 hover:border-[#35d6d0]">
             <Video size={30} />
             <span className="mt-3 text-sm">{t("xrk.video.choose")}</span>
-            <input className="hidden" type="file" accept="video/*" onChange={(event) => {
+            <input className="hidden" type="file" accept="video/*,.lrv,.LRV" onChange={(event) => {
               const file = event.target.files?.[0];
               if (!file) return;
               if (videoUrl) URL.revokeObjectURL(videoUrl);
-              setVideoUrl(URL.createObjectURL(file));
+              setVideoUrl(URL.createObjectURL(file.type ? file : file.slice(0, file.size, "video/mp4")));
               setVideoName(file.name);
               setVideoFile(file);
               setVideoDurationS(0);
@@ -2161,13 +2234,20 @@ export function SingleLapAnalysisPanel({
       <div className="flex min-w-0 flex-col gap-5">
         <Panel title={t("xrk.video.gaugeTitle")} subtitle={t("xrk.video.gaugeHint")}>
           <div className="grid grid-cols-2 gap-3">
-            <GaugeStat label={t("xrk.video.gaugeSpeed")} value={gauge.speed_kmh} unit="km/h" />
-            <GaugeStat label={t("xrk.video.gaugeRpm")} value={gauge.rpm} unit="" />
-            <GaugeStat label={t("xrk.video.gaugeLongitudinal")} value={gauge.longitudinal_g} unit="g" />
-            <GaugeStat label={t("xrk.video.gaugeLateral")} value={gauge.lateral_g} unit="g" />
+            <GaugeStat label={t("xrk.video.gaugeSpeed")} value={rpmPreviewing ? null : gauge.speed_kmh} unit="km/h" />
+            <GaugeStat label={t("xrk.video.gaugeRpm")} value={rpmPreviewing ? null : gauge.rpm} unit="" />
+            <GaugeStat label={t("xrk.video.gaugeLongitudinal")} value={rpmPreviewing ? null : gauge.longitudinal_g} unit="g" />
+            <GaugeStat label={t("xrk.video.gaugeLateral")} value={rpmPreviewing ? null : gauge.lateral_g} unit="g" />
           </div>
         </Panel>
         <Panel title={t("xrk.video.syncTitle")} subtitle={t("xrk.video.syncSubtitle")}>
+          <label className="mb-3 block text-xs text-slate-400">{t("xrk.video.rpmSearchScope")}
+            <select value={rpmScope} disabled={rpmSyncing || autoSyncing} onChange={(event) => setRpmScope(event.target.value as "selected_lap" | "session")}
+              className="mt-2 min-h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white">
+              <option value="selected_lap">{t("xrk.video.rpmSelectedScope")}</option>
+              <option value="session">{t("xrk.video.rpmSessionScope")}</option>
+            </select>
+          </label>
           <label className="block text-xs text-slate-400">
             {t("xrk.video.telemetryLap")}
             <select
@@ -2204,7 +2284,7 @@ export function SingleLapAnalysisPanel({
                 className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white" />
             </label>
           </div>
-          {selectedLapRow && <p className="mb-3 text-xs text-slate-400">
+          {selectedLapRow && rpmScope === "selected_lap" && <p className="mb-3 text-xs text-slate-400">
             {t("xrk.video.rpmScope", { lap: analysis.target_lap, time: Number(selectedLapRow.lap_time).toFixed(3) })}
           </p>}
           {videoDurationS > 0 && !rpmRangeValid && <p role="alert" className="mb-3 text-xs text-amber-300">{t("xrk.video.rpmRangeInvalid")}</p>}
@@ -2254,6 +2334,10 @@ export function SingleLapAnalysisPanel({
             className="mt-2 flex min-h-10 items-center gap-2 text-sm text-slate-300">
             <X size={16} />{t("xrk.video.cancelRpm")}
           </button>}
+          <p className="mt-2 text-xs text-slate-400">{t("xrk.video.rpmProxyHint")}</p>
+          {rpmReview && <RpmSyncReview key={`${rpmReview.offset_ms}:${rpmScope}`} result={rpmReview}
+            points={rpmReviewPoints(targetPoints, rpmReview.offset_ms, videoDurationS, rpmReview.evidence.video_time_range_s)}
+            verdict={rpmVerdict} onPreview={previewRpmCandidate} onDecision={reviewRpmCandidate} />}
           {!analysis.capabilities.rpm && <p className="mt-2 text-xs text-amber-300">{t("xrk.unavailable.rpm")}</p>}
           <p className="mt-2 text-xs leading-5 text-slate-500">
             {t("xrk.video.privacy")}

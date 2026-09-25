@@ -142,6 +142,10 @@ class VideoSyncRpmAutoRequest(BaseModel):
     max_offset_s: float = Field(default=300.0, ge=5.0, le=1_800.0)
     search_step_s: float = Field(default=0.25, ge=0.05, le=2.0)
     min_overlap_s: float = Field(default=5.0, ge=2.0, le=300.0)
+    verification: bool = False
+    audio_method: Literal["dominant_band", "harmonic_product"] = "dominant_band"
+    alternative_video_rpm: list[VideoRpmPoint] | None = Field(default=None, min_length=8, max_length=5_000)
+    source_ambiguous: bool = False
 
 
 @router.get("/demo-session", response_model=DemoSessionResponse)
@@ -640,6 +644,7 @@ async def auto_sync_video_rpm(
             error_type="video_sync_limits",
         )
     source = "request_summary"
+    rpm_timebase = "request_summary"
     if payload.inspection_id:
         source = "temporary_xrk_inspection"
         try:
@@ -673,11 +678,26 @@ async def auto_sync_video_rpm(
             ) from exc
         try:
             telemetry_rpm = telemetry_rpm_summary(telemetry, lap=payload.lap)
+            rpm_timebase = "normalized_legacy"
+            if payload.verification:
+                from ..analysis.rpm_sync_verification import native_rpm_for_sync
+
+                native = await asyncio.to_thread(native_rpm_for_sync, record, payload.lap)
+                if native is not None:
+                    telemetry_rpm = native
+                    rpm_timebase = "native_rpm"
         except ValueError as exc:
             raise PublicApiError(
                 status_code=422,
                 error_code="VIDEO_SYNC_LAP_UNAVAILABLE" if payload.lap is not None else "XRK_RPM_UNAVAILABLE",
                 message=str(exc),
+                error_type="video_sync_data",
+            ) from exc
+        except Exception as exc:
+            raise PublicApiError(
+                status_code=422,
+                error_code="VIDEO_SYNC_TELEMETRY_UNAVAILABLE",
+                message="RPM telemetry is unavailable. Re-import the XRK and try again.",
                 error_type="video_sync_data",
             ) from exc
     elif payload.lap is not None:
@@ -698,15 +718,29 @@ async def auto_sync_video_rpm(
         )
 
     try:
-        result = await asyncio.to_thread(
-            estimate_video_telemetry_rpm_offset,
-            [point.model_dump() for point in payload.video_rpm],
-            telemetry_rpm,
-            max_offset_s=payload.max_offset_s,
-            search_step_s=payload.search_step_s,
-            min_overlap_s=payload.min_overlap_s,
-            selected_lap=payload.lap,
-        )
+        if payload.verification:
+            from ..analysis.rpm_sync_verification import verify_rpm_alignment
+
+            result = await asyncio.to_thread(
+                verify_rpm_alignment,
+                [point.model_dump() for point in payload.video_rpm], telemetry_rpm,
+                alternative_video_rpm=([point.model_dump() for point in payload.alternative_video_rpm]
+                                       if payload.alternative_video_rpm else None),
+                audio_method=payload.audio_method, source_ambiguous=payload.source_ambiguous,
+                max_offset_s=payload.max_offset_s, min_overlap_s=payload.min_overlap_s,
+                selected_lap=payload.lap,
+            )
+            result["evidence"]["telemetry_timebase"] = rpm_timebase
+        else:
+            result = await asyncio.to_thread(
+                estimate_video_telemetry_rpm_offset,
+                [point.model_dump() for point in payload.video_rpm],
+                telemetry_rpm,
+                max_offset_s=payload.max_offset_s,
+                search_step_s=payload.search_step_s,
+                min_overlap_s=payload.min_overlap_s,
+                selected_lap=payload.lap,
+            )
     except ValueError as exc:
         raise PublicApiError(
             status_code=422,

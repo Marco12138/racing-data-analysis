@@ -7,6 +7,7 @@ import {
   smoothRpmForEvents,
   stft,
   trackEngineRpm,
+  trackDominantRpm,
   extractVideoRpmTrace,
 } from "../frontend/lib/audioRpm.ts";
 
@@ -179,5 +180,36 @@ test("cancelled RPM extraction never reads or uploads the video", async () => {
   await assert.rejects(extractVideoRpmTrace({ arrayBuffer: async () => { reads += 1; } }, {
     signal: controller.signal,
   }), { name: "AbortError" });
+  assert.equal(reads, 0);
+});
+
+test("verified audio uses centered timestamps and two bounded candidates", async (t) => {
+  const sampleRate = 8000;
+  const samples = harmonicAudio(20, sampleRate, 150, [1, 2, 3, 4]);
+  t.mock.method(globalThis, "setTimeout", (fn) => { fn(); return 0; });
+  const original = globalThis.OfflineAudioContext;
+  globalThis.OfflineAudioContext = class {
+    async decodeAudioData() { return { duration: 20, sampleRate, length: samples.length, numberOfChannels: 1, getChannelData: () => samples }; }
+  };
+  t.after(() => { globalThis.OfflineAudioContext = original; });
+  const trace = await extractVideoRpmTrace(new File(["mock"], "test.lrv"), { verification: true, startS: 8, endS: 14 });
+  assert.equal(trace.times[0], 8.128);
+  assert.equal(trace.processing.timestamp, "window_center");
+  assert.equal(trace.method, "dominant_band");
+  assert.equal(trace.rpm.length, trace.alternative_rpm.length);
+  assert.ok(trace.times.at(-1) < 14);
+  assert.ok(Math.abs(median(trace.rpm) - 9000) < 100);
+});
+
+test("dominant frequency and zero padding do not change frame clock", () => {
+  const spectrum = stft(harmonicAudio(5, 8000, 150, [1]), { sampleRate: 8000, windowSize: 2048, fftSize: 4096, hopSize: 800 });
+  assert.equal(spectrum.times[1], .1);
+  assert.equal(spectrum.frequencies[1], 8000/4096);
+  assert.ok(Math.abs(median(trackDominantRpm(spectrum)) - 9000) < 100);
+});
+
+test("large original video is rejected before browser allocation", async () => {
+  let reads = 0;
+  await assert.rejects(extractVideoRpmTrace({ size: 6e9, arrayBuffer: async () => { reads++; } }, { verification: true }), /RPM_AUDIO_FILE_TOO_LARGE/);
   assert.equal(reads, 0);
 });
