@@ -78,7 +78,7 @@ const worker = {
       );
     }
 
-    if (url.pathname === "/" && request.method === "GET") {
+    if (url.pathname === "/demo" && request.method === "GET") {
       const summary = await fetchPublicDemoSummary(env);
       if (summary) {
         const forwardedHeaders = new Headers(request.headers);
