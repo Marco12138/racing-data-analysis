@@ -143,6 +143,7 @@ class VideoSyncRpmAutoRequest(BaseModel):
     search_step_s: float = Field(default=0.25, ge=0.05, le=2.0)
     min_overlap_s: float = Field(default=5.0, ge=2.0, le=300.0)
     verification: bool = False
+    search_mode: Literal["bounded", "overlap"] = "bounded"
     audio_method: Literal["dominant_band", "harmonic_product"] = "dominant_band"
     alternative_video_rpm: list[VideoRpmPoint] | None = Field(default=None, min_length=8, max_length=5_000)
     source_ambiguous: bool = False
@@ -633,7 +634,13 @@ async def auto_sync_video_rpm(
     candidate_count = int(
         (2 * payload.max_offset_s) // payload.search_step_s
     ) + 1
-    if payload.lap is None and candidate_count > MAX_SEARCH_CANDIDATES:
+    if payload.search_mode == "overlap" and not payload.verification:
+        raise PublicApiError(
+            status_code=422, error_code="VIDEO_SYNC_VERIFICATION_REQUIRED",
+            message="Overlap search requires the human-reviewed synchronization mode.",
+            error_type="video_sync_limits",
+        )
+    if payload.search_mode == "bounded" and payload.lap is None and candidate_count > MAX_SEARCH_CANDIDATES:
         raise PublicApiError(
             status_code=422,
             error_code="VIDEO_SYNC_SEARCH_LIMIT_EXCEEDED",
@@ -645,6 +652,7 @@ async def auto_sync_video_rpm(
         )
     source = "request_summary"
     rpm_timebase = "request_summary"
+    lap_timings = []
     if payload.inspection_id:
         source = "temporary_xrk_inspection"
         try:
@@ -665,6 +673,7 @@ async def auto_sync_video_rpm(
                 message="RPM is unavailable for this inspection.",
                 error_type="video_sync_data",
             )
+        lap_timings = record.manifest.get("lap_timing", [])
         try:
             telemetry = await asyncio.to_thread(
                 pd.read_parquet, record.telemetry_path
@@ -729,8 +738,14 @@ async def auto_sync_video_rpm(
                 audio_method=payload.audio_method, source_ambiguous=payload.source_ambiguous,
                 max_offset_s=payload.max_offset_s, min_overlap_s=payload.min_overlap_s,
                 selected_lap=payload.lap,
+                search_mode=payload.search_mode,
             )
             result["evidence"]["telemetry_timebase"] = rpm_timebase
+            lower, upper = result["evidence"]["matched_telemetry_range_s"]
+            result["evidence"]["lap_coverage"] = [{
+                "lap": int(row["lap"]),
+                "coverage": "full" if row["start_time_ms"]/1000 >= lower and row["end_time_ms"]/1000 <= upper else "partial",
+            } for row in lap_timings if row["end_time_ms"]/1000 > lower and row["start_time_ms"]/1000 < upper]
         else:
             result = await asyncio.to_thread(
                 estimate_video_telemetry_rpm_offset,

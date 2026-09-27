@@ -1805,6 +1805,7 @@ export function SingleLapAnalysisPanel({
         inspection_id: analysis.inspection_id,
         lap: rpmScope === "selected_lap" ? analysis.target_lap : undefined,
         verification: true,
+        search_mode: "overlap",
         audio_method: trace.method ?? "dominant_band",
         alternative_video_rpm: trace.alternative_rpm?.map((rpm, index) => ({ time_s: trace.times[index], rpm })),
         video_rpm: trace.times.map((time_s, index) => ({
@@ -2242,7 +2243,7 @@ export function SingleLapAnalysisPanel({
         </Panel>
         <Panel title={t("xrk.video.syncTitle")} subtitle={t("xrk.video.syncSubtitle")}>
           <label className="mb-3 block text-xs text-slate-400">{t("xrk.video.rpmSearchScope")}
-            <select value={rpmScope} disabled={rpmSyncing || autoSyncing} onChange={(event) => setRpmScope(event.target.value as "selected_lap" | "session")}
+            <select aria-label={t("xrk.video.rpmSearchScope")} value={rpmScope} disabled={rpmSyncing || autoSyncing} onChange={(event) => setRpmScope(event.target.value as "selected_lap" | "session")}
               className="mt-2 min-h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white">
               <option value="selected_lap">{t("xrk.video.rpmSelectedScope")}</option>
               <option value="session">{t("xrk.video.rpmSessionScope")}</option>

@@ -474,6 +474,10 @@ export type VideoSyncRpmResult = {
     reliable_confidence_threshold: number;
     searched_offset_range_ms: [number, number];
     search_scope?: "selected_lap" | "session";
+    search_mode?: "bounded" | "overlap";
+    matched_telemetry_range_s?: [number, number];
+    matched_video_range_s?: [number, number];
+    lap_coverage?: Array<{ lap: number; coverage: "full" | "partial" }>;
     selected_lap?: number | null;
     search_candidates?: number;
     telemetry_time_range_s?: [number, number];
@@ -783,6 +787,7 @@ export async function autoSyncVideoRpm(options: {
   search_step_s?: number;
   min_overlap_s?: number;
   verification?: boolean;
+  search_mode?: "bounded" | "overlap";
   audio_method?: "dominant_band" | "harmonic_product";
   alternative_video_rpm?: Array<{ time_s: number; rpm: number }>;
   source_ambiguous?: boolean;

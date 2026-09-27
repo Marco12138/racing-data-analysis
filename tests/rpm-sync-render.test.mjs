@@ -31,3 +31,18 @@ test("English review degrades when the lap is not covered", () => {
   assert.match(html, /not a probability/);
   assert.doesNotMatch(html, /已保存|起点附近/);
 });
+
+test("partial recordings show independent clocks and only candidate lap coverage", () => {
+  const partial = { ...result, status: "weak", evidence: { ...result.evidence,
+    reason_codes: ["PARTIAL_RECORDING_OVERLAP"], matched_video_range_s: [0,60], matched_telemetry_range_s: [240,300],
+    lap_coverage: [{ lap:5, coverage:"partial" }, { lap:6, coverage:"full" }, { lap:7, coverage:"partial" }],
+  } };
+  for (const locale of ["zh", "en"]) {
+    const html = renderToStaticMarkup(createElement(RpmSyncTest, { result:partial, locale, points:[], verdict:null, onPreview(){}, onDecision(){} }));
+    assert.match(html, /240\.00/);
+    assert.match(html, /0\.00/);
+    assert.match(html, /L6/);
+    assert.match(html, /L5, L7/);
+    assert.match(html, locale === "zh" ? /待核对/ : /unverified/);
+  }
+});

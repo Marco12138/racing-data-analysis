@@ -121,20 +121,24 @@ def _search(video: tuple, telemetry: tuple, step: float, lower: float,
 
 
 def _evaluate(rows: list[dict], telemetry: tuple, *, method: str, step: float,
-              max_offset_s: float, selected_lap: int | None, min_overlap_s: float) -> dict:
+              max_offset_s: float, selected_lap: int | None, min_overlap_s: float,
+              search_mode: str) -> dict:
     """Refine one method and inspect disjoint early/middle/late windows."""
     video = _grid(rows, step)
     vt, vv, processing = video
     tt, tv, _ = telemetry
     common_span = min(vt[-1] - vt[0], tt[-1] - tt[0])
-    minimum = max(min_overlap_s, RULES["minimum_overlap_ratio"] * common_span)
+    whole_minimum = RULES["minimum_overlap_ratio"] * common_span
+    minimum = max(min_overlap_s, min(30., whole_minimum) if search_mode == "overlap" else whole_minimum)
     lower, upper = -max_offset_s, max_offset_s
-    if selected_lap is not None:
+    if selected_lap is not None or search_mode == "overlap":
         lower, upper = vt[0] - tt[-1] + minimum, vt[-1] - tt[0] - minimum
     candidates = _search(video, telemetry, step, lower, upper, minimum)
     if not candidates:
         raise ValueError("Not enough continuous, varying RPM overlap for synchronization.")
-    best = candidates[0]
+    # Prefer longer evidence when its score is comparable, not a short lucky peak.
+    best = next((c for c in candidates if c["overlap_s"] >= whole_minimum
+                 and c["correlation"] >= candidates[0]["correlation"] - RULES["minimum_peak_margin"]), candidates[0])
     offset = best["offset_s"]
     start, end = max(tt[0], vt[0]-offset), min(tt[-1], vt[-1]-offset)
     query = np.arange(start, end, step)
@@ -167,6 +171,8 @@ def _evaluate(rows: list[dict], telemetry: tuple, *, method: str, step: float,
                                 "offset_s": round(float(local), 3), "correlation": round(r, 4)})
     spread = float(np.ptp([w["offset_s"] for w in windows])) if windows else None
     reasons = []
+    if best["overlap_s"] < whole_minimum:
+        reasons.append("PARTIAL_RECORDING_OVERLAP")
     if correlation < RULES["minimum_correlation"]:
         reasons.append("LOW_CORRELATION")
     if len(windows) < 3:
@@ -184,6 +190,7 @@ def _evaluate(rows: list[dict], telemetry: tuple, *, method: str, step: float,
     status = "candidate" if not reasons else ("ambiguous" if any(
         code in reasons for code in ("REPEATED_LAP_AMBIGUITY", "VIDEO_SPANS_MULTIPLE_LAPS")
     ) else "weak")
+    start, end = max(tt[0], vt[0]-offset), min(tt[-1], vt[-1]-offset)
     return {"method": method, "offset_ms": int(round(offset*1000)), "status": status,
             "correlation": round(float(correlation), 4), "overlap_s": round(best["overlap_s"], 3),
             "window_spread_s": round(spread, 3) if spread is not None else None,
@@ -191,6 +198,9 @@ def _evaluate(rows: list[dict], telemetry: tuple, *, method: str, step: float,
             "peak_margin": round(margin, 4) if margin is not None else None,
             "search_candidates": len(candidates), "processing": processing,
             "video_time_range_s": [float(vt[0]), float(vt[-1])],
+            "matched_telemetry_range_s": [round(float(start), 3), round(float(end), 3)],
+            "matched_video_range_s": [round(float(start+offset), 3), round(float(end+offset), 3)],
+            "minimum_overlap_s": float(minimum),
             "searched_offset_range_ms": [round(lower*1000), round(upper*1000)]}
 
 
@@ -198,10 +208,12 @@ def verify_rpm_alignment(video_rpm: list[dict], telemetry_rpm: list[dict], *,
                          alternative_video_rpm: list[dict] | None = None,
                          audio_method: str = "dominant_band", selected_lap: int | None = None,
                          max_offset_s: float = 150, min_overlap_s: float = 15,
-                         source_ambiguous: bool = False) -> dict[str, Any]:
+                         source_ambiguous: bool = False, search_mode: str = "bounded") -> dict[str, Any]:
     """Return evidence and alternatives; a candidate always requires human review."""
     vt, _ = _series(video_rpm)
     tt, _ = _series(telemetry_rpm)
+    if search_mode not in {"bounded", "overlap"}:
+        raise ValueError("Unknown RPM search mode.")
     step = max(.1, float(np.median(np.diff(vt))), float(np.median(np.diff(tt))))
     if step > .5:
         raise ValueError("RPM sampling is too sparse; use a shorter video segment.")
@@ -214,7 +226,7 @@ def verify_rpm_alignment(video_rpm: list[dict], telemetry_rpm: list[dict], *,
         try:
             results.append(_evaluate(rows, telemetry, method=method, step=step,
                                     max_offset_s=max_offset_s, selected_lap=selected_lap,
-                                    min_overlap_s=min_overlap_s))
+                                    min_overlap_s=min_overlap_s, search_mode=search_mode))
         except ValueError:
             failures.append(method)
     if not results:
@@ -247,6 +259,7 @@ def verify_rpm_alignment(video_rpm: list[dict], telemetry_rpm: list[dict], *,
                      "offset_convention": "video_time_s = telemetry_session_time_s + offset_ms / 1000",
                      "confidence_kind": "heuristic_not_probability", "rules": RULES,
                      "search_scope": "selected_lap" if selected_lap is not None else "session",
+                     "search_mode": search_mode,
                      "selected_lap": selected_lap, "best_correlation": best["correlation"],
                      "peak_margin": best["peak_margin"], "matched_overlap_s": best["overlap_s"],
                      "window_offset_spread_s": best["window_spread_s"], "windows": best["windows"],
@@ -257,6 +270,9 @@ def verify_rpm_alignment(video_rpm: list[dict], telemetry_rpm: list[dict], *,
                      "searched_offset_range_ms": best["searched_offset_range_ms"],
                      "telemetry_time_range_s": [float(tt[0]), float(tt[-1])],
                      "video_time_range_s": best["video_time_range_s"],
+                     "matched_telemetry_range_s": best["matched_telemetry_range_s"],
+                     "matched_video_range_s": best["matched_video_range_s"],
+                     "minimum_overlap_s": best["minimum_overlap_s"],
                      "preview": preview,
                      "telemetry_processing": telemetry[2], "audio_processing": best["processing"],
                      "drift_correction_applied": False, "gap_limit_s": MAX_GAP_S},

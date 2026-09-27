@@ -20,6 +20,7 @@ const COPY = {
     missing: "该候选未完整覆盖当前圈，无法确认。请调整视频范围或选择正确圈。",
     confirmed: "已保存人工确认", rejected: "已记录不吻合，原校准未改动", unsure: "已记录不确定，原校准未改动",
     alternative: "其他时间候选", alternativeMethod: "另一种声音方法", noWindows: "分段检查不足",
+    videoRange: "视频重叠范围", telemetryRange: "AiM 重叠范围", fullLaps: "时间范围内的圈（待核对）", partialLaps: "仅覆盖一部分的圈", noFullLap: "此候选没有完整覆盖记录圈；可先人工绑定具体弯道片段。",
   },
   en: {
     title: "Review synchronization candidate", candidate: "Awaiting human confirmation", ambiguous: "Lap or audio ambiguity", weak: "Insufficient evidence",
@@ -31,6 +32,7 @@ const COPY = {
     missing: "This candidate does not cover the current lap. Adjust the video range or lap before confirming.",
     confirmed: "Human confirmation saved", rejected: "Mismatch recorded; prior calibration unchanged", unsure: "Uncertainty recorded; prior calibration unchanged",
     alternative: "Alternative timing", alternativeMethod: "Other audio method", noWindows: "Too few usable windows",
+    videoRange: "Video overlap", telemetryRange: "AiM overlap", fullLaps: "Laps within the time range (unverified)", partialLaps: "Partly covered laps", noFullLap: "No complete recorded lap is covered. A specific corner clip can still be anchored manually.",
   },
 };
 
@@ -43,6 +45,7 @@ const REASONS: Record<string, [string, string]> = {
   SEARCH_BOUNDARY: ["候选接近搜索边界", "Candidate near search boundary"],
   AUDIO_METHOD_DISAGREEMENT: ["两种声音方法给出不同位置", "Audio methods disagree on timing"],
   MULTIPLE_AUDIO_SOURCES: ["可能混有其他车辆声音", "Possible interfering engines"],
+  PARTIAL_RECORDING_OVERLAP: ["录像与 AiM 只有部分重叠；候选仍需人工核对，未匹配区域不可用", "Only part of these recordings overlaps. Review the candidate; unmatched sections remain unavailable"],
 };
 
 /** A review action records human judgement, never upgrades a heuristic silently. */
@@ -68,7 +71,14 @@ export function RpmSyncReview({ result, points, verdict, onPreview, onDecision }
       <dt className="text-slate-400">{c.offset}</dt><dd>{(result.offset_ms / 1000).toFixed(3)} s</dd>
       <dt className="text-slate-400">{c.correlation}</dt><dd>{evidence.best_correlation.toFixed(3)}</dd>
       <dt className="text-slate-400">{c.spread}</dt><dd>{evidence.window_offset_spread_s == null ? c.noWindows : `${evidence.window_offset_spread_s.toFixed(3)} s`}</dd>
+      {evidence.matched_video_range_s && <><dt className="text-slate-400">{c.videoRange}</dt><dd>{evidence.matched_video_range_s.map(t => t.toFixed(2)).join(" – ")} s</dd></>}
+      {evidence.matched_telemetry_range_s && <><dt className="text-slate-400">{c.telemetryRange}</dt><dd>{evidence.matched_telemetry_range_s.map(t => t.toFixed(2)).join(" – ")} s</dd></>}
     </dl>
+    {evidence.lap_coverage && <div className="mt-3 space-y-1 text-xs text-slate-300">
+      <p>{c.fullLaps}: {evidence.lap_coverage.filter(p => p.coverage === "full").map(p => `L${p.lap}`).join(", ") || "—"}</p>
+      <p>{c.partialLaps}: {evidence.lap_coverage.filter(p => p.coverage === "partial").map(p => `L${p.lap}`).join(", ") || "—"}</p>
+      {!evidence.lap_coverage.some(p => p.coverage === "full") && <p>{c.noFullLap}</p>}
+    </div>}
     {!!evidence.preview?.length && <div className="mt-3 h-40 min-w-0" aria-label={`${c.measured} / ${c.proxy}`}>
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={evidence.preview} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>

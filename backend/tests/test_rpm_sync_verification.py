@@ -105,6 +105,40 @@ def test_clock_reversal_and_work_limits_reject():
         verify_rpm_alignment(video, [{**r, "time_s": r["time_s"]*100} for r in telemetry])
 
 
+def test_overlap_search_handles_a_late_gopro_chapter_without_rebasing_aim():
+    """A late video file has its own zero, not the logger's session start."""
+    video, telemetry = signals(offset=0, start=650, duration=90)
+    result = verify_rpm_alignment(video, telemetry, search_mode="overlap")
+    assert result["offset_ms"] == pytest.approx(-650000, abs=50)
+    assert result["evidence"]["matched_video_range_s"] == pytest.approx([0, 89.9], abs=.05)
+    assert result["evidence"]["matched_telemetry_range_s"] == pytest.approx([650, 739.9], abs=.05)
+    assert result["requires_manual_confirmation"] is True
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_different_start_and_end_times_match_only_the_shared_driving(reverse):
+    """Neither recorder needs to contain most of the other recording."""
+    _, rows = signals(offset=0, duration=600)
+    telemetry = rows[:3000]
+    video = [{**r, "time_s": r["time_s"]-240} for r in rows[2400:]]
+    if reverse:
+        video, telemetry = telemetry, video
+    result = verify_rpm_alignment(video, telemetry, search_mode="overlap")
+    assert result["offset_ms"] == pytest.approx(240000 if reverse else -240000, abs=50)
+    assert result["evidence"]["matched_overlap_s"] == pytest.approx(60, abs=.2)
+    assert "PARTIAL_RECORDING_OVERLAP" in result["evidence"]["reason_codes"]
+    assert result["reliable"] is False
+    assert result["status"] == "weak"
+    assert result["requires_manual_confirmation"] is True
+
+
+def test_overlap_search_rejects_sparse_or_excessive_recordings():
+    """Full-shift search still has fixed memory and source time-span bounds."""
+    video, telemetry = signals()
+    with pytest.raises(ValueError, match="one hour"):
+        verify_rpm_alignment(video, [{**r, "time_s": r["time_s"]*100} for r in telemetry], search_mode="overlap")
+
+
 def test_api_verification_is_additive_and_path_free(monkeypatch, tmp_path):
     """New clients receive evidence while old callers keep their contract."""
     client = build_client(monkeypatch, tmp_path)
@@ -120,6 +154,17 @@ def test_api_verification_is_additive_and_path_free(monkeypatch, tmp_path):
             'video_rpm':video, 'telemetry_rpm':rows, 'verification':True, 'video_path':'/private/video.mp4',
         })
         assert rejected.status_code == 422
+        overlap = client.post('/api/v1/xrk/video-sync/rpm', json={
+            'video_rpm':video, 'telemetry_rpm':rows, 'verification':True,
+            'search_mode':'overlap', 'max_offset_s':1800, 'search_step_s':.05,
+        })
+        assert overlap.status_code == 200, overlap.text
+        assert overlap.json()['evidence']['search_mode'] == 'overlap'
+        legacy = client.post('/api/v1/xrk/video-sync/rpm', json={
+            'video_rpm':video, 'telemetry_rpm':rows, 'search_mode':'overlap',
+        })
+        assert legacy.status_code == 422
+        assert legacy.json()['error_code'] == 'VIDEO_SYNC_VERIFICATION_REQUIRED'
 
 
 def test_api_uses_native_rpm_instead_of_lossy_display_grid(monkeypatch, tmp_path):
@@ -143,6 +188,7 @@ def test_api_uses_native_rpm_instead_of_lossy_display_grid(monkeypatch, tmp_path
     assert response.status_code == 200, response.text
     assert response.json()['evidence']['telemetry_timebase'] == 'native_rpm'
     assert response.json()['offset_ms'] == pytest.approx(-642700, abs=50)
+    assert response.json()['evidence']['lap_coverage'] == [{'lap':13, 'coverage':'partial'}]
 
 
 def test_corrupt_native_cache_returns_a_public_error(monkeypatch, tmp_path):

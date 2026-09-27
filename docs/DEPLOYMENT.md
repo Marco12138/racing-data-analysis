@@ -322,13 +322,28 @@ The backend prefers the inspection's native RPM and logger lap boundaries;
 older caches explicitly report `normalized_legacy`. Search uses overlap-specific
 Pearson statistics, bounded FFT work, no extrapolation, and no interpolation
 across gaps over 0.5 seconds. Selected-lap mode retains its actual session clock;
-whole-session UI search is bounded to +/-150 seconds. The best candidate is
+the default legacy search is bounded to the requested offset. New UI requests
+also set `search_mode: "overlap"`: offsets are derived from the two actual time
+ranges, including GoPro chapters starting long after the logger. This bounded
+FFT search does not require the recorder start/end times to coincide and does
+not use file creation timestamps. Each source still has the one-hour and
+40,000-grid-point processing limits. The best candidate is
 refined at 25 ms increments and checked in up to five disjoint windows. Repeated
 lap peaks, method disagreement, short/sparse evidence and inconsistent windows
 are exposed as reason codes. Thresholds are exploratory, not calibrated success
 probabilities; window spread and search increments are not accuracy guarantees.
 No drift correction, driver-action inference or multi-session identity claim is
 made by this synchronizer.
+
+Overlap mode allows a shared interval shorter than 70% of the shorter recording,
+requiring up to 30 seconds (or the caller's larger minimum). Such partial matches
+remain weak/unconfirmed and are labelled `PARTIAL_RECORDING_OVERLAP`; fewer than
+three usable windows cannot pass. Comparable scores prefer longer evidence.
+The response displays both overlap clocks and candidate full/partial lap ranges;
+these are time coverage, not independently verified lap identity or gap-free data.
+Full-lap confirmation still requires the target lap to be covered. For a partial
+corner use each side's existing manual clip anchor; never stretch the recordings
+to force both start and end to match. Old payloads keep the previous search mode.
 
 Whole-session location is the default. In selected-lap mode, a video interval
 longer than 1.5 times that lap is explicitly ambiguous: another lap can score
