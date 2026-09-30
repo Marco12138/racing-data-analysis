@@ -18,7 +18,7 @@ export type VideoSyncCalibration = {
   video_time_s: number;
   target_lap: number;
   calibrated_at: string;
-  review?: { method: "audio_rpm_multi_window_v1"; verdict: "confirmed"; scope: "session" | "selected_lap"; checked_points: number };
+  review?: { method: "audio_rpm_multi_window_v1" | "gpmf_gnss_v1"; verdict: "confirmed"; scope: "session" | "selected_lap"; checked_points: number };
   video: {
     duration_s: number;
     size_bytes: number;

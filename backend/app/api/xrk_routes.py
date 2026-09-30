@@ -149,6 +149,65 @@ class VideoSyncRpmAutoRequest(BaseModel):
     source_ambiguous: bool = False
 
 
+class VideoGnssClockPoint(BaseModel):
+    """A real GPMF GPS timestamp, never the file creation time."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    time_s: float = Field(ge=0, le=3600)
+    utc_s: float = Field(ge=315964800, le=4102444800)
+    fix: int = Field(ge=0, le=3)
+
+
+class VideoGnssPoint(BaseModel):
+    """Bounded camera GPS samples; video and IMU arrays stay local."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    time_s: float = Field(ge=0, le=3600)
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    speed_kmh: float = Field(ge=0, le=600)
+    fix: int = Field(ge=0, le=3)
+
+
+class VideoSyncGnssRequest(BaseModel):
+    """Use an existing temporary XRK; never accept server file paths."""
+
+    model_config = ConfigDict(extra="forbid")
+    inspection_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    video_clock: list[VideoGnssClockPoint] = Field(min_length=20, max_length=3600)
+    video_gps: list[VideoGnssPoint] = Field(default_factory=list, max_length=20000)
+
+
+@router.post("/video-sync/gnss")
+async def auto_sync_video_gnss(request: Request, payload: VideoSyncGnssRequest) -> dict[str, Any]:
+    """Return a review-only GNSS candidate; do not store camera telemetry."""
+    from ..analysis.gnss_sync import read_gnss_reference, verify_gnss_alignment
+
+    try:
+        record = request.app.state.xrk_inspection_store.load(payload.inspection_id)
+    except InspectionExpiredError as exc:
+        raise PublicApiError(status_code=410, error_code="XRK_INSPECTION_EXPIRED",
+                             message=str(exc), error_type="expired_token") from exc
+    try:
+        reference = await asyncio.to_thread(read_gnss_reference, record)
+        result = await asyncio.to_thread(verify_gnss_alignment,
+                                        [p.model_dump() for p in payload.video_clock],
+                                        [p.model_dump() for p in payload.video_gps], reference)
+    except ValueError as exc:
+        code = str(exc)
+        if not code.startswith(("GNSS_", "AIM_", "GOPRO_")) or len(code) > 80:
+            code = "GNSS_DATA_UNAVAILABLE"
+        raise PublicApiError(status_code=422, error_code=code,
+                             message="GNSS synchronization is unavailable for these recordings. Audio and manual anchors remain available.",
+                             error_type="video_sync_data") from exc
+    except Exception as exc:
+        raise PublicApiError(status_code=422, error_code="GNSS_DATA_UNAVAILABLE",
+                             message="GNSS data could not be read. Re-import the XRK or use audio/manual synchronization.",
+                             error_type="video_sync_data") from exc
+    result["request_id"] = getattr(request.state, "request_id", "unknown")
+    return result
+
+
 @router.get("/demo-session", response_model=DemoSessionResponse)
 def get_demo_session(response: Response) -> DemoSessionResponse:
     """Return the reviewed real-session summary bundled with the service."""

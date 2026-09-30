@@ -306,6 +306,16 @@ them with a `NEXT_PUBLIC_` prefix.
 
 ## Release checks
 
+### GoPro GNSS candidate validation
+
+The additive `POST /api/v1/xrk/video-sync/gnss` route consumes only bounded camera
+GPS summaries and an existing inspection token. Original video and camera IMU
+are not uploaded. It requires the native AiM cache and never accepts local paths.
+Deploy Railway before the new frontend. See [GoPro GNSS Sync](GOPRO_GNSS_SYNC.md)
+for supported files, source/timing limits, private audits and human confirmation.
+Run `pnpm run test:gnss-sync` as well as `pnpm run test:rpm-sync` and the checks
+below. No analysis-core or automatic manual-anchor override is introduced.
+
 ### Multi-window RPM synchronization review
 
 New clients opt in with `verification: true` on the existing

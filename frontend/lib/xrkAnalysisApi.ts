@@ -7,6 +7,7 @@ import {
   materializeUploadBlob,
 } from "./fileUpload";
 import type { VideoSyncFeature } from "./videoFeatureExtraction";
+import type { GnssClockPoint, GnssPositionPoint } from "./gpmfTelemetry";
 
 export type XrkChannel = {
   name: string;
@@ -810,6 +811,34 @@ export async function deleteXrkInspection(inspectionId: string): Promise<void> {
   await fetch(url, { method: "DELETE" }).catch(() => {
     // Temporary data also expires automatically.
   });
+}
+
+export type VideoSyncGnssResult = {
+  method: "gpmf_gnss_v1";
+  offset_ms: number;
+  status: "candidate" | "weak";
+  requires_manual_confirmation: true;
+  evidence: {
+    clock_offset_ms: number;
+    matched_video_range_s: [number, number];
+    matched_telemetry_range_s: [number, number];
+    lap_coverage: Array<{ lap: number; coverage: "full" | "partial" }>;
+    speed_check: { passed?: boolean; validation_max_residual_s?: number; validation_samples?: number };
+    spatial_check: { median_error_m?: number; p95_error_m?: number };
+    reason_codes: string[];
+  };
+};
+
+/** Only numeric GNSS summaries leave the browser; no video or camera IMU. */
+export async function autoSyncVideoGnss(options: {
+  inspection_id: string; video_clock: GnssClockPoint[]; video_gps: GnssPositionPoint[];
+}, signal?: AbortSignal): Promise<VideoSyncGnssResult> {
+  const response = await fetch(await resolveApiUrl("/xrk/video-sync/gnss"), {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options), signal,
+  });
+  if (!response.ok) throw await responseError(response, "GoPro/AiM GNSS verification is unavailable.");
+  return response.json() as Promise<VideoSyncGnssResult>;
 }
 
 export async function compareDriverLaps(options: {

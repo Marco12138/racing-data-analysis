@@ -4,6 +4,7 @@ import { CornerDynamicsSummary } from "./CornerDynamicsSummary";
 import { CoachReviewPanel } from "./CoachReviewPanel";
 import { TrackReferencePanel } from "./TrackReferencePanel";
 import { RpmSyncReview, type SyncReviewPoint, type SyncReviewVerdict } from "./RpmSyncReview";
+import { GoproSyncPanel } from "./GoproSyncPanel";
 
 import {
   useCallback,
@@ -68,6 +69,7 @@ import type {
   XrkEvent,
   XrkTrackPoint,
   VideoSyncRpmResult,
+  VideoSyncGnssResult,
 } from "../lib/xrkAnalysisApi";
 import {
   autoSyncVideoRpm,
@@ -115,7 +117,7 @@ function createObjectUrl(file: File): string {
   if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
     return "";
   }
-  return URL.createObjectURL(file);
+  return URL.createObjectURL(file.type ? file : file.slice(0, file.size, "video/mp4"));
 }
 
 const tabs = [
@@ -168,7 +170,7 @@ export function XrkAnalysisWorkspace({
   const [zoneStart, setZoneStart] = useState<number | null>(null);
   const [manualZones, setManualZones] = useState<XrkAnalyzeOptions["manual_zones"]>([]);
   const videoStorageKey = `racing-video-sync:${analysis.track?.track_id ?? "unknown"}:${analysis.file_fingerprint}`;
-  const [initialVideo] = useState(() => initialVideoState(initialVideoFile, createObjectUrl));
+  const [initialVideo] = useState(() => initialVideoState(initialVideoFile, () => ""));
   const [videoUrl, setVideoUrl] = useState(initialVideo.videoUrl);
   const [videoName, setVideoName] = useState(initialVideo.videoName);
   const [videoFile, setVideoFile] = useState<File | null>(initialVideo.videoFile);
@@ -179,11 +181,17 @@ export function XrkAnalysisWorkspace({
   });
   const [offsetMs, setOffsetMs] = useState(calibration?.offset_ms ?? 0);
 
-  useEffect(() => () => {
-    if (videoUrl && typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
-      URL.revokeObjectURL(videoUrl);
-    }
-  }, [videoUrl]);
+  useEffect(() => {
+    if (!videoFile) return;
+    // Allocate after mount: Strict Mode cleanup must not revoke the active URL.
+    const url = createObjectUrl(videoFile);
+    let active = true;
+    queueMicrotask(() => { if (active) setVideoUrl(url); });
+    return () => {
+      active = false;
+      if (url && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(url);
+    };
+  }, [videoFile]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -1880,6 +1888,38 @@ export function SingleLapAnalysisPanel({
     }
   }
 
+  function reviewGnssCandidate(result: VideoSyncGnssResult, verdict: SyncReviewVerdict, point?: SyncReviewPoint): boolean {
+    if (!videoFile || readOnly) return false;
+    try {
+      if (verdict === "confirmed") {
+        if (!point) return false;
+        const next = createVideoSyncCalibration({
+          videoTimeS: point.video_time_s, telemetryPoint: point, targetLap: analysis.target_lap,
+          videoDurationS, fileSizeBytes: videoFile.size, fileLastModifiedMs: videoFile.lastModified,
+          fileMimeType: videoFile.type,
+        });
+        next.review = { method: "gpmf_gnss_v1", verdict: "confirmed", scope: "session", checked_points: 3 };
+        window.localStorage.setItem(storageKey, JSON.stringify(next));
+        setCalibration(next);
+        setOffsetMs(next.offset_ms);
+        setManualAnchorActive(true);
+        setPendingAutoResult(null);
+      }
+      window.localStorage.setItem(`${storageKey}:gnss-review`, JSON.stringify({
+        verdict, lap: analysis.target_lap, offset_ms: result.offset_ms, method: result.method,
+        reviewed_at: new Date().toISOString(), reason_codes: result.evidence.reason_codes,
+        video: { size_bytes: videoFile.size, last_modified_ms: videoFile.lastModified, duration_s: videoDurationS },
+      }));
+      setRpmPreviewing(false);
+      videoRef.current?.pause();
+      setSyncError("");
+      return true;
+    } catch {
+      setSyncError(t("xrk.video.calibrationFailed"));
+      return false;
+    }
+  }
+
   function followVideo() {
     if (!analysis.track || !videoRef.current) return;
     const sessionTime = videoToTelemetryTimeS(videoRef.current.currentTime, offsetMs);
@@ -1955,7 +1995,7 @@ export function SingleLapAnalysisPanel({
               const file = event.target.files?.[0];
               if (!file) return;
               if (videoUrl) URL.revokeObjectURL(videoUrl);
-              setVideoUrl(URL.createObjectURL(file.type ? file : file.slice(0, file.size, "video/mp4")));
+              setVideoUrl("");
               setVideoName(file.name);
               setVideoFile(file);
               setVideoDurationS(0);
@@ -2339,6 +2379,11 @@ export function SingleLapAnalysisPanel({
           {rpmReview && <RpmSyncReview key={`${rpmReview.offset_ms}:${rpmScope}`} result={rpmReview}
             points={rpmReviewPoints(targetPoints, rpmReview.offset_ms, videoDurationS, rpmReview.evidence.video_time_range_s)}
             verdict={rpmVerdict} onPreview={previewRpmCandidate} onDecision={reviewRpmCandidate} />}
+          {videoFile && analysis.inspection_id && <GoproSyncPanel
+            key={`${analysis.inspection_id}:${analysis.target_lap}:${videoFile.name}:${videoFile.size}:${videoFile.lastModified}`}
+            file={videoFile} duration={videoDurationS} inspectionId={analysis.inspection_id} points={targetPoints}
+            disabled={!!readOnly || analyzing || rpmSyncing || autoSyncing}
+            onPreview={previewRpmCandidate} onDecision={reviewGnssCandidate} />}
           {!analysis.capabilities.rpm && <p className="mt-2 text-xs text-amber-300">{t("xrk.unavailable.rpm")}</p>}
           <p className="mt-2 text-xs leading-5 text-slate-500">
             {t("xrk.video.privacy")}
