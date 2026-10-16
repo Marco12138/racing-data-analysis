@@ -68,6 +68,9 @@ class TrackReference(TrackModel):
     source_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     source_lap: int = Field(ge=1)
     reference_path: list[tuple[float, float]] = Field(min_length=100, max_length=5000)
+    reference_s_m: list[float] | None = Field(default=None, min_length=100, max_length=5000)
+    closing_edge_m: float | None = Field(default=None, ge=0, le=15)
+    length_m: float | None = Field(default=None, ge=100, le=15015)
     start_finish_gate: SpatialGate
     corners: list[TrackCorner] = Field(default_factory=list, max_length=30)
     acceptance: TrackAcceptance = Field(default_factory=TrackAcceptance)
@@ -83,6 +86,16 @@ class TrackReference(TrackModel):
             raise ValueError("Reference geometry is outside supported map bounds.")
         if np.any(steps <= 0) or np.max(steps) > 20 or np.linalg.norm(points[-1] - points[0]) > 15:
             raise ValueError("Reference path must be continuous and nearly closed.")
+        distance = np.r_[0, np.cumsum(steps)]
+        closing = float(np.linalg.norm(points[-1] - points[0]))
+        length = float(distance[-1] + closing)
+        if self.reference_s_m is not None and (len(self.reference_s_m) != len(distance)
+                or not np.allclose(self.reference_s_m, distance, atol=1e-6, rtol=0)):
+            raise ValueError("Reference arc length does not match the final path.")
+        if ((self.closing_edge_m is not None and abs(self.closing_edge_m-closing) > 1e-6)
+                or (self.length_m is not None and abs(self.length_m-length) > 1e-6)):
+            raise ValueError("Closed reference length does not match the final path.")
+        self.reference_s_m, self.closing_edge_m, self.length_m = distance.tolist(), closing, length
         if len({c.id for c in self.corners}) != len(self.corners):
             raise ValueError("Corner identifiers must be unique.")
         following = np.roll(points, -1, axis=0)

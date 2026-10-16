@@ -48,6 +48,29 @@ test("camera IMU is counted without producing body-frame values", () => {
   assert.doesNotMatch(JSON.stringify(a), /longitudinal|lateral|roll|pitch/);
 });
 
+test("raw orientation, signs, units and timing fields are retained without body calibration", () => {
+  const a = audit();
+  const stream = { interpretSamples: "GYRO", GYRO: [[1, 2, 3]], SIUN: "rad/s",
+    ORIN: "YxZ", ORIO: "ZXY", SCAL: 100, MTRX: [1,0,0,0,1,0,0,0,1], TSMP: 1, STMP: 12345 };
+  consumeGpmfPacket(a, { DEVC: { STRM: stream } }, timing);
+  const s = a.summary.streams[0];
+  assert.equal(s.input_orientation, "YxZ"); assert.equal(s.output_orientation, "ZXY");
+  assert.equal(s.source, "camera_imu"); assert.equal(s.body_frame_calibrated, false);
+  assert.deepEqual(s.scale, [100]); assert.deepEqual(s.timing_fields, ["TSMP", "STMP"]);
+  consumeGpmfPacket(a, { DEVC: { STRM: { ...stream, ORIO: "XYZ" } } }, { ...timing, cts: 42000 });
+  assert.equal(s.orientation_consistent, false);
+  assert.ok(a.summary.warnings.includes("CAMERA_AXIS_METADATA_CHANGED"));
+});
+
+test("opt-in camera samples remain local scaled raw columns on an explicitly estimated clock", () => {
+  const a = { ...audit(), camera_imu: {} };
+  consumeGpmfPacket(a, { DEVC: { STRM: { interpretSamples: "ACCL", ACCL: [[2,4,6],[4,8,12]], SCAL: [2], SIUN: "m/s²", ORIN: "YxZ", ORIO: "ZXY" } } }, timing);
+  assert.deepEqual(a.camera_imu.ACCL.columns, [[1,2], [2,4], [3,6]]);
+  assert.deepEqual(a.camera_imu.ACCL.time_s, [20,20.5]);
+  assert.equal(a.video_gps.length, 0);
+  assert.equal(a.summary.streams[0].body_frame_calibrated, false);
+});
+
 test("unsupported GPS variants and units degrade explicitly", () => {
   for (const extra of [{ SCAL: [0] }, { UNIT: ["x"] }]) {
     const a = audit(); consumeGpmfPacket(a, packet(extra), timing);

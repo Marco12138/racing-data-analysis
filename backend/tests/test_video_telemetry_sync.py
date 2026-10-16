@@ -83,6 +83,8 @@ def test_estimator_finds_coarse_offset_with_reliable_evidence() -> None:
     assert result["reliable"] is True
     assert result["evidence"]["telemetry_deceleration_events"] >= 3
     assert result["evidence"]["search_resolution_ms"] == 250
+    assert result["evidence"]["confidence_kind"] == "heuristic_proxy_score_not_alignment_accuracy"
+    assert result["evidence"]["validates_manual_anchors"] is False
     assert "frame" not in result["evidence"]["method"]
 
 

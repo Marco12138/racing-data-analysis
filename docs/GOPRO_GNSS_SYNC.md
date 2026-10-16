@@ -14,8 +14,8 @@ and driver-action detectors are unchanged.
    speed. The file creation date is never used as GPS UTC. GPS9 is detected but
    not yet validated and cannot generate a timing candidate in this version.
 4. Only bounded GPS summaries and the existing inspection token are posted to
-   `POST /api/v1/xrk/video-sync/gnss`. Camera IMU values stay local; only their
-   presence/sample count/rate is shown. No camera-to-body calibration is claimed.
+   `POST /api/v1/xrk/video-sync/gnss`. Camera IMU values stay local, including the
+   opt-in experimental channel/spectrum view. No camera-to-body calibration is claimed.
 5. The server reads native AiM `TimTpItow`, GPS fix, speed and position from the
    token's existing Parquet cache. It never accepts a server path or client AiM
    reference arrays. Speed and position require `gps_receiver` provenance.
@@ -33,6 +33,20 @@ and driver-action detectors are unchanged.
    stay in localStorage and are not submitted as training labels. Demo cannot
    request server synchronization.
 
+Geometry additionally fits offset and translation on alternating complete logger
+laps when at least four are available, otherwise disjoint 20-second blocks. The
+transform is frozen before validation. The search stays within +/-1.5 seconds
+of the GNSS clock on a 0.05-second grid, using the same valid samples for every
+candidate. A straight-only path, long gaps, poor fix/coverage and translations
+over 30m fail explicitly. Held-out median/P95, window disagreement and the
+fit/validation split are returned in `evidence.geometry_check`. All thresholds
+are exploratory. Passing geometry does not override failed speed checks, apply
+a different offset automatically, or independently exclude a wrong lap.
+
+The registered/raw GPS overlay has equal metric X/Y scale and plots points
+without connecting gaps. It defaults to held-out observations. Clock, speed and
+geometry share GNSS receivers; they are not three statistically independent votes.
+
 Convention: `video_time_s = telemetry_session_time_s + offset_ms / 1000`.
 The current player applies a constant offset only; substantial measured drift
 requires manual anchors and is not silently corrected.
@@ -46,14 +60,18 @@ requires manual anchors and is not silently corrected.
   several recorded samples. Quantization is reported, not hidden by interpolation.
 - GPS5 summaries use within-payload ~0.2s boxcar averaging with center timestamps.
   This is a coarse synchronization signal, not raw data for vehicle dynamics.
-- Position residuals compare unregistered GPS coordinates; different receiver
-  errors can affect them. Agreement is not independent frame-level ground truth.
+- `spatial_check` retains unregistered position residuals; `geometry_check`
+  separately reports frozen-transform held-out residuals. Do not combine the
+  two or treat either as independent frame-level ground truth.
 - Speed correlation, clock-fit residuals and search resolution are not success
   probabilities or claimed timing accuracy. Human checks remain required even
   when all gates pass. Lap coverage describes recording time coverage, not an
   independent proof of lap identity or uninterrupted valid sensor data.
 - Camera ACCL/GYRO axes remain uncalibrated. Reported rates are sample count over
   payload time, not hardware bandwidth or validated roll/pitch/steering signals.
+  ORIN/ORIO, scale, matrix and timing-field presence are retained. The research
+  view labels raw columns, not vehicle axes. Missing/changing orientation disables
+  the view. SCAL is applied per payload; MTRX is recorded, not silently applied.
 - Edited/fragmented MP4 timelines, multiple gpmd tracks and GPS9 are not supported
   for synchronization yet. Metadata-stripped videos use audio/manual fallback.
   Metadata inspection can work even when video playback is unavailable; visual
@@ -77,6 +95,24 @@ Both parsers load lazily in the browser. The same extraction function is used by
 the private local audit command, so local and browser clocks follow one method.
 Distributed notices, including the binary-parser dependency, are preserved in
 `public/licenses/gopro-metadata.txt`.
+
+## Local Sensor Research And Playback
+
+At most 400,000 samples per camera IMU stream are retained in browser memory.
+They are neither persisted nor sent to the API/LLM. The experimental view allows
+6-60 second windows. PSD rejects missing values, clock reversals, gaps, endpoint
+coverage failures or over 10% interval variation. It linearly upsamples to the
+fastest observed interval (no rate reduction), then uses 1024-point Hann windows,
+50% overlap and per-window mean removal with one-sided physical density scaling.
+An analytic test checks integrated variance and 10-80 Hz RMS. RMS is not energy.
+The timebase remains a payload-uniform estimate, not validated hardware timing.
+No unrelated AiM run is overlaid as a sensor-performance comparison.
+
+Single-lap playback uses presented `mediaTime` via `requestVideoFrameCallback`,
+falls back to `timeupdate`, updates on paused seeks, and cancels callbacks on
+replacement/unmount. Displayed Hz measures delivered callbacks, not timing
+accuracy. Original recording clocks, calibration convention and human review
+requirements are unchanged.
 
 ## Private Validation
 

@@ -1,4 +1,4 @@
-import { GoproSyncPanel, GnssSyncReview } from "../../frontend/components/GoproSyncPanel";
+import { GoproSyncPanel, GnssSyncReview, GoproChannelSummary } from "../../frontend/components/GoproSyncPanel";
 import { I18nProvider } from "../../frontend/lib/i18n";
 import type { ComponentProps } from "react";
 
@@ -8,4 +8,8 @@ export function GnssSyncTest({ locale, ...props }: ComponentProps<typeof GnssSyn
 
 export function GoproPanelTest({ locale, ...props }: ComponentProps<typeof GoproSyncPanel> & { locale: "zh" | "en" }) {
   return <I18nProvider initialLocale={locale}><GoproSyncPanel {...props} /></I18nProvider>;
+}
+
+export function GoproChannelsTest({ locale, ...props }: ComponentProps<typeof GoproChannelSummary> & { locale: "zh" | "en" }) {
+  return <I18nProvider initialLocale={locale}><GoproChannelSummary {...props} /></I18nProvider>;
 }

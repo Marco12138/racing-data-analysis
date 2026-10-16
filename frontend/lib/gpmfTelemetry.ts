@@ -2,18 +2,28 @@
 export type GnssClockPoint = { time_s: number; utc_s: number; fix: number };
 export type GnssPositionPoint = { time_s: number; lat: number; lon: number; speed_kmh: number; fix: number };
 type Stream = Record<string, unknown>;
+export type GoproStreamSummary = {
+  key: string; unit: string; sample_count: number; sample_rate_hz: number; first_time_s: number; last_time_s: number;
+  source: "camera_imu" | "gps_receiver";
+  input_orientation: string | null; output_orientation: string | null;
+  scale: number[] | null; calibration_matrix: number[] | null;
+  orientation_consistent: boolean; body_frame_calibrated: false;
+  timing_fields: string[];
+};
+export type CameraImuSeries = { time_s: number[]; columns: [number[], number[], number[]]; unit: string };
 type Packet = { cts: number; duration: number; timescale: number; size: number; offset: number };
 type Track = { id: number; codec: string; type: string; edits?: Array<{ media_time: number; media_rate_integer: number; media_rate_fraction: number }> };
 export type Movie = { duration: number; timescale: number; isFragmented: boolean; tracks: Track[] };
 export type GoproAudit = {
   summary: {
     parser: string; duration_s: number; bytes_read: number; packet_count: number;
-    streams: Array<{ key: string; unit: string; sample_count: number; sample_rate_hz: number; first_time_s: number; last_time_s: number }>;
+    streams: GoproStreamSummary[];
     warnings: string[]; camera_imu_body_calibrated: false; gps_clock_source: string;
     sample_time_method: string; speed_summary_method: string;
   };
   video_clock: GnssClockPoint[];
   video_gps: GnssPositionPoint[];
+  camera_imu?: Partial<Record<"ACCL" | "GYRO", CameraImuSeries>>;
 };
 
 /** GPSU is YYMMDDhhmmss.sss UTC, independent of local timezone or MP4 dates. */
@@ -34,6 +44,21 @@ function list(value: unknown): Stream[] {
   return (Array.isArray(value) ? value : [value]).filter((x): x is Stream => !!x && typeof x === "object");
 }
 
+/** Preserve declared axes and calibration, without inventing mounting orientation. */
+function streamMetadata(stream: Stream, key: string) {
+  const orientation = (value: unknown) => typeof value === "string" && /^[XYZxyz]{3}$/.test(value)
+    && new Set(value.toUpperCase()).size === 3 ? value : null;
+  const numbers = (value: unknown) => {
+    const values = (Array.isArray(value) ? value.flat() : [value]);
+    return values.length <= 16 && values.every(v => typeof v === "number" && Number.isFinite(v)) ? values as number[] : null;
+  };
+  return { source: key === "ACCL" || key === "GYRO" ? "camera_imu" as const : "gps_receiver" as const,
+    input_orientation: orientation(stream.ORIN), output_orientation: orientation(stream.ORIO),
+    scale: numbers(stream.SCAL), calibration_matrix: numbers(stream.MTRX),
+    orientation_consistent: true, body_frame_calibrated: false as const,
+    timing_fields: ["TSMP", "STMP", "TIMO"].filter(k => stream[k] !== undefined) };
+}
+
 /** Read numeric values without applying camera orientation or body-frame transforms. */
 export function consumeGpmfPacket(audit: GoproAudit, parsed: Stream, packet: Pick<Packet, "cts" | "duration" | "timescale">): void {
   const start = packet.cts / packet.timescale;
@@ -46,15 +71,41 @@ export function consumeGpmfPacket(audit: GoproAudit, parsed: Stream, packet: Pic
     if (!Array.isArray(rows) || !rows.length || rows.length > 10000 || !rows.every(Array.isArray)) continue;
     const rawUnits = stream.SIUN ?? stream.UNIT;
     const unit = Array.isArray(rawUnits) ? rawUnits.join(", ") : String(rawUnits ?? "unknown");
+    const metadata = streamMetadata(stream, key);
     let summary = audit.summary.streams.find((s) => s.key === key);
     if (!summary) {
-      summary = { key, unit, sample_count: 0, sample_rate_hz: 0, first_time_s: start, last_time_s: start };
+      summary = { key, unit, sample_count: 0, sample_rate_hz: 0, first_time_s: start, last_time_s: start, ...metadata };
       audit.summary.streams.push(summary);
+    } else if (summary.input_orientation !== metadata.input_orientation || summary.output_orientation !== metadata.output_orientation
+      || summary.unit !== unit || JSON.stringify(summary.calibration_matrix) !== JSON.stringify(metadata.calibration_matrix)) {
+      summary.orientation_consistent = false;
+      audit.summary.warnings.push("CAMERA_AXIS_METADATA_CHANGED");
     }
+    summary.timing_fields = [...new Set([...summary.timing_fields, ...metadata.timing_fields])];
+    if (metadata.source === "camera_imu" && (!metadata.input_orientation || !metadata.output_orientation))
+      audit.summary.warnings.push("CAMERA_AXIS_METADATA_UNAVAILABLE");
     summary.sample_count += rows.length;
     summary.last_time_s = start + duration;
     summary.sample_rate_hz = summary.sample_count / (summary.last_time_s - summary.first_time_s);
-    if (key === "ACCL" || key === "GYRO") continue;
+    if (key === "ACCL" || key === "GYRO") {
+      if (audit.camera_imu && !audit.summary.warnings.includes(`${key}_LOCAL_SAMPLE_LIMIT`)) {
+        const source = audit.camera_imu[key] ?? { time_s: [], columns: [[], [], []], unit } as CameraImuSeries;
+        if (source.time_s.length + rows.length > 400000) {
+          delete audit.camera_imu[key];
+          audit.summary.warnings.push(`${key}_LOCAL_SAMPLE_LIMIT`);
+        } else if (metadata.scale && [1, 3].includes(metadata.scale.length) && metadata.scale.every(v => v > 0)) {
+          for (const [index, row] of rows.entries()) {
+            source.time_s.push(start + index * duration / rows.length);
+            for (let axis = 0; axis < 3; axis++) {
+              const value = row.length === 3 && typeof row[axis] === "number" ? row[axis] / metadata.scale[axis % metadata.scale.length] : NaN;
+              source.columns[axis].push(value);
+            }
+          }
+          audit.camera_imu[key] = source;
+        } else audit.summary.warnings.push(`${key}_SCALE_UNSUPPORTED`);
+      }
+      continue;
+    }
     if (key === "GPS9") {
       audit.summary.warnings.push("GPS9_NOT_YET_VALIDATED");
       continue;
@@ -103,7 +154,7 @@ export function validateMovie(movie: Movie): number {
 
 /** Sparse reads of MP4 sample tables and gpmd packets, never audio/video decoding. */
 export async function extractGoproTelemetry(file: Blob, options: {
-  signal?: AbortSignal; onProgress?: (fraction: number) => void;
+  signal?: AbortSignal; onProgress?: (fraction: number) => void; includeCameraImu?: boolean;
 } = {}): Promise<GoproAudit> {
   const check = () => {
     options.signal?.throwIfAborted();
@@ -141,7 +192,7 @@ export async function extractGoproTelemetry(file: Blob, options: {
     camera_imu_body_calibrated: false, gps_clock_source: "GPSU only; no movie creation-date fallback",
     sample_time_method: "MP4 gpmd CTS/timescale; uniform timing within each payload, not native per-sample hardware timestamps",
     speed_summary_method: "within-payload 0.2s boxcar; center timestamp; not a dynamics signal",
-  }, video_clock: [], video_gps: [] };
+  }, video_clock: [], video_gps: [], ...(options.includeCameraImu ? { camera_imu: {} } : {}) };
   let previousEnd = -1;
   for (const [index, packet] of packets.entries()) {
     check();

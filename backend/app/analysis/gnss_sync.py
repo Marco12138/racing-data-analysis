@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from .rpm_sync_verification import _sample
+from .gnss_spatial import verify_spatial_alignment
 from ..importers.xrk_inspection import convert_units
 
 GPS_EPOCH = datetime(1980, 1, 6, tzinfo=UTC).timestamp()
@@ -223,6 +224,13 @@ def verify_gnss_alignment(video_clock: list[dict], video_gps: list[dict], refere
                     reasons.append("GNSS_POSITION_DISAGREEMENT")
     if not spatial:
         reasons.append("GNSS_POSITION_VALIDATION_UNAVAILABLE")
+    geometry = verify_spatial_alignment(video_gps,
+        {key: _fixed_series(reference, key) for key in ("gps_lat", "gps_lon") if key in reference["series"]},
+        clock_offset, reference.get("lap_timing", []))
+    if geometry.get("reason"):
+        reasons.append(geometry["reason"])
+    if geometry.get("passed") and abs(geometry["proposed_offset_s"]-offset) > .25:
+        reasons.append("GNSS_GEOMETRY_OFFSET_DISAGREEMENT")
     start, end = max(tt[valid][0], vt[np.isfinite(vu)][0]-offset), min(tt[valid][-1], vt[np.isfinite(vu)][-1]-offset)
     if end-start < 15:
         raise ValueError("GNSS_NO_RECORDING_OVERLAP")
@@ -231,8 +239,9 @@ def verify_gnss_alignment(video_clock: list[dict], video_gps: list[dict], refere
         a, b = row["start_time_ms"]/1000, row["end_time_ms"]/1000
         if a < end and b > start:
             coverage.append({"lap": row["lap"], "coverage": "full" if a >= start and b <= end else "partial"})
-    candidate = speed_check.get("passed", False) and bool(spatial) and not any(
-        r in reasons for r in ("CLOCK_DRIFT_REQUIRES_ANCHORS", "GNSS_POSITION_DISAGREEMENT", "AIM_GPS_FIX_UNAVAILABLE"))
+    candidate = speed_check.get("passed", False) and geometry.get("passed", False) and bool(spatial) and not any(
+        r in reasons for r in ("CLOCK_DRIFT_REQUIRES_ANCHORS", "GNSS_POSITION_DISAGREEMENT", "AIM_GPS_FIX_UNAVAILABLE",
+                              "GNSS_GEOMETRY_OFFSET_DISAGREEMENT"))
     return {"method": "gpmf_gnss_v1", "offset_ms": round(offset*1000),
             "status": "candidate" if candidate else "weak", "requires_manual_confirmation": True,
             "manually_confirmed": False, "body_dynamics_available": False,
@@ -244,6 +253,6 @@ def verify_gnss_alignment(video_clock: list[dict], video_gps: list[dict], refere
                          "matched_video_range_s": [round(start+offset, 3), round(end+offset, 3)],
                          "matched_telemetry_range_s": [round(start, 3), round(end, 3)],
                          "lap_coverage": coverage, "speed_check": speed_check, "windows": windows,
-                         "spatial_check": spatial, "reason_codes": reasons,
+                         "spatial_check": spatial, "geometry_check": geometry, "reason_codes": reasons,
                          "source_channels": reference.get("source_channels", []),
                          "accuracy_claim": "none; held-out signal agreement is not frame-level ground truth"}}

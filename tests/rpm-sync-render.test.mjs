@@ -11,7 +11,7 @@ mkdirSync(`${root}/tmp`, { recursive: true });
 const dir = mkdtempSync(`${root}/tmp/rpm-review-test-`);
 execFileSync(`${root}/node_modules/.bin/esbuild`, [`${root}/tests/fixtures/rpm-sync-entry.tsx`, "--bundle", "--format=esm", "--platform=node", "--jsx=automatic",
   "--external:react", "--external:react-dom", "--external:recharts", "--external:lucide-react", `--outfile=${dir}/entry.mjs`], { stdio: "pipe" });
-const { RpmSyncTest } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
+const { RpmSyncTest, ManualLapTest } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
 after(() => rmSync(dir, { recursive: true, force: true }));
 const result = { offset_ms: -8500, status: "ambiguous", evidence: { best_correlation: .95,
   selected_method: "dominant_band", window_offset_spread_s: .1, reason_codes: ["REPEATED_LAP_AMBIGUITY"],
@@ -44,5 +44,16 @@ test("partial recordings show independent clocks and only candidate lap coverage
     assert.match(html, /L6/);
     assert.match(html, /L5, L7/);
     assert.match(html, locale === "zh" ? /待核对/ : /unverified/);
+  }
+});
+
+test("manual lap review exposes duration residual, not automatic accuracy", () => {
+  for (const locale of ["zh", "en"]) {
+    const html = renderToStaticMarkup(createElement(ManualLapTest, { locale, lap: 13, marked: true, disabled: false,
+      bounds: { video_duration_s: 40.5, telemetry_duration_s: 40.326, end_residual_s: .174 }, onBind() {}, saved: false }));
+    assert.match(html, /40\.500/); assert.match(html, /40\.326/); assert.match(html, /\+0\.174/);
+    assert.match(html, locale === "zh" ? /不拉伸视频/ : /without stretching video/);
+    assert.match(html, /<button[^>]+disabled=""/);
+    assert.doesNotMatch(html, /39%|100%/);
   }
 });

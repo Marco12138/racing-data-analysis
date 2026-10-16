@@ -7,6 +7,8 @@ import { extractGoproTelemetry, type GoproAudit } from "../lib/gpmfTelemetry";
 import { autoSyncVideoGnss, type VideoSyncGnssResult } from "../lib/xrkAnalysisApi";
 import { rpmReviewPoints, type TelemetrySyncPoint } from "../lib/videoTelemetrySync";
 import type { SyncReviewPoint, SyncReviewVerdict } from "./RpmSyncReview";
+import { GoproGpsOverlay } from "./GoproGpsOverlay";
+import { GoproSensorResearch } from "./GoproSensorResearch";
 
 const REASONS: Record<string, [string, string]> = {
   AIM_TIME_VALIDITY_UNEXPOSED: ["AiM 时间有效性标志未由解析器提供", "AiM time-validity flags are not exposed by the parser"],
@@ -26,6 +28,14 @@ const REASONS: Record<string, [string, string]> = {
   GPMF_DURATION_LIMIT: ["本版支持最长一小时的原始录像章节", "This version supports original chapters up to one hour"],
   GPMF_EDIT_LIST_UNSUPPORTED: ["此视频经过时间剪辑，请用原始 GoPro 章节或人工校准", "Edited video timeline is unsupported; use the original chapter or manual anchors"],
   GOPRO_GPS_UTC_UNAVAILABLE: ["没有有效的 GPS UTC，不能进行绝对时间匹配", "No valid GPS UTC; absolute-clock matching is unavailable"],
+  GNSS_GEOMETRY_UNAVAILABLE: ["轨迹核对缺少 GPS 坐标", "GPS coordinates unavailable for geometry checks"],
+  GNSS_GEOMETRY_TIMING_INVALID: ["轨迹时间轴不足或不单调", "Insufficient or nonmonotonic geometry timestamps"],
+  GNSS_GEOMETRY_HOLDOUT_INSUFFICIENT: ["轨迹长度不足，无法分离拟合与验证", "Recording too short for separate geometry fit and validation"],
+  GNSS_GEOMETRY_COVERAGE_INSUFFICIENT: ["共同有效定位覆盖不足，未跨缺口补值", "Insufficient shared GPS coverage; gaps are not filled"],
+  GNSS_GEOMETRY_LOW_EXCITATION: ["路径变化不足，无法区分位置平移和时间偏移", "Too little path variation to separate translation and timing"],
+  GNSS_GEOMETRY_TRANSLATION_EXCESSIVE: ["拟合的位置平移超出允许范围", "Position translation exceeds the supported range"],
+  GNSS_GEOMETRY_HOLDOUT_DISAGREEMENT: ["留出轨迹未通过一致性核对", "Held-out geometry does not agree"],
+  GNSS_GEOMETRY_OFFSET_DISAGREEMENT: ["轨迹与速度/时钟偏移不一致，请人工核对", "Geometry and speed/clock offsets disagree; review manually"],
 };
 
 /** Separate verification UI: a result cannot change calibration on arrival. */
@@ -51,12 +61,17 @@ export function GnssSyncReview({ result, points, playbackUnavailable = false, on
       <dt>{zh ? "仅时钟偏移" : "Clock-only offset"}</dt><dd>{(e.clock_offset_ms / 1000).toFixed(3)} s</dd>
       <dt>{zh ? "独立窗口最大偏差" : "Held-out maximum deviation"}</dt><dd>{e.speed_check.validation_max_residual_s == null ? "Unavailable" : `${e.speed_check.validation_max_residual_s.toFixed(3)} s`}</dd>
       <dt>{zh ? "位置差中位数" : "Median position difference"}</dt><dd>{e.spatial_check.median_error_m == null ? "Unavailable" : `${e.spatial_check.median_error_m.toFixed(2)} m`}</dd>
+      {e.geometry_check && <>
+        <dt>{zh ? "轨迹候选偏移" : "Geometry candidate offset"}</dt><dd>{e.geometry_check.proposed_offset_s?.toFixed(3) ?? "Unavailable"} {e.geometry_check.proposed_offset_s != null && "s"}</dd>
+        <dt>{zh ? "留出位置差 / P95" : "Held-out median / P95"}</dt><dd>{e.geometry_check.validation_median_m == null ? "Unavailable" : `${e.geometry_check.validation_median_m.toFixed(2)} / ${e.geometry_check.validation_p95_m?.toFixed(2)} m`}</dd>
+      </>}
     </dl>
+    {e.geometry_check && <GoproGpsOverlay check={e.geometry_check} />}
     <p className="mt-3 text-xs">{zh ? "覆盖整圈（待核对）" : "Full laps (unverified)"}: {e.lap_coverage.filter((p) => p.coverage === "full").map((p) => `L${p.lap}`).join(", ") || "—"}</p>
     <p className="mt-1 text-xs">{zh ? "视频重叠范围" : "Video overlap"}: {e.matched_video_range_s.map((v) => v.toFixed(2)).join(" - ")} s</p>
     <ul className="mt-3 space-y-1 text-xs text-amber-200">{e.reason_codes.map((r) => <li key={r}>{REASONS[r]?.[zh ? 0 : 1] ?? r}</li>)}</ul>
     {points.map((point, index) => <div key={index} className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-      <button type="button" disabled={verdict !== null} className="flex min-h-9 items-center gap-1 text-cyan-200 disabled:opacity-40"
+      <button type="button" disabled={verdict !== null || playbackUnavailable} className="flex min-h-9 items-center gap-1 text-cyan-200 disabled:opacity-40"
         onClick={() => { onPreview(point); setVisited((old) => [...new Set([...old, index])]); }}>
         <Play size={14} />{(zh ? ["起点附近", "圈中", "终点附近"] : ["Near lap start", "Mid-lap", "Near lap end"])[index]} · {point.video_time_s.toFixed(2)} s
       </button>
@@ -70,7 +85,7 @@ export function GnssSyncReview({ result, points, playbackUnavailable = false, on
       ? (zh ? "确认后替换当前圈的校准。不代表帧级精度。" : "Confirmation replaces this lap's calibration. Not proof of frame accuracy.")
       : (zh ? "候选未覆盖当前完整圈，请选择覆盖列表中的圈后重新检查。" : "This lap is not fully covered. Select a covered lap and check again.")}</p>
     <div className="mt-2 flex flex-wrap gap-2 text-xs">
-      <button type="button" onClick={() => decide("confirmed")} disabled={verdict !== null || points.length !== 3 || checked.length !== 3}
+      <button type="button" onClick={() => decide("confirmed")} disabled={verdict !== null || playbackUnavailable || points.length !== 3 || checked.length !== 3}
         className="flex min-h-10 items-center gap-1 rounded border border-emerald-600 px-2 text-emerald-200 disabled:opacity-40"><Check size={14} />{zh ? "确认并保存" : "Confirm and save"}</button>
       <button type="button" onClick={() => decide("rejected")} disabled={verdict !== null} className="flex min-h-10 items-center gap-1 disabled:opacity-40"><X size={14} />{zh ? "不吻合" : "Mismatch"}</button>
       <button type="button" onClick={() => decide("uncertain")} disabled={verdict !== null} className="flex min-h-10 items-center gap-1 disabled:opacity-40"><CircleHelp size={14} />{zh ? "不确定" : "Uncertain"}</button>
@@ -102,7 +117,7 @@ export function GoproSyncPanel({ file, duration, inspectionId, points, disabled,
     abort.current = controller;
     setBusy(true); setResult(null); setError(""); setProgress(0);
     try {
-      const data = audit ?? await extractGoproTelemetry(file, { signal: controller.signal, onProgress: setProgress });
+      const data = audit ?? await extractGoproTelemetry(file, { signal: controller.signal, onProgress: setProgress, includeCameraImu: true });
       controller.signal.throwIfAborted();
       setAudit(data); setProgress(1);
       if (!data.video_clock.some((p) => p.fix >= 3)) throw new Error("GOPRO_GPS_UTC_UNAVAILABLE");
@@ -125,12 +140,33 @@ export function GoproSyncPanel({ file, duration, inspectionId, points, disabled,
     </button>
     {busy && <button type="button" onClick={() => abort.current?.abort()} className="mt-2 flex min-h-9 items-center gap-1 text-xs"><X size={14} />{zh ? "取消" : "Cancel"}</button>}
     <p className="mt-2 text-xs leading-5 text-slate-400">{zh ? "视频留在本机，仅发送 GPS 时间、速度与位置摘要。相机 IMU 不用于车体分析。" : "Video stays local. Only GPS time, speed and position summaries are sent. Camera IMU is not used for body dynamics."}</p>
-    {audit && <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr><th>{zh ? "原始通道" : "Recorded channel"}</th><th>{zh ? "样本数" : "Samples"}</th><th>Hz*</th></tr></thead>
-      <tbody>{audit.summary.streams.map((s) => <tr key={s.key}><td className="py-1">{s.key}</td><td>{s.sample_count}</td><td>{s.sample_rate_hz.toFixed(1)}</td></tr>)}</tbody></table>
-      <p className="mt-1 text-xs text-slate-400">{zh ? "*按元数据时长估算，不代表硬件带宽。" : "*Estimated from payload duration, not hardware bandwidth."}</p></div>}
+    {audit && <GoproChannelSummary audit={audit} />}
+    {audit?.camera_imu && <details className="mt-3 text-xs"><summary className="min-h-8 cursor-pointer">{zh ? "相机通道与频谱 · 实验" : "Camera channels and spectrum · Experimental"}</summary><GoproSensorResearch audit={audit} /></details>}
     {error && <p role="alert" className="mt-3 text-xs text-amber-200">{error}</p>}
     {result && <GnssSyncReview result={result} playbackUnavailable={!Number.isFinite(duration) || duration <= 0}
       points={rpmReviewPoints(points, result.offset_ms, duration, result.evidence.matched_video_range_s)}
       onPreview={onPreview} onDecision={(verdict, point) => onDecision(result, verdict, point)} />}
   </section>;
+}
+
+/** Source declarations are auditable without relabelling camera axes as vehicle motion. */
+export function GoproChannelSummary({ audit }: { audit: GoproAudit }) {
+  const { locale } = useI18n();
+  const zh = locale === "zh";
+  return <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr>
+    <th>{zh ? "原始通道" : "Recorded channel"}</th><th>{zh ? "单位" : "Units"}</th><th>{zh ? "样本数" : "Samples"}</th><th>Hz*</th>
+  </tr></thead><tbody>{audit.summary.streams.map(s => <tr key={s.key}><td className="py-1">{s.key}</td><td>{s.unit}</td><td>{s.sample_count}</td><td>{s.sample_rate_hz.toFixed(1)}</td></tr>)}</tbody></table>
+    <p className="mt-1 text-xs text-slate-400">{zh ? "*按元数据时长估算，不代表硬件带宽。" : "*Estimated from payload duration, not hardware bandwidth."}</p>
+    <details className="mt-2 text-xs"><summary className="min-h-8 cursor-pointer">{zh ? "轴向与时间来源" : "Axis and timing provenance"}</summary>
+      {audit.summary.streams.filter(s => s.source === "camera_imu").map(s => <dl key={s.key} className="mb-3 grid grid-cols-2 gap-1">
+        <dt>{s.key} ORIN / ORIO</dt><dd>{s.input_orientation ?? "Unavailable"} / {s.output_orientation ?? "Unavailable"}</dd>
+        <dt>{zh ? "元数据一致" : "Metadata consistent"}</dt><dd>{s.orientation_consistent ? (zh ? "是" : "Yes") : (zh ? "否" : "No")}</dd>
+        <dt>{zh ? "车体轴标定" : "Body-frame calibration"}</dt><dd>{zh ? "未完成" : "Unavailable"}</dd>
+        <dt>SCAL</dt><dd className="break-words">{s.scale?.join(", ") ?? "Unavailable"}</dd>
+        <dt>MTRX</dt><dd className="break-words">{s.calibration_matrix?.join(", ") ?? "Unavailable"}</dd>
+        <dt>{zh ? "原生计时字段" : "Recorded timing fields"}</dt><dd>{s.timing_fields?.join(", ") || "Unavailable"}</dd>
+      </dl>)}
+      <p className="leading-5 text-slate-400">{zh ? "帧包 CTS 确定时间范围，包内样本按均匀时刻估计；不等于硬件逐样本时间。相机轴不解释为车体偏航、侧倾或俯仰。" : "Payload CTS sets the interval; within-payload sample times are uniform estimates, not hardware timestamps. Camera axes are not vehicle yaw, roll or pitch."}</p>
+    </details>
+  </div>;
 }

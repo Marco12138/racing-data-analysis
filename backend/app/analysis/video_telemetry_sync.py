@@ -135,6 +135,8 @@ def estimate_video_telemetry_offset(
         "reliable": reliable,
         "evidence": {
             "method": "visual_change_to_gps_deceleration_cross_correlation",
+            "confidence_kind": "heuristic_proxy_score_not_alignment_accuracy",
+            "validates_manual_anchors": False,
             "offset_convention": "video_time_s = telemetry_session_time_s + offset_ms / 1000",
             "video_feature_points": int(len(video)),
             "telemetry_speed_points": int(len(telemetry)),

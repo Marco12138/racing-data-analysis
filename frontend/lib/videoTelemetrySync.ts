@@ -18,7 +18,8 @@ export type VideoSyncCalibration = {
   video_time_s: number;
   target_lap: number;
   calibrated_at: string;
-  review?: { method: "audio_rpm_multi_window_v1" | "gpmf_gnss_v1"; verdict: "confirmed"; scope: "session" | "selected_lap"; checked_points: number };
+  review?: { method: "audio_rpm_multi_window_v1" | "gpmf_gnss_v1" | "manual_lap_bounds_v1"; verdict: "confirmed"; scope: "session" | "selected_lap"; checked_points: number };
+  lap_bounds?: ManualLapBounds;
   video: {
     duration_s: number;
     size_bytes: number;
@@ -30,6 +31,39 @@ export type VideoSyncCalibration = {
 export type VideoSeekValidation =
   | { ok: true; time_s: number }
   | { ok: false; time_s: null; message: string };
+
+export type ManualLapBounds = {
+  video_start_s: number; video_end_s: number;
+  telemetry_start_s: number; telemetry_end_s: number;
+  video_duration_s: number; telemetry_duration_s: number; end_residual_s: number;
+};
+
+/** Compare actual logger boundaries, never the cropped GPS track or fastest-lap estimate. */
+export function inspectManualLapBounds(videoStart: number, videoEnd: number,
+  telemetryStart: number, telemetryEnd: number, videoDuration: number): ManualLapBounds | null {
+  if (![videoStart, videoEnd, telemetryStart, telemetryEnd, videoDuration].every(Number.isFinite)
+    || videoDuration <= 0 || videoStart < 0 || videoEnd > videoDuration || videoEnd <= videoStart
+    || telemetryStart < 0 || telemetryEnd <= telemetryStart) return null;
+  return { video_start_s: videoStart, video_end_s: videoEnd,
+    telemetry_start_s: telemetryStart, telemetry_end_s: telemetryEnd,
+    video_duration_s: videoEnd-videoStart, telemetry_duration_s: telemetryEnd-telemetryStart,
+    end_residual_s: (videoEnd-videoStart)-(telemetryEnd-telemetryStart) };
+}
+
+/** Bind the human-confirmed start; the second mark checks duration, never stretches time. */
+export function createManualLapCalibration(bounds: ManualLapBounds, input: {
+  targetLap: number; videoDurationS: number; fileSizeBytes: number;
+  fileLastModifiedMs: number; fileMimeType: string;
+}): VideoSyncCalibration {
+  const checked = inspectManualLapBounds(bounds.video_start_s, bounds.video_end_s,
+    bounds.telemetry_start_s, bounds.telemetry_end_s, input.videoDurationS);
+  if (!checked || !Number.isInteger(input.targetLap) || input.targetLap < 1)
+    throw new Error("A real lap and valid video boundaries are required.");
+  return { ...createVideoSyncCalibration({ ...input, videoTimeS: checked.video_start_s,
+    telemetryPoint: { distance_m: 0, session_time_s: checked.telemetry_start_s } }),
+    lap_bounds: checked,
+    review: { method: "manual_lap_bounds_v1", verdict: "confirmed", scope: "selected_lap", checked_points: 2 } };
+}
 
 /** Offset convention: video time = telemetry session time + offset. */
 export function calculateVideoOffsetMs(
@@ -183,6 +217,14 @@ export function parseVideoSyncCalibration(value: string | null): VideoSyncCalibr
       || typeof parsed.video.mime_type !== "string"
     ) {
       return null;
+    }
+    if (parsed.lap_bounds) {
+      const b = parsed.lap_bounds;
+      const checked = inspectManualLapBounds(b.video_start_s, b.video_end_s,
+        b.telemetry_start_s, b.telemetry_end_s, parsed.video.duration_s);
+      if (!checked || Math.abs(calculateVideoOffsetMs(b.video_start_s, b.telemetry_start_s)-parsed.offset_ms) > 1)
+        return null;
+      parsed.lap_bounds = checked;
     }
     return parsed as VideoSyncCalibration;
   } catch {

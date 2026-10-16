@@ -11,7 +11,7 @@ mkdirSync(`${root}/tmp`, { recursive: true });
 const dir = mkdtempSync(`${root}/tmp/gnss-review-test-`);
 execFileSync(`${root}/node_modules/.bin/esbuild`, [`${root}/tests/fixtures/gnss-sync-entry.tsx`, "--bundle", "--format=esm", "--platform=node", "--jsx=automatic",
   "--external:react", "--external:react-dom", "--external:recharts", "--external:lucide-react", "--external:mp4box", "--external:gopro-telemetry", `--outfile=${dir}/entry.mjs`], { stdio: "pipe" });
-const { GnssSyncTest, GoproPanelTest } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
+const { GnssSyncTest, GoproPanelTest, GoproChannelsTest } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
 after(() => rmSync(dir, { recursive: true, force: true }));
 const result = { offset_ms: 23700, status: "weak", evidence: { clock_offset_ms: 23800,
   matched_video_range_s: [24, 300], matched_telemetry_range_s: [.3, 276.3], lap_coverage: [{ lap: 1, coverage: "full" }],
@@ -46,4 +46,22 @@ test("playback-unavailable is not mislabeled as a wrong target lap", () => {
     onPreview() {}, onDecision() { return true; } }));
   assert.match(html, /需先解决播放问题/);
   assert.doesNotMatch(html, /请选择覆盖列表/);
+});
+
+test("geometry overlay keeps metric aspect and labels shared evidence, not accuracy", () => {
+  const geometry = { status: "candidate", proposed_offset_s: 23.75, validation_median_m: 3,
+    validation_p95_m: 8, overlay: [{ session_time_s: 30, role: "validation", aim_xy_m: [0,0],
+      camera_raw_xy_m: [3,4], camera_registered_xy_m: [1,1] }] };
+  const html = renderToStaticMarkup(createElement(GnssSyncTest, { locale: "zh", result: { ...result, evidence: { ...result.evidence, geometry_check: geometry } },
+    points: [], onPreview() {}, onDecision() { return true; } }));
+  for (const text of ["轨迹候选偏移", "留出位置差", "不是独立", "AiM GPS", "GoPro GPS", "23.750"]) assert.ok(html.includes(text), text);
+  assert.match(html, /viewBox="0 0 640 380"/);
+});
+
+test("camera provenance labels do not promote declared axes to body yaw", () => {
+  const html = renderToStaticMarkup(createElement(GoproChannelsTest, { locale: "zh", audit: { summary: { streams: [{
+    key: "GYRO", source: "camera_imu", unit: "rad/s", sample_count: 200, sample_rate_hz: 199.1,
+    input_orientation: "YxZ", output_orientation: "ZXY", orientation_consistent: true, scale: [100], timing_fields: ["TSMP"],
+  }] } } }));
+  for (const text of ["YxZ", "ZXY", "未完成", "不解释为车体偏航", "不代表硬件带宽"]) assert.ok(html.includes(text), text);
 });

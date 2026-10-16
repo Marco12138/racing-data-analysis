@@ -5,10 +5,12 @@ import { CoachReviewPanel } from "./CoachReviewPanel";
 import { TrackReferencePanel } from "./TrackReferencePanel";
 import { RpmSyncReview, type SyncReviewPoint, type SyncReviewVerdict } from "./RpmSyncReview";
 import { GoproSyncPanel } from "./GoproSyncPanel";
+import { ManualLapBinding } from "./ManualLapBinding";
 
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
@@ -97,6 +99,8 @@ import {
 } from "../lib/feedbackApi";
 import {
   createVideoSyncCalibration,
+  createManualLapCalibration,
+  inspectManualLapBounds,
   rpmReviewPoints,
   nearestPointByDistance,
   nearestPointBySessionTime,
@@ -111,6 +115,7 @@ import {
 } from "../lib/videoTelemetrySync";
 import { useI18n, type TranslationKey } from "../lib/i18n";
 import { StoryboardPanel } from "./StoryboardPanel";
+import { observeVideoClock, type VideoClockSample } from "../lib/videoFrameClock";
 import { PersistentWeaknessHint } from "./PersistentWeaknessHint";
 
 function createObjectUrl(file: File): string {
@@ -1291,7 +1296,7 @@ export function SingleLapAnalysisPanel({
   setCalibration: (value: VideoSyncCalibration | null) => void;
   setOffsetMs: (value: number) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const videoRef = useRef<HTMLVideoElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const [syncMessage, setSyncMessage] = useState("");
@@ -1309,6 +1314,7 @@ export function SingleLapAnalysisPanel({
   const [currentTime, setCurrentTime] = useState(0);
   const [lapStart, setLapStart] = useState(0);
   const [lapEnd, setLapEnd] = useState(videoDurationS);
+  const [lapMarks, setLapMarks] = useState<{ start: boolean; end: boolean; lap: number }>({ start: false, end: false, lap: analysis.target_lap });
   const [corners, setCorners] = useState<CornerSegment[]>([]);
   const [draft, setDraft] = useState<{ entry: number | null; apex: number | null; exit: number | null }>({
     entry: null,
@@ -1345,6 +1351,10 @@ export function SingleLapAnalysisPanel({
   // eligibility remains controlled by the existing Lap Quality Gate.
   const syncLaps = analysis.lap_rows;
   const selectedLapRow = analysis.lap_rows.find((row) => Number(row.lap) === analysis.target_lap);
+  const loggerLap = analysis.video_sync?.lap_video_ranges?.find(row => row.lap === analysis.target_lap);
+  const manualBounds = loggerLap ? inspectManualLapBounds(lapStart, lapEnd,
+    loggerLap.telemetry_start_s, loggerLap.telemetry_end_s, videoDurationS) : null;
+  const bothLapMarks = lapMarks.lap === analysis.target_lap && lapMarks.start && lapMarks.end;
   const rpmRangeValid = Number.isFinite(lapStart) && Number.isFinite(lapEnd)
     && lapStart >= 0 && lapEnd <= videoDurationS && lapEnd - lapStart >= 5;
   const [detectedCodec, setDetectedCodec] = useState<DetectedVideoCodec>("unknown");
@@ -1377,23 +1387,29 @@ export function SingleLapAnalysisPanel({
         ? t("videoCoach.markApex")
         : t("videoCoach.markExit");
 
-  function onTimeUpdate() {
+  const [frameClock, setFrameClock] = useState<VideoClockSample | null>(null);
+  const onPresentedFrame = useEffectEvent((sample: VideoClockSample) => {
     const video = videoRef.current;
     if (!video) return;
-    setCurrentTime(video.currentTime);
+    setCurrentTime(sample.time_s);
+    setFrameClock(previous => previous?.mode === sample.mode && previous?.refresh_hz === sample.refresh_hz ? previous : sample);
     if (rpmPreviewing) {
-      if (rpmPreviewEnd.current != null && video.currentTime >= rpmPreviewEnd.current) video.pause();
+      if (rpmPreviewEnd.current != null && sample.time_s >= rpmPreviewEnd.current) video.pause();
       return;
     }
     if (loopCorner != null) {
       const corner = corners[loopCorner];
-      if (corner && video.currentTime > corner.end) {
+      if (corner && sample.time_s > corner.end) {
         video.pause();
         video.currentTime = corner.start;
       }
     }
-    followVideo();
-  }
+    followVideo(sample.time_s);
+  });
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video && videoUrl) return observeVideoClock(video, onPresentedFrame);
+  }, [videoUrl]);
 
   function onTimelineClick(event: React.MouseEvent<HTMLDivElement>) {
     const bar = timelineRef.current;
@@ -1576,7 +1592,7 @@ export function SingleLapAnalysisPanel({
       setSyncMessage("");
       setSyncError("");
     });
-    return () => { rpmSyncAbortRef.current?.abort(); };
+    return () => { rpmSyncAbortRef.current?.abort(); autoSyncAbortRef.current?.abort(); };
   }, [analysis.target_lap, analysis.inspection_id, videoFile, lapStart, lapEnd, rpmStrokes, rpmScope]);
 
   useEffect(() => {
@@ -1616,6 +1632,11 @@ export function SingleLapAnalysisPanel({
     );
     if (calibration && calibrationMatchesVideo(calibration, videoFile, video.duration)) {
       setOffsetMs(calibration.offset_ms);
+      if (calibration.lap_bounds && calibration.target_lap === analysis.target_lap) {
+        setLapStart(calibration.lap_bounds.video_start_s);
+        setLapEnd(calibration.lap_bounds.video_end_s);
+        setLapMarks({ start: true, end: true, lap: analysis.target_lap });
+      }
       setSyncMessage(t("xrk.video.restore", { offset: signedMilliseconds(calibration.offset_ms) }));
       setSyncError("");
     } else if (calibration) {
@@ -1652,6 +1673,7 @@ export function SingleLapAnalysisPanel({
       return;
     }
     try {
+      autoSyncAbortRef.current?.abort();
       const next = createVideoSyncCalibration({
         videoTimeS: video.currentTime,
         telemetryPoint: cursorPoint,
@@ -1679,6 +1701,7 @@ export function SingleLapAnalysisPanel({
   }
 
   function updateManualOffset(value: number) {
+    autoSyncAbortRef.current?.abort();
     setRpmReview(null);
     setRpmPreviewing(false);
     setOffsetMs(value);
@@ -1714,7 +1737,7 @@ export function SingleLapAnalysisPanel({
       setPendingAutoResult(null);
       setSyncMessage("");
       setSyncError(t("xrk.video.autoDiscarded", {
-        confidence: formatConfidence(result.confidence),
+        confidence: formatMatchScore(result.confidence),
       }));
       return;
     }
@@ -1752,11 +1775,13 @@ export function SingleLapAnalysisPanel({
       const videoFeatures = await extractVideoSyncFeatures(video, {
         signal: controller.signal,
       });
+      controller.signal.throwIfAborted();
       setSyncMessage(t("xrk.video.comparing"));
       const result = await autoSyncVideoTelemetry({
         inspection_id: analysis.inspection_id,
         video_features: videoFeatures,
       }, controller.signal);
+      controller.signal.throwIfAborted();
       considerAutoResult(result, t("xrk.video.speedChannelLabel"));
     } catch (error) {
       if ((error as Error).name !== "AbortError") {
@@ -1764,8 +1789,10 @@ export function SingleLapAnalysisPanel({
         setSyncError((error as Error).message || t("xrk.video.autoFailed"));
       }
     } finally {
-      if (autoSyncAbortRef.current === controller) autoSyncAbortRef.current = null;
-      setAutoSyncing(false);
+      if (autoSyncAbortRef.current === controller) {
+        autoSyncAbortRef.current = null;
+        setAutoSyncing(false);
+      }
     }
   }
 
@@ -1920,9 +1947,10 @@ export function SingleLapAnalysisPanel({
     }
   }
 
-  function followVideo() {
+  function followVideo(mediaTime = videoRef.current?.currentTime) {
     if (!analysis.track || !videoRef.current) return;
-    const sessionTime = videoToTelemetryTimeS(videoRef.current.currentTime, offsetMs);
+    if (mediaTime == null) return;
+    const sessionTime = videoToTelemetryTimeS(mediaTime, offsetMs);
     const bounds = telemetrySessionTimeBounds(analysis.track.target);
     if (!bounds || sessionTime < bounds.start_s || sessionTime > bounds.end_s) return;
     const point = nearestPointBySessionTime(analysis.track.target, sessionTime);
@@ -1930,6 +1958,7 @@ export function SingleLapAnalysisPanel({
   }
 
   function replaceVideo() {
+    autoSyncAbortRef.current?.abort();
     rpmSyncAbortRef.current?.abort();
     rpmTraceCache.current = null;
     if (videoUrl && typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
@@ -1950,6 +1979,7 @@ export function SingleLapAnalysisPanel({
   }
 
   function resetLapAnalysis() {
+    setLapMarks({ start: false, end: false, lap: analysis.target_lap });
     setLapStart(0);
     setLapEnd(0);
     setCorners([]);
@@ -1965,6 +1995,22 @@ export function SingleLapAnalysisPanel({
     codecProbeRef.current = null;
   }
 
+  function bindManualLap() {
+    if (!videoFile || !bothLapMarks || !manualBounds || readOnly) return;
+    try {
+      const next = createManualLapCalibration(manualBounds, {
+        targetLap: analysis.target_lap, videoDurationS, fileSizeBytes: videoFile.size,
+        fileLastModifiedMs: videoFile.lastModified, fileMimeType: videoFile.type,
+      });
+      autoSyncAbortRef.current?.abort();
+      rpmSyncAbortRef.current?.abort();
+      window.localStorage.setItem(storageKey, JSON.stringify(next));
+      setCalibration(next); setOffsetMs(next.offset_ms); setManualAnchorActive(true);
+      setPendingAutoResult(null); setRpmReview(null); setRpmPreviewing(false);
+      setSyncError(""); setSyncMessage("");
+    } catch { setSyncError(t("xrk.video.calibrationFailed")); }
+  }
+
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
       <Panel title={t("xrk.lap.title")} subtitle={t("xrk.lap.subtitle")}>
@@ -1975,10 +2021,10 @@ export function SingleLapAnalysisPanel({
               src={videoUrl}
               controls
               className="aspect-video w-full bg-black"
-              onTimeUpdate={onTimeUpdate}
               onLoadedMetadata={loadVideoMetadata}
               onError={onVideoError}
             />
+            <p className="mt-1 text-xs text-slate-400" aria-live="off">{frameClock?.mode === "video-frame" ? (locale === "zh" ? "按视频帧更新" : "Video-frame updates") : (locale === "zh" ? "播放时钟更新" : "Playback clock")}{frameClock?.refresh_hz != null ? ` · ${frameClock.refresh_hz.toFixed(1)} Hz` : ""}</p>
             <button
               type="button"
               onClick={replaceVideo}
@@ -2038,7 +2084,7 @@ export function SingleLapAnalysisPanel({
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => setLapStart(videoRef.current?.currentTime ?? lapStart)}
+            onClick={() => { setLapStart(videoRef.current?.currentTime ?? lapStart); setLapMarks(old => ({ start: true, end: old.lap === analysis.target_lap && old.end, lap: analysis.target_lap })); }}
             disabled={rpmSyncing || !videoUrl || videoDurationS <= 0}
             className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:opacity-45 hover:border-[#35d6d0]"
           >
@@ -2046,7 +2092,7 @@ export function SingleLapAnalysisPanel({
           </button>
           <button
             type="button"
-            onClick={() => setLapEnd(videoRef.current?.currentTime ?? lapEnd)}
+            onClick={() => { setLapEnd(videoRef.current?.currentTime ?? lapEnd); setLapMarks(old => ({ end: true, start: old.lap === analysis.target_lap && old.start, lap: analysis.target_lap })); }}
             disabled={rpmSyncing || !videoUrl || videoDurationS <= 0}
             className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:opacity-45 hover:border-[#35d6d0]"
           >
@@ -2076,6 +2122,12 @@ export function SingleLapAnalysisPanel({
         </div>
         {rpmError ? <p role="alert" className="mt-2 text-xs leading-5 text-red-300">{rpmError}</p> : null}
         {rpmHint ? <p className="mt-2 text-xs leading-5 text-emerald-300">{rpmHint}</p> : null}
+        <ManualLapBinding key={`${analysis.target_lap}:${lapStart}:${lapEnd}:${videoFile?.lastModified}`}
+          lap={analysis.target_lap} bounds={manualBounds} marked={bothLapMarks}
+          disabled={!!readOnly || analyzing || rpmSyncing || autoSyncing || !videoFile}
+          saved={calibration?.review?.method === "manual_lap_bounds_v1" && calibration.target_lap === analysis.target_lap
+            && calibration.lap_bounds?.video_start_s === lapStart && calibration.lap_bounds?.video_end_s === lapEnd}
+          onBind={bindManualLap} />
         {rpmReplacePending ? (
           <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
             <span className="text-xs text-amber-200">{t("videoCoach.audioReplace", { count: corners.length })}</span>
@@ -2389,7 +2441,7 @@ export function SingleLapAnalysisPanel({
             {t("xrk.video.privacy")}
           </p>
           {autoConfidence != null && (
-            <p className="mt-2 text-xs text-slate-400">{t("xrk.video.autoConfidence", { value: formatConfidence(autoConfidence) })}</p>
+            <p className="mt-2 text-xs text-slate-400">{t("xrk.video.autoConfidence", { value: formatMatchScore(autoConfidence) })}</p>
           )}
           {manualAnchorActive ? (
             <p className="mt-2 text-xs leading-5 text-amber-300">
@@ -2407,7 +2459,7 @@ export function SingleLapAnalysisPanel({
                 {t("xrk.video.manualPriority", {
                   source: pendingAutoResult.source,
                   offset: signedMilliseconds(pendingAutoResult.offset_ms),
-                  confidence: formatConfidence(pendingAutoResult.confidence),
+                  confidence: formatMatchScore(pendingAutoResult.confidence),
                 })}
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -2555,8 +2607,8 @@ function signedMilliseconds(value: number): string {
   return `${value >= 0 ? "+" : ""}${value} ms`;
 }
 
-function formatConfidence(value: number): string {
-  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
+function formatMatchScore(value: number): string {
+  return Math.max(0, Math.min(1, value)).toFixed(2);
 }
 
 function CoachSummaryPanel({

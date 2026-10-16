@@ -7,6 +7,7 @@ export type TrackReference = {
   schema_version: 1; track_id: string; revision: number; venue_aliases: string[];
   direction: "CW" | "CCW"; origin_lat: number; origin_lon: number;
   source_fingerprint: string; source_lap: number; reference_path: XY[];
+  reference_s_m?: number[]; closing_edge_m?: number; length_m?: number;
   start_finish_gate: SpatialGate; corners: TrackCorner[];
   acceptance: Record<string, number>; source: "real_observed_lap"; official: false;
 };
@@ -41,6 +42,14 @@ export function parseTrackReference(text: string): TrackReference {
       || !["CW", "CCW"].includes(value.direction) || value.source !== "real_observed_lap" || value.official !== false
       || !/^[0-9a-f]{64}$/.test(value.source_fingerprint) || !value.acceptance) {
     throw new Error("Invalid track configuration / 赛道配置无效");
+  }
+  if (value.reference_s_m !== undefined && (!Array.isArray(value.reference_s_m)
+      || value.reference_s_m.length !== value.reference_path.length
+      || value.reference_s_m[0] !== 0 || !value.reference_s_m.every((s, i, a) => Number.isFinite(s) && (i === 0 || s > a[i-1]))
+      || !Number.isFinite(value.closing_edge_m) || value.closing_edge_m! < 0 || value.closing_edge_m! > 15
+      || !Number.isFinite(value.length_m)
+      || Math.abs(value.reference_s_m.at(-1)! + value.closing_edge_m! - value.length_m!) > 1e-6)) {
+    throw new Error("Invalid reference arc length / 参考弧长无效");
   }
   return value;
 }

@@ -45,6 +45,7 @@ def main() -> int:
              "- Convention: video = telemetry session time + offset",
              f"- Held-out speed check: {json.dumps(evidence['speed_check'])}",
              f"- Spatial check (no translation): {json.dumps(evidence['spatial_check'])}",
+             f"- Frozen-transform holdout: {json.dumps({k: v for k, v in evidence.get('geometry_check', {}).items() if k not in {'overlay', 'windows'}})}",
              f"- Lap coverage: {json.dumps(evidence['lap_coverage'])}",
              f"- Warnings: {', '.join(evidence['reason_codes'])}",
              "- No inferred body axes, frame-accuracy guarantee, or automatic calibration overwrite."]

@@ -127,7 +127,7 @@ export function TrackReferencePanel({ inspectionId, referenceLap, readOnly = fal
     {config && <>
       <div className="flex flex-wrap items-end gap-3">
         <label className="grid gap-1 text-xs text-slate-400">{zh ? "赛道 ID" : "Track ID"}<input aria-label="Track ID" className={inputStyle} value={config.track_id} maxLength={80} disabled={busy} onChange={e => commit({ ...config, track_id: e.target.value.replace(/[^A-Za-z0-9_-]/g, "") })} /></label>
-        <span className="pb-2 text-xs text-slate-400">{config.direction} · Lap {config.source_lap} · v{config.revision}</span>
+        <span className="pb-2 text-xs text-slate-400">{config.direction} · Lap {config.source_lap} · v{config.revision}{config.length_m != null ? ` · ${config.length_m.toFixed(2)} m` : ""}</span>
         <button className={buttonStyle} disabled={busy || !config.track_id} title={zh ? "保存到当前浏览器" : "Save in this browser"} onClick={() => { try { localStorage.setItem(STORAGE, JSON.stringify(config)); setNotice(zh ? "配置已保存到当前浏览器" : "Map saved in this browser"); } catch { setError(zh ? "保存失败" : "Save failed"); } }}><Save size={16} /></button>
         <button className={buttonStyle} title={zh ? "导出赛道配置" : "Export track configuration"} onClick={download}><Download size={16} /></button>
         <button className={`${buttonStyle} bg-emerald-700/30`} disabled={busy || unavailable || !config.track_id} onClick={() => void run("match")}><Check size={16} />{busy ? (zh ? "正在检验" : "Checking") : (zh ? "匹配当前 Session" : "Match this session")}</button>
@@ -144,7 +144,7 @@ export function TrackReferencePanel({ inspectionId, referenceLap, readOnly = fal
           <svg aria-label={zh ? "固定参考轨迹及空间门" : "Fixed track reference and spatial gates"} role="img" viewBox={`${minX} ${minY} ${width} ${height}`} preserveAspectRatio="xMidYMid meet" className={`mt-3 aspect-[3/4] w-full touch-manipulation sm:aspect-[3/2] ${mode !== "view" ? "cursor-crosshair" : ""}`}
             onClick={e => { if (mode === "view") return; const matrix = e.currentTarget.getScreenCTM(); if (!matrix) return;
               const point = new DOMPoint(e.clientX, e.clientY).matrixTransform(matrix.inverse()); moveGate(nearestReferenceIndex(config.reference_path, [point.x, -point.y])); }}>
-            <polyline points={pointsAttribute(config.reference_path)} fill="none" stroke="#e2e8f0" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+            <polygon points={pointsAttribute(config.reference_path)} fill="none" stroke="#e2e8f0" strokeWidth={2} vectorEffect="non-scaling-stroke" />
             {raw && trace && <polyline points={pointsAttribute(trace.raw_xy)} fill="none" stroke="#fb7185" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
             {registered && trace && <polyline points={pointsAttribute(trace.registered_xy)} fill="none" stroke="#34d399" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
             {gates.map(({ id, gate, color }) => <g key={id}><title>{id}</title><line x1={gate.a[0]} y1={-gate.a[1]} x2={gate.b[0]} y2={-gate.b[1]} stroke={color} strokeWidth={2} strokeDasharray={gate.confirmed ? undefined : "4 3"} vectorEffect="non-scaling-stroke" />{(!id.endsWith("out") || id.startsWith(`${cornerId} `)) && <text x={gate.b[0] + 2} y={-gate.b[1]} fontSize={6} fill={color}>{id.replace(" in", "")}</text>}</g>)}
@@ -158,6 +158,7 @@ export function TrackReferencePanel({ inspectionId, referenceLap, readOnly = fal
               onChange={e => setPlacementIndex(Math.max(0, Math.min(config.reference_path.length - 1, Math.trunc(Number(e.target.value)))))} /></label>
             <button className={buttonStyle} title={zh ? "应用空间门位置" : "Apply gate position"} onClick={() => moveGate(placementIndex)}><Check size={16} /></button>
           </div>}
+          {mode !== "view" && config.reference_s_m && <p className="text-xs text-slate-400">s = {config.reference_s_m[placementIndex]?.toFixed(2)} m / {config.length_m?.toFixed(2)} m</p>}
           <label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={config.start_finish_gate.confirmed} onChange={e => commit({ ...config, start_finish_gate: { ...config.start_finish_gate, confirmed: e.target.checked } })} />{zh ? "已通过视频确认计时线" : "Timing line confirmed in video"}</label>
           <select aria-label={zh ? "弯道区间" : "Corner interval"} className={`${inputStyle} w-full`} value={cornerId} onChange={e => { setCornerId(e.target.value); setMode("view"); }}>{config.corners.map(c => <option key={c.id} value={c.id}>{c.id} · {c.name}</option>)}</select>
           {selected && <>

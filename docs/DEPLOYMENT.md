@@ -306,7 +306,36 @@ them with a `NEXT_PUBLIC_` prefix.
 
 ## Release checks
 
+### Manual lap binding and visual-score semantics
+
+Single Lap Analysis can bind explicitly marked video start/end to the selected
+real AiM lap's logger timestamps (`video_sync.lap_video_ranges`). Both marks and
+human confirmation of lap identity/the same timing line are required. The start
+defines a constant offset; the end reports a duration residual, not an affine
+time stretch or a synchronization accuracy percentage. Similar lap durations
+alone do not identify a lap. Review a mid-lap landmark before coaching use.
+
+The legacy visual-motion endpoint retains `confidence` for compatibility and
+adds `confidence_kind: heuristic_proxy_score_not_alignment_accuracy` and
+`validates_manual_anchors: false`. The UI labels it as an experimental proxy
+match score on 0..1, never a percentage accuracy. Low visual scores do not
+invalidate manual binding. Changing manual calibration/video/lap cancels stale
+visual candidates; raw media remains local. No scoring formula is loosened.
+
+Regression checks include a local browser case with a deliberately mocked 0.39
+visual score: the saved real-lap binding must stay identical. That mock is only
+a UI regression, never evidence of actual synchronization or telemetry quality.
+
 ### GoPro GNSS candidate validation
+
+The GoPro workspace increment and acceptance checklist are in
+[GoPro Workspace Plan](GOPRO_WORKSPACE_PLAN.md). New responses add optional
+`geometry_check` evidence; older clients keep their original fields. Camera IMU
+research stays browser-local. Track-reference v1 accepts legacy maps and adds
+server-derived `reference_s_m`, `closing_edge_m` and `length_m` from the final
+closed path; contradictory supplied distances are rejected. Deploy the backend
+before clients that serialize those additional fields. No public sample or
+private recording is added by this change.
 
 The additive `POST /api/v1/xrk/video-sync/gnss` route consumes only bounded camera
 GPS summaries and an existing inspection token. Original video and camera IMU

@@ -298,7 +298,7 @@ def analyze_gate_phases(gps: pd.DataFrame, manifest: dict, cycles: list[dict], c
 def match_track_reference(gps: pd.DataFrame, manifest: dict, config: TrackReference) -> dict[str, Any]:
     """Match full observed laps, report spatial gates and preserve original logger times."""
     reference = np.asarray(config.reference_path)
-    length = float(np.linalg.norm(np.diff(reference, axis=0), axis=1).sum())
+    length = config.length_m
     origin = {"origin_lat": config.origin_lat, "origin_lon": config.origin_lon}
     timing = manifest.get("lap_timing", [])
     frames = [_lap_frame(gps, row, origin) for row in timing]

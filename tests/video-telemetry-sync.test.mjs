@@ -13,6 +13,8 @@ import {
   validateVideoSeek,
   videoToTelemetryTimeS,
   rpmReviewPoints,
+  inspectManualLapBounds,
+  createManualLapCalibration,
 } from "../frontend/lib/videoTelemetrySync.ts";
 import {
   summarizeVideoFrame,
@@ -106,4 +108,21 @@ test("video feature sampling is bounded and spans the readable duration", () => 
   assert.equal(samples[0], 0);
   assert.ok(samples.at(-1) <= 572.16);
   assert.deepEqual(videoFeatureSampleTimes(0), []);
+});
+
+test("manual lap binding uses logger boundaries and never stretches time to fit the end", () => {
+  const bounds = inspectManualLapBounds(12, 52.5, 150, 190.326, 60);
+  assert.ok(bounds);
+  assert.ok(Math.abs(bounds.end_residual_s-.174) < 1e-10);
+  const calibration = createManualLapCalibration(bounds, { targetLap: 13, videoDurationS: 60,
+    fileSizeBytes: 500, fileLastModifiedMs: 123, fileMimeType: "video/mp4" });
+  assert.equal(calibration.offset_ms, -138000);
+  assert.equal(telemetryToVideoTimeS(190.326, calibration.offset_ms), 52.32599999999999);
+  assert.equal(calibration.review.method, "manual_lap_bounds_v1");
+  assert.equal(calibration.review.scope, "selected_lap");
+  assert.deepEqual(parseVideoSyncCalibration(JSON.stringify(calibration)), calibration);
+  assert.equal(inspectManualLapBounds(52, 12, 150, 190, 60), null);
+  assert.equal(inspectManualLapBounds(12, 61, 150, 190, 60), null);
+  assert.equal(inspectManualLapBounds(12, 52, NaN, 190, 60), null);
+  assert.equal(parseVideoSyncCalibration(JSON.stringify({ ...calibration, offset_ms: 0 })), null);
 });

@@ -60,6 +60,37 @@ def test_directed_finite_gate_and_timestamp_brackets():
     assert not gate_crossings(points, np.array([2., 2.]), gate)
 
 
+def test_closed_arc_contract_upgrades_legacy_maps_and_rejects_conflicting_axes(observed):
+    """One final-path distance axis includes the closing edge, without moving gates."""
+    config = create_track_reference(*observed, 3, track_id="arc-test")
+    points = np.asarray(config.reference_path)
+    expected = np.r_[0, np.cumsum(np.linalg.norm(np.diff(points, axis=0), axis=1))]
+    np.testing.assert_allclose(config.reference_s_m, expected)
+    assert config.closing_edge_m == pytest.approx(np.linalg.norm(points[-1]-points[0]))
+    assert config.length_m == pytest.approx(expected[-1]+config.closing_edge_m)
+    legacy = config.model_dump(exclude={"reference_s_m", "closing_edge_m", "length_m"})
+    restored = type(config).model_validate(legacy)
+    assert restored.length_m == config.length_m
+    assert restored.start_finish_gate == config.start_finish_gate
+    for field in ("length_m", "reference_s_m"):
+        bad = config.model_dump()
+        if field == "length_m":
+            bad[field] += 1
+        else:
+            bad[field][-1] += 1
+        with pytest.raises(ValidationError, match="length"):
+            type(config).model_validate(bad)
+
+
+def test_gate_counts_all_directed_crossings_instead_of_nearest_sample():
+    """A repeated gate passage cannot masquerade as one unambiguous event."""
+    gate = SpatialGate(a=(0, -5), b=(0, 5), forward=(1, 0))
+    points = np.array([[-1., 0.], [1., 0.], [-1., 0.], [1., 0.]])
+    hits = gate_crossings(points, np.array([1., 1.1, 1.2, 1.3]), gate)
+    assert len(hits) == 2
+    assert [h["session_time_s"] for h in hits] == pytest.approx([1.05, 1.25])
+
+
 def test_moving_line_does_not_preserve_individual_lap_times():
     """Different within-lap passage offsets change the measured interval, without clock error."""
     logger_starts = np.array([0., 40., 81.])

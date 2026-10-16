@@ -813,6 +813,17 @@ export async function deleteXrkInspection(inspectionId: string): Promise<void> {
   });
 }
 
+export type GnssGeometryCheck = {
+  status: "unavailable" | "weak" | "candidate"; passed: boolean; independent_ground_truth: false;
+  proposed_offset_s?: number; translation_m?: [number, number]; split?: string;
+  validation_median_m?: number; validation_p95_m?: number; coverage?: number;
+  window_offset_max_deviation_s?: number | null; reason?: string | null;
+  fit_samples?: number; validation_samples?: number;
+  windows?: Array<{ session_start_s: number; session_end_s: number; sample_count: number; offset_s: number; median_error_m: number }>;
+  overlay?: Array<{ session_time_s: number; role: "fit" | "validation";
+    aim_xy_m: [number, number]; camera_raw_xy_m: [number, number]; camera_registered_xy_m: [number, number] }>;
+};
+
 export type VideoSyncGnssResult = {
   method: "gpmf_gnss_v1";
   offset_ms: number;
@@ -825,6 +836,7 @@ export type VideoSyncGnssResult = {
     lap_coverage: Array<{ lap: number; coverage: "full" | "partial" }>;
     speed_check: { passed?: boolean; validation_max_residual_s?: number; validation_samples?: number };
     spatial_check: { median_error_m?: number; p95_error_m?: number };
+    geometry_check?: GnssGeometryCheck;
     reason_codes: string[];
   };
 };
