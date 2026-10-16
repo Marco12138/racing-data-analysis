@@ -166,6 +166,13 @@ function ReviewCard({ review, analysis, videoUrl, file, duration, targetCalibrat
   const { locale } = useI18n();
   const [context, setContext] = useState(false), [cursor, setCursor] = useState(review.focus);
   const name = locale === "zh" ? review.name.replace(/^Suggested Zone\s+/i, "建议区间 ").replace(/^Zone\s+/i, "区间 ") : review.name;
+  const landmarkEvents = Object.fromEntries([review.referenceLap, review.targetLap].map(lap => {
+    const zone = analysis.zones.comparisons.find(z => z.id === review.id);
+    const values = zone && lap === analysis.target_lap ? zone.target : zone && lap === analysis.reference_lap ? zone.reference
+      : analysis.consensus_benchmark.corners.find(corner => corner.corner_id === review.id)?.evidence.features_by_lap.find(row => row.lap === lap);
+    const number = (v: unknown) => typeof v === "number" && Number.isFinite(v) ? v : null;
+    return [lap, { recovery: number(values?.reacceleration_distance_m), rpm_drop: number(values?.lift_distance_m) }];
+  }));
   const chart = useMemo(() => review.target.filter(p => p.distance_m >= review.entry && p.distance_m <= review.downstreamEnd).map(p => ({
     distance: p.distance_m, target_speed: p.speed, target_rpm: p.rpm,
     reference_speed: reviewValue(review.reference, p.distance_m, "speed"), reference_rpm: reviewValue(review.reference, p.distance_m, "rpm"),
@@ -181,6 +188,7 @@ function ReviewCard({ review, analysis, videoUrl, file, duration, targetCalibrat
     </div>
     <ManualReviewVideo review={review} fingerprint={analysis.file_fingerprint} defaultFile={file} defaultUrl={videoUrl}
       defaultDuration={duration} targetCalibration={targetCalibration} referenceCalibration={referenceCalibration} context={context}
+      landmarkEvents={landmarkEvents} readOnly={readOnly}
       onCursor={distance => { setCursor(distance); onCursor(distance); }}
       feedback={state => readOnly || !/^[0-9a-f]{32}$/.test(analysis.inspection_id)
         ? <p className="mt-3 text-xs text-slate-400">{locale === "zh" ? "演示模式不收集复核投票。" : "Review voting is disabled for demo data."}</p>

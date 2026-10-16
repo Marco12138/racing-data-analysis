@@ -8,6 +8,7 @@ import { createVideoSyncCalibration, type VideoSyncCalibration } from "../lib/vi
 import { manualReviewWindow, restoreManualReview, reviewDistanceAtTime, reviewVideoIdentity, validateManualReview,
   type ManualReviewClip, type ReviewSide } from "../lib/manualReview";
 import type { ClipFeedbackInput } from "../lib/feedbackApi";
+import { TrackLandmarkEditor } from "./TrackLandmarkEditor";
 
 const TEXT = {
   zh: {
@@ -50,6 +51,8 @@ type Props = {
   review: ReviewSelection; fingerprint: string; defaultFile: File | null; defaultUrl: string; defaultDuration: number;
   targetCalibration: VideoSyncCalibration | null; referenceCalibration: VideoSyncCalibration | null;
   context: boolean; onCursor: (distance: number) => void; feedback: (state: ReviewFeedbackState) => ReactNode;
+  readOnly?: boolean;
+  landmarkEvents?: Record<number, { recovery: number | null; rpm_drop: number | null }>;
 };
 
 export function ManualReviewVideo(props: Props) {
@@ -71,7 +74,7 @@ export function ManualReviewVideo(props: Props) {
 }
 
 function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, defaultDuration, targetCalibration, referenceCalibration,
-  context, onCursor, feedback, side, command, onReady }: Props & { side: ReviewSide; command: PairCommand; onReady: (side: ReviewSide, ready: boolean) => void }) {
+  context, onCursor, feedback, side, command, onReady, landmarkEvents, readOnly = false }: Props & { side: ReviewSide; command: PairCommand; onReady: (side: ReviewSide, ready: boolean) => void }) {
   const { locale } = useI18n(), c = TEXT[locale];
   const lap = side === "reference" ? review.referenceLap : review.targetLap;
   const trace = side === "reference" ? review.reference : review.target;
@@ -255,6 +258,12 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
     {error && <p role="alert" className="mt-2 text-sm text-red-300">{c[error as keyof typeof c]}</p>}
     {notice && <p role="status" className="mt-2 text-xs text-slate-400">{c[notice as keyof typeof c]}</p>}
     {mode === "manual" && validManual && <p className="mt-1 text-xs text-slate-500">{c.revision}: {validManual.saved_at.replace("T", " ").slice(0, 19)} UTC</p>}
+    {url && clip && !editing && <TrackLandmarkEditor key={signature} video={video} videoUrl={url}
+      scope={`${fingerprint}:${review.entry}:${review.exit}`} cornerId={review.id} lap={lap} videoKey={JSON.stringify(identity)}
+      syncKey={activeAnchor ? JSON.stringify(activeAnchor) : ""} window={clip} readOnly={readOnly}
+      onSeek={time => { video.current?.pause(); seek(time); }}
+      distanceAtTime={time => activeAnchor ? reviewDistanceAtTime(trace, time - activeAnchor.offset_ms / 1000) : null}
+      events={landmarkEvents?.[lap] ?? { recovery: null, rpm_drop: null }} />}
     {feedback({ clipId: hash?.signature === signature ? hash.id : "", side, source: mode, clip,
       enabled: Boolean(!editing && clip && hash?.signature === signature && hash.originalSignature === originalSignature && watched === signature), syncConfirmed: Boolean(activeAnchor), correction })}
   </section>;

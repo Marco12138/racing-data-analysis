@@ -410,6 +410,14 @@ export type XrkAnalysis = {
   warnings: string[];
   report: string;
   narrative?: string | null;
+  narrative_status?: { status: "generated" | "fallback"; reason: string; language: string; policy: string };
+  coach_debrief?: {
+    version: number; language: string;
+    observations: Array<{ id: string; location: string; text: string; corner_id?: string; evidence_class: string }>;
+    reviews: Array<{ id: string; location: string; text: string; corner_id: string }>;
+    training: Array<{ id: string; location: string; text: string; confidence: string }>;
+    no_training_reason: string; limitations: string[];
+  };
 };
 
 export type XrkAnalyzeOptions = {

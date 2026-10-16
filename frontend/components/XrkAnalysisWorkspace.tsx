@@ -6,6 +6,7 @@ import { TrackReferencePanel } from "./TrackReferencePanel";
 import { RpmSyncReview, type SyncReviewPoint, type SyncReviewVerdict } from "./RpmSyncReview";
 import { GoproSyncPanel } from "./GoproSyncPanel";
 import { ManualLapBinding } from "./ManualLapBinding";
+import { CoachDebrief } from "./CoachDebrief";
 
 import {
   useCallback,
@@ -463,7 +464,8 @@ export function XrkAnalysisWorkspace({
       )}
 
       {activeTab === "coach" && (
-        <CoachSummaryPanel analysis={analysis} onCursor={selectDistance} llmNarrative={llmNarrative} readOnly={publishedDemo}>
+        <CoachSummaryPanel analysis={analysis} onCursor={selectDistance} llmNarrative={llmNarrative} readOnly={publishedDemo}
+          calibration={calibration} videoFile={videoFile} videoDurationS={videoDurationS}>
           <CoachReviewPanel analysis={analysis} videoUrl={videoUrl} videoFile={videoFile}
             videoDurationS={videoDurationS} calibration={calibration}
             onSync={() => setActiveTab("video")} onCursor={selectDistance}
@@ -2614,21 +2616,20 @@ function formatMatchScore(value: number): string {
 function CoachSummaryPanel({
   analysis,
   onCursor,
-  llmNarrative = { available: false, model: null },
   children,
   readOnly = false,
+  calibration, videoFile, videoDurationS,
 }: {
   analysis: XrkAnalysis;
   onCursor: (distance: number) => void;
   llmNarrative?: { available: boolean; model: string | null };
   children?: ReactNode;
   readOnly?: boolean;
+  calibration?: VideoSyncCalibration | null; videoFile?: File | null; videoDurationS?: number;
 }) {
   const { t, locale } = useI18n();
   const [feedbackSent, setFeedbackSent] = useState<{ corner: string; thumbsUp: boolean } | null>(null);
   const summary = analysis.ai_coach_summary;
-  const improvement = analysis.achievable_improvement_range;
-  const rangeAvailable = improvement.maximum_improvement_s > 0;
 
   async function sendFeedback(corner: string, index: number, thumbsUp: boolean) {
     if (readOnly || !/^[0-9a-f]{32}$/.test(analysis.inspection_id)) return;
@@ -2641,7 +2642,7 @@ function CoachSummaryPanel({
           node_id: `priority-${index + 1}`,
           data_origin: "real",
           token: analysis.inspection_id,
-          source: analysis.narrative ? "llm" : "structured",
+          source: "structured",
           locale: locale === "zh" ? "zh" : "en",
           thumbs_up: thumbsUp,
         },
@@ -2654,39 +2655,7 @@ function CoachSummaryPanel({
   return (
     <div className="space-y-5">
       <Panel title={t("xrk.coach.title")} subtitle={t("xrk.coach.subtitle")}>
-        <p className={`llm-narrative-badge ${llmNarrative.available ? "is-on" : ""}`}>
-          {llmNarrative.available ? t("xrk.llm.enabled") : t("xrk.llm.disabled")}
-        </p>
-        {analysis.narrative ? (
-          <div>
-            <p className="whitespace-pre-wrap text-sm leading-7 text-slate-200">
-              {analysis.narrative}
-            </p>
-            <p className="mt-4 text-xs font-medium text-amber-200">
-              {t("xrk.coach.disclaimer")}
-            </p>
-          </div>
-        ) : (
-          <>
-            <div className="grid gap-4 sm:grid-cols-3">
-              <QualityFact
-                label={t("xrk.coach.primaryFocus")}
-                value={summary.training_priorities[0]?.corner ?? t("xrk.coach.noFocus")}
-              />
-              <QualityFact
-                label={t("xrk.coach.achievableRange")}
-                value={rangeAvailable
-                  ? `${improvement.minimum_improvement_s.toFixed(3)}–${improvement.maximum_improvement_s.toFixed(3)}s`
-                  : t("xrk.coach.insufficient")}
-              />
-              <QualityFact label={t("xrk.coach.confidence")} value={humanEvent(improvement.confidence)} />
-            </div>
-            <p className="mt-4 text-sm leading-6 text-slate-300">{summary.reference_statement}</p>
-            <p className="mt-2 text-xs leading-5 text-slate-500">
-              {t("xrk.coach.rangeBoundary")}
-            </p>
-          </>
-        )}
+        <CoachDebrief analysis={analysis} calibration={calibration} videoFile={videoFile} videoDurationS={videoDurationS} />
         <p className="mt-4 border-t border-slate-800 pt-3 text-[11px] leading-5 text-slate-500">
           {t("xrk.boundary.singleCar")}
         </p>

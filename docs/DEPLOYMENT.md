@@ -450,6 +450,7 @@ accuracy or driving truth. Demo controls must remain disabled even with local vi
 ```bash
 python -m pytest backend/tests -q
 pnpm run test:frontend
+pnpm run test:coach-debrief
 pnpm run lint
 pnpm run build
 pnpm run build:vercel
@@ -632,6 +633,59 @@ Local release verification uses private XRK/video files only locally. A test
 anchor exercises playback and feedback but is **not** evidence that those
 files depict the same lap. Public smoke tests use the reviewed public demo.
 See `docs/COACH_REVIEW_FEEDBACK.md` for the user workflow and limits.
+
+## Layered coach debrief and local landmarks
+
+`/api/v1/xrk/analyze` now adds `coach_debrief` and `narrative_status`; existing
+analysis fields and quality/consensus rules are unchanged. The three tiers are
+observations, review questions, and separately validated training. An empty
+training tier does not discard real sector/event comparisons. Inferred RPM
+reduction is never renamed as confirmed braking. Relative event differences
+are calculated by the existing backend and expressed as earlier/later than a
+real reference, not as absolute track coordinates or prescribed braking moves.
+
+The optional LLM receives compact summary evidence, selects existing evidence
+IDs within each tier, and adds number-free commentary. The server inserts the
+original fact text/numbers. Unknown IDs, tier promotion, invented numbers and
+prohibited driver-input claims fall back to structured facts. `narrative_status`
+distinguishes configuration, timeout, provider, format and policy failures with
+bounded reason codes, never keys or upstream error bodies. The request locale is
+forwarded to generation; capability availability is not generation success.
+
+In each AI Coach review video, open **Trackside landmarks / 赛道边参照物**:
+
+1. Pause a clear frame, select **Mark current frame**, drag a rectangle around a
+   fixed roadside feature, and name it (optional English name).
+2. Confirm the lap/corner and that the feature is stationary. A separate passing
+   checkbox requires manually confirmed video synchronization and continuous
+   telemetry coverage. Merely visible landmarks never provide passing distances.
+3. In the other lap's clip choose the saved landmark and **Find in this clip**.
+   A bounded normalized-correlation template search proposes a frame. Weak and
+   ambiguous matches remain unconfirmed. Check the actual frame before saving.
+4. Only confirmed passing sightings can label observed RPM reduction/recovery
+   relative to a landmark. They cannot alter synchronization or produce a new
+   braking/throttle recommendation. Delete a landmark to remove its local data.
+
+This is an experimental same-view template library, not a trained semantic
+vision model. It scans at most 12 seconds / 25 frames around the current clip
+position. It will miss viewpoint, occlusion and appearance changes; manual
+selection remains available. Similarity is not calibrated accuracy. The method
+follows the normalized coefficient approach described in the
+[OpenCV template-matching reference](https://docs.opencv.org/4.x/de/da9/tutorial_template_matching.html).
+There is no video upload, LLM image request or new vision dependency.
+
+Up to 12 cropped thumbnails/templates and 20 confirmed sightings per landmark
+stay in browser localStorage, scoped to session fingerprint and zone geometry.
+File/video identity, lap and calibration must match before a sighting is used.
+Changing synchronization invalidates its old distance association. No automatic
+cross-session/cross-camera generalization, offline model training, official
+corner naming or brake-point accuracy is claimed. Coach video feedback still
+does not automatically train a model. Public demo cannot save landmarks.
+
+Local acceptance: `pnpm run test:coach-debrief`, backend pytest and normal
+release checks above. Private video/XRK evidence must not be committed or
+uploaded for smoke tests. Deploy the additive backend response before the
+frontend; older backend/demo responses show an explicit fallback.
 
 ## Provider references
 

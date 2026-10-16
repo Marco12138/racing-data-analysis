@@ -84,6 +84,25 @@ Evidence, Drill, Stop condition. Do not output Chinese characters.
 
 """
 
+DEBRIEF_PROMPT = """You are an evidence-bounded karting review editor. Respond in {language}.
+The input debrief has three distinct tiers: observations, reviews, training.
+Return JSON only: {{"observations":[{{"evidence_id":"...","explanation":"..."}}],
+"reviews":[{{"evidence_id":"...","explanation":"..."}}],"training":[{{"evidence_id":"...","explanation":"..."}}]}}.
+Select up to three existing evidence IDs per tier, never move an ID between tiers.
+Empty tiers MUST remain empty; do not invent three training tasks when none passed validation.
+The application will insert the original evidence text and ALL numbers. Your explanation
+must contain NO numbers, units, estimates or new measurements. Do not copy the numerical facts.
+Use short everyday driver language to explain what to compare or check, without repeating the evidence.
+Do not issue a new driving instruction: training is limited to the existing approved text.
+No absolute track-distance instructions, invented track landmarks, guaranteed gains,
+pedal/steering diagnosis, wheel lock-up, oversteer/understeer or causal claims.
+RPM reduction is not confirmed lifting or braking; acceleration recovery is not measured throttle.
+Never claim to have viewed the video. Local video is NOT supplied to you.
+Example review explanation: "对照画面核对减速与出弯过程，先确认差异是否真实。"
+Example observation explanation: "This locates a difference to review, not its cause."
+Use the requested language throughout. No markdown fences.
+"""
+
 
 def build_xrk_narrative_evidence(result: dict[str, Any]) -> dict[str, Any]:
     """Select compact report evidence without raw telemetry or plotting arrays."""
@@ -93,6 +112,7 @@ def build_xrk_narrative_evidence(result: dict[str, Any]) -> dict[str, Any]:
     zones = (result.get("zones") or {}).get("comparisons", [])
     events = result.get("events") or []
     return _round_evidence_numbers({
+        **({"coach_debrief": result["coach_debrief"]} if result.get("coach_debrief") else {}),
         "reference_policy": consensus.get("reference_policy"),
         "capabilities": result.get("capabilities", {}),
         "evidence_catalog": result.get("evidence_catalog", {}),
@@ -139,6 +159,11 @@ def build_xrk_narrative_evidence(result: dict[str, Any]) -> dict[str, Any]:
                     "confidence",
                 ),
                 "evidence_channels": (corner.get("evidence") or {}).get("channels", []),
+                "features_by_lap": [
+                    _pick(row, "lap", "elapsed_time_s", "downstream_elapsed_s", "entry_speed_kmh",
+                          "minimum_speed_kmh", "minimum_rpm", "exit_speed_kmh", "exit_rpm")
+                    for row in (corner.get("evidence") or {}).get("features_by_lap", [])[:3]
+                ],
             }
             for corner in consensus.get("corners", [])
         ],
@@ -164,7 +189,7 @@ def build_xrk_narrative_evidence(result: dict[str, Any]) -> dict[str, Any]:
                         "unit",
                         "evidence_class",
                     )
-                    for finding in zone.get("findings", [])[:4]
+                    for finding in zone.get("findings", [])[:12]
                 ],
             }
             for zone in zones
@@ -210,11 +235,19 @@ async def generate_llm_narrative(
     *,
     client: httpx.AsyncClient | None = None,
     language: str = "en",
+    diagnostics: dict[str, Any] | None = None,
 ) -> str | None:
-    """Return an optional narrative, falling back silently on any failure."""
+    """Return optional prose with safe reason codes; never expose provider errors."""
+    def outcome(reason: str, narrative: str | None = None) -> str | None:
+        """Record only bounded public diagnostics, never prompts or credentials."""
+        if diagnostics is not None:
+            diagnostics.update(status="generated" if narrative else "fallback", reason=reason,
+                               language=language, policy="tiered_evidence_v1" if evidence.get("coach_debrief") else "legacy")
+        return narrative
+
     config = _llm_config()
     if config is None:
-        return None
+        return outcome("not_configured")
     base_url, api_key, model = config
     evidence_json = json.dumps(
         evidence,
@@ -258,6 +291,12 @@ async def generate_llm_narrative(
             },
         ],
     }
+    debrief = evidence.get("coach_debrief")
+    if debrief:
+        payload["messages"] = [
+            {"role": "system", "content": DEBRIEF_PROMPT.format(language="Chinese" if language == "zh" else "English")},
+            {"role": "user", "content": json.dumps(debrief, ensure_ascii=False, separators=(",", ":"))},
+        ]
     owned_client = client is None
     active_client = client or httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS)
     try:
@@ -272,20 +311,71 @@ async def generate_llm_narrative(
         response.raise_for_status()
         content = response.json()["choices"][0]["message"]["content"]
         if not isinstance(content, str) or not content.strip():
-            return None
+            return outcome("empty_response")
+        if debrief:
+            narrative = _render_debrief_narrative(content, debrief, language)
+            return outcome("ok" if narrative else "policy_rejected", narrative)
         narrative = content.strip()
         if not _numbers_are_grounded(narrative, evidence):
-            return None
+            return outcome("numbers_rejected")
         if not is_specific_text(narrative, language):
-            return None
+            return outcome("language_rejected")
         if not _passes_narrative_policy(narrative, language):
-            return None
-        return narrative
-    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError):
-        return None
+            return outcome("policy_rejected")
+        return outcome("ok", narrative)
+    except httpx.TimeoutException:
+        return outcome("timeout")
+    except httpx.HTTPError:
+        return outcome("provider_unavailable")
+    except (KeyError, IndexError, TypeError, ValueError):
+        return outcome("invalid_response")
     finally:
         if owned_client:
             await active_client.aclose()
+
+
+def _render_debrief_narrative(content: str, debrief: dict[str, Any], language: str) -> str | None:
+    """Resolve model-selected IDs to code-authored facts; numbers never come from the LLM."""
+    try:
+        result = json.loads(content)
+    except (ValueError, TypeError):
+        return None
+    tiers = ("observations", "reviews", "training")
+    if not isinstance(result, dict) or set(result) != set(tiers):
+        return None
+    headings = ("已观察到的事实", "值得复盘的片段", "有依据的训练建议") if language == "zh" else (
+        "Observed facts", "Clips worth reviewing", "Evidence-backed training")
+    sections = []
+    unsafe = re.compile(r"\d|[零一二两三四五六七八九十百千万]+(?:米|秒|圈|转|次)|百分之|"
+                        r"刹车|制动|油门|转向|锁死|收油|给油|踩|松开|提早|提前|推迟|延后|减小|加大|保证|导致|因为|"
+                        r"brak|throttle|steer|lock.?up|guarantee|caus|because|met(?:er|re)|\bseconds?\b|"
+                        r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:laps?|times?|seconds?|metres?|meters?)\b", re.I)
+    for tier, heading in zip(tiers, headings):
+        entries = result[tier]
+        allowed = {row["id"]: row for row in debrief.get(tier, [])}
+        if not isinstance(entries, list) or len(entries) > 3 or (allowed and not entries):
+            return None
+        seen = set()
+        texts = []
+        for row in entries:
+            if not isinstance(row, dict) or set(row) != {"evidence_id", "explanation"}:
+                return None
+            identifier, text = row["evidence_id"], row["explanation"]
+            if not isinstance(identifier, str) or identifier not in allowed or identifier in seen:
+                return None
+            if not isinstance(text, str) or not 1 <= len(text) <= 500 or unsafe.search(text):
+                return None
+            if language == "en" and re.search(r"[\u4e00-\u9fff]", text):
+                return None
+            if language == "zh" and not re.search(r"[\u4e00-\u9fff]", text):
+                return None
+            seen.add(identifier)
+            texts.append(f"{allowed[identifier]['text']}\n{text}")
+        if not texts:
+            texts = [debrief["no_training_reason"] if tier == "training" else
+                     ("暂无足够数据。" if language == "zh" else "Insufficient data.")]
+        sections.append(heading + "\n" + "\n\n".join(texts))
+    return "\n\n".join(sections)
 
 
 def _llm_config() -> tuple[str, str, str] | None:

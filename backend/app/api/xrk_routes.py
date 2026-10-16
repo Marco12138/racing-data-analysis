@@ -21,6 +21,7 @@ from ..analysis.llm_narrative import (
     generate_llm_narrative,
 )
 from ..analysis.xrk_session_analysis import analyze_xrk_session
+from ..analysis.coach_debrief import build_coach_debrief
 from ..analysis.video_telemetry_sync import (
     MAX_SEARCH_CANDIDATES,
     estimate_video_telemetry_offset,
@@ -564,9 +565,12 @@ async def analyze_xrk(
             max_comparison_points=settings.xrk_max_comparison_points,
             language=payload.language,
         )
+        result["coach_debrief"] = build_coach_debrief(result, payload.language)
+        diagnostics: dict[str, Any] = {}
         narrative = await generate_llm_narrative(
-            build_xrk_narrative_evidence(result)
+            build_xrk_narrative_evidence(result), language=payload.language, diagnostics=diagnostics,
         )
+        result["narrative_status"] = diagnostics
         if narrative is not None:
             result["narrative"] = narrative
         return result

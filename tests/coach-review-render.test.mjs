@@ -11,7 +11,7 @@ mkdirSync(`${root}/tmp`, { recursive: true });
 const dir = mkdtempSync(`${root}/tmp/coach-review-test-`);
 execFileSync(`${root}/node_modules/.bin/esbuild`, [`${root}/tests/fixtures/coach-review-entry.tsx`, "--bundle", "--format=esm", "--platform=node", "--jsx=automatic",
   "--external:react", "--external:react-dom", "--external:recharts", "--external:lucide-react", `--outfile=${dir}/entry.mjs`], { stdio: "pipe" });
-const { CoachReviewTest } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
+const { CoachReviewTest, CoachDebriefTest } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
 after(() => rmSync(dir, { recursive: true, force: true }));
 const { analysis: demoAnalysis } = JSON.parse(readFileSync(`${root}/public/demo/reviewed-real-session.json`));
 const analysis = { ...demoAnalysis, inspection_id: "a".repeat(32), file_fingerprint: "b".repeat(64) };
@@ -44,4 +44,20 @@ test("missing telemetry produces an explicit empty state and no fabricated clip"
   const html = renderToStaticMarkup(createElement(CoachReviewTest, { analysis: empty, locale: "en", videoUrl: "", videoFile: null, videoDurationS: 0, calibration: null, onSync() {}, onCursor() {} }));
   assert.match(html, /Comparable corner clips are unavailable/);
   assert.doesNotMatch(html, /data-testid="coach-review-card"/);
+});
+
+test("layered summary retains observations with no training and reports actual generation status", () => {
+  const data = {...analysis, narrative_status: {status:"fallback", reason:"timeout", language:"zh"}, coach_debrief: {
+    version:1, language:"zh", observations:[{id:"z", location:"区间 1", text:"转速下降迹象比参考圈提前 5.0 米。"}],
+    reviews:[{id:"z", location:"区间 1", text:"核对减速与出弯过程。"}], training:[], no_training_reason:"目前没有足够证据建议改变驾驶操作。", limitations:[]}};
+  const html = renderToStaticMarkup(createElement(CoachDebriefTest, {analysis:data, locale:"zh"}));
+  for(const phrase of ["AI 请求超时", "已观察到的事实", "值得复盘的片段", "提前 5.0 米", "没有足够证据"]) assert.ok(html.includes(phrase));
+  assert.doesNotMatch(html, /AI 叙事已启用|没有通过验证的重点/);
+});
+
+test("narrative in another language never masquerades as a successful localized summary", () => {
+  const data = {...analysis, narrative:"English only narrative", narrative_status:{status:"generated", reason:"ok", language:"en"}};
+  const html = renderToStaticMarkup(createElement(CoachDebriefTest, {analysis:data, locale:"zh"}));
+  assert.doesNotMatch(html, /English only narrative|本次 AI 叙事已生成/);
+  assert.match(html, /语言切换/);
 });
