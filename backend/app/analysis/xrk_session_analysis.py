@@ -15,6 +15,7 @@ from .corner_consensus import (
     estimate_achievable_improvement_range,
 )
 from .lap_analysis import analyze_laps
+from .top_lap_segments import build_top_lap_segments, segment_report_lines
 from .corner_dynamics import analyze_corner_dynamics
 from .lap_quality import build_lap_quality_summary, classify_lap_quality
 from .rpm_analysis import (
@@ -284,6 +285,10 @@ def analyze_xrk_session(
                 "synthetic_curve_generated": False,
             },
             "events": visible_events,
+            "top_lap_segments": build_top_lap_segments(
+                quality_summary["top_valid_laps"], lap_rows,
+                [0.0, *boundaries, lap_length_m],
+            ),
             "event_comparison": event_comparison,
             "action_analysis": {
                 **action_meta,
@@ -755,6 +760,7 @@ def generate_xrk_report(result: dict[str, Any], language: str = "en") -> str:
             ),
         ]
     )
+    lines.extend(segment_report_lines(result.get("top_lap_segments") or {}, language))
     if improvement.get("maximum_improvement_s", 0) > 0:
         lines.append(
             t["range"].format(

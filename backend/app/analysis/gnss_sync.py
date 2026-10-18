@@ -196,7 +196,10 @@ def verify_gnss_alignment(video_clock: list[dict], video_gps: list[dict], refere
             passed = max(residuals) <= .25 and min(w["correlation"] for w in held) >= .8 and abs(proposed-clock_offset) < 1.8
             speed_check = {"passed": passed, "proposed_offset_s": proposed,
                            "validation_max_residual_s": round(max(residuals), 4),
-                           "validation_samples": len(held), "fit_samples": len(fit)}
+                           "validation_samples": len(held), "fit_samples": len(fit),
+                           "residual_limit_s": .25, "correlation_minimum": .8,
+                           "worst_validation_window": max(held, key=lambda w: abs(w["offset_s"]-proposed)),
+                           "failed_validation_windows": [w for w in held if abs(w["offset_s"]-proposed) > .25 or w["correlation"] < .8]}
             if passed:
                 offset = proposed
             else:
@@ -242,6 +245,16 @@ def verify_gnss_alignment(video_clock: list[dict], video_gps: list[dict], refere
     candidate = speed_check.get("passed", False) and geometry.get("passed", False) and bool(spatial) and not any(
         r in reasons for r in ("CLOCK_DRIFT_REQUIRES_ANCHORS", "GNSS_POSITION_DISAGREEMENT", "AIM_GPS_FIX_UNAVAILABLE",
                               "GNSS_GEOMETRY_OFFSET_DISAGREEMENT"))
+    # These estimators share GNSS sensors. Their spread is diagnostic, not an
+    # independent accuracy interval, and must never override a manual anchor.
+    estimators = [
+        {"method": "clock_sample_median", "offset_s": round(clock_offset, 6)},
+        {"method": "clock_linear_intercept", "offset_s": round(aim["intercept_utc_s"]-camera["intercept_utc_s"], 6)},
+    ]
+    if "proposed_offset_s" in speed_check:
+        estimators.append({"method": "speed_windows", "offset_s": speed_check["proposed_offset_s"]})
+    if "proposed_offset_s" in geometry:
+        estimators.append({"method": "gps_geometry", "offset_s": geometry["proposed_offset_s"]})
     return {"method": "gpmf_gnss_v1", "offset_ms": round(offset*1000),
             "status": "candidate" if candidate else "weak", "requires_manual_confirmation": True,
             "manually_confirmed": False, "body_dynamics_available": False,
@@ -253,6 +266,14 @@ def verify_gnss_alignment(video_clock: list[dict], video_gps: list[dict], refere
                          "matched_video_range_s": [round(start+offset, 3), round(end+offset, 3)],
                          "matched_telemetry_range_s": [round(start, 3), round(end, 3)],
                          "lap_coverage": coverage, "speed_check": speed_check, "windows": windows,
+                         "offset_diagnostics": {
+                             "version": "gnss-offset-audit-v1", "estimators": estimators,
+                             "selected_method": "speed_windows" if speed_check.get("passed") else "clock_sample_median",
+                             "tow_is_held": "AIM_TOW_QUANTIZED" in reasons,
+                             "shared_gnss_evidence": True, "frame_accuracy_established": False,
+                             "estimator_spread_s": round(max(e["offset_s"] for e in estimators)-min(e["offset_s"] for e in estimators), 6),
+                             "manual_anchor_policy": "never_overwrite",
+                         },
                          "spatial_check": spatial, "geometry_check": geometry, "reason_codes": reasons,
                          "source_channels": reference.get("source_channels", []),
                          "accuracy_claim": "none; held-out signal agreement is not frame-level ground truth"}}

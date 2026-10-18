@@ -238,7 +238,17 @@ export type XrkZoneComparison = {
   }>;
 };
 
+export type TopLapSegment = {
+  id: string; number: number; entry_m: number; exit_m: number; status: string;
+  rows: Array<{ lap: number; time_s: number; delta_to_best_s: number | null }>;
+  winner_laps: number[];
+  comparisons: Array<{ reference_lap: number; target_lap: number; local_gain_s: number;
+    next_sector_delta_s: number | null; net_gain_through_next_s: number | null }>;
+};
+
 export type XrkAnalysis = {
+  top_lap_segments?: { status: string; laps: number[]; segments: TopLapSegment[];
+    position_source: string; landmarks_used_for_positioning: false; synthetic_curve_generated: false };
   corner_dynamics?: {
     status: string;
     corners: Array<{
@@ -842,7 +852,10 @@ export type VideoSyncGnssResult = {
     matched_video_range_s: [number, number];
     matched_telemetry_range_s: [number, number];
     lap_coverage: Array<{ lap: number; coverage: "full" | "partial" }>;
-    speed_check: { passed?: boolean; validation_max_residual_s?: number; validation_samples?: number };
+    speed_check: { passed?: boolean; validation_max_residual_s?: number; validation_samples?: number;
+      residual_limit_s?: number; worst_validation_window?: { session_center_s: number; offset_s: number; correlation: number } };
+    offset_diagnostics?: { version: string; selected_method: string; tow_is_held: boolean;
+      estimator_spread_s: number; estimators: Array<{ method: string; offset_s: number }> };
     spatial_check: { median_error_m?: number; p95_error_m?: number };
     geometry_check?: GnssGeometryCheck;
     reason_codes: string[];

@@ -65,3 +65,17 @@ test("camera provenance labels do not promote declared axes to body yaw", () => 
   }] } } }));
   for (const text of ["YxZ", "ZXY", "未完成", "不解释为车体偏航", "不代表硬件带宽"]) assert.ok(html.includes(text), text);
 });
+
+test("offset diagnostics name the failed window without claiming accuracy or overwriting anchors", () => {
+  const inspected={...result,evidence:{...result.evidence,
+    speed_check:{...result.evidence.speed_check,residual_limit_s:.25,worst_validation_window:{session_center_s:232.437,offset_s:24.149,correlation:.9121}},
+    offset_diagnostics:{selected_method:"clock_sample_median",tow_is_held:true,estimators:[
+      {method:"clock_sample_median",offset_s:23.799},{method:"clock_linear_intercept",offset_s:23.738927}]}}};
+  for(const locale of ["zh","en"]) {
+    const html=renderToStaticMarkup(createElement(GnssSyncTest,{locale,result:inspected,points:[],onPreview(){},onDecision(){return true;}}));
+    for(const text of ["23.799","23.739","232.44","0.350","0.250"]) assert.ok(html.includes(text));
+    assert.ok(html.includes(locale==="zh"?"未剔除该窗口":"window was not discarded"));
+    assert.ok(html.includes(locale==="zh"?"不会覆盖人工锚点":"do not overwrite manual anchors"));
+    assert.match(html,/<button[^>]+disabled=""/);
+  }
+});

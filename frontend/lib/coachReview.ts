@@ -4,6 +4,7 @@ import type { VideoSyncCalibration } from "./videoTelemetrySync";
 export const REVIEW_VERSION = "coach-review-v1";
 export type ReviewPoint = { distance_m: number; session_time_s: number | null; lap_time_s: number | null; speed: number | null; rpm: number | null; local_x_m: number | null; local_y_m: number | null };
 export type ReviewSelection = {
+  kind?: "sector"; downstreamAvailable?: boolean;
   id: string; name: string; referenceLap: number; targetLap: number;
   entry: number; exit: number; downstreamEnd: number; focus: number;
   localLoss: number; downstreamDelta: number; netLoss: number;
@@ -41,6 +42,31 @@ export function reviewValue(trace: ReviewPoint[], distance: number, key: keyof R
   const gap = b.distance_m - a.distance_m;
   if (va === null || vb === null || gap <= 0 || gap > 10) return null;
   return va + (vb - va) * (distance - a.distance_m) / gap;
+}
+
+/** Bind a real sector winner and a real comparison lap to GPS traces, never image matches. */
+export function selectSegmentReview(analysis: XrkAnalysis, segmentId: string, targetLap: number): ReviewSelection | null {
+  const segments = analysis.top_lap_segments?.segments ?? [];
+  const segment = segments.find(s => s.id === segmentId && s.status === "calculated");
+  const pair = segment?.comparisons.find(p => p.target_lap === targetLap);
+  if (!segment || !pair) return null;
+  const eligible = new Set(analysis.lap_quality.top_valid_laps.filter(l => l.analysis_eligible).slice(0, 3).map(l => l.lap));
+  if (!eligible.has(pair.reference_lap) || !eligible.has(pair.target_lap)) return null;
+  const reference = reviewTrace(analysis, pair.reference_lap), target = reviewTrace(analysis, pair.target_lap);
+  const candidates = target.filter(p => p.distance_m >= segment.entry_m && p.distance_m <= segment.exit_m
+    && p.speed !== null && p.session_time_s !== null && reviewValue(reference, p.distance_m, "session_time_s") !== null);
+  if (!candidates.length) return null;
+  const focus = candidates.reduce((a, b) => b.speed! < a.speed! ? b : a).distance_m;
+  const next = segments.find(s => s.number === segment.number + 1);
+  return {
+    id: `top3-${segment.id}`, kind: "sector", name: `Sector ${segment.number}`,
+    referenceLap: pair.reference_lap, targetLap, entry: segment.entry_m, exit: segment.exit_m,
+    downstreamEnd: pair.next_sector_delta_s !== null && next ? next.exit_m : segment.exit_m,
+    focus, localLoss: pair.local_gain_s, downstreamDelta: pair.next_sector_delta_s ?? 0,
+    netLoss: pair.net_gain_through_next_s ?? pair.local_gain_s,
+    downstreamAvailable: pair.next_sector_delta_s !== null,
+    reference, target, repeatCount: 0, sourceLaps: [],
+  };
 }
 
 function elapsed(trace: ReviewPoint[], entry: number, exit: number): number | null {

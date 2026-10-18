@@ -116,7 +116,8 @@ export function TrackLandmarkEditor({ video, videoUrl, scope, cornerId, lap, vid
   }
   const display = candidate?.frame ?? frame;
   return <details className="mt-4 border-t border-slate-700 pt-3" data-testid="track-landmark-editor">
-    <summary className="cursor-pointer text-sm text-teal-200">{zh ? "赛道边参照物 · 本地学习" : "Trackside landmarks · Local learning"}</summary>
+    <summary className="cursor-pointer text-sm text-teal-200">{zh ? "赛道边参照物 · 画面解释" : "Trackside landmarks · Visual explanation"}</summary>
+    <p className="mt-2 text-xs leading-5 text-slate-400">{zh ? "位置来自 GPS 遥测与已确认的视频同步。参照物用于说明动作发生在哪里；相似画面不是位置真值，也不用于自动调整同步。" : "Location comes from GPS telemetry and confirmed video sync. Landmarks explain where an action occurs; visual similarity is not location truth and never adjusts sync automatically."}</p>
     <p className="mt-2 text-xs leading-5 text-slate-400">{zh ? "仅在相近机位中搜索相似画面；分数不是识别准确率。候选需人工确认，不修改视频同步。裁剪小图只保存在本浏览器。" : "Same-view template search only; scores are not accuracy. Confirm every candidate. Sync is unchanged; cropped thumbnails stay in this browser."}</p>
     <div className="mt-3 flex flex-wrap gap-2">
       <button className={btn} disabled={readOnly || searching} onClick={takeFrame}><Camera size={14} />{zh ? "框选当前画面" : "Mark current frame"}</button>

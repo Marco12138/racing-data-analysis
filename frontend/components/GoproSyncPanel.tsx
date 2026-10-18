@@ -59,13 +59,31 @@ export function GnssSyncReview({ result, points, playbackUnavailable = false, on
     <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
       <dt>{zh ? "候选偏移" : "Candidate offset"}</dt><dd>{(result.offset_ms / 1000).toFixed(3)} s</dd>
       <dt>{zh ? "仅时钟偏移" : "Clock-only offset"}</dt><dd>{(e.clock_offset_ms / 1000).toFixed(3)} s</dd>
-      <dt>{zh ? "独立窗口最大偏差" : "Held-out maximum deviation"}</dt><dd>{e.speed_check.validation_max_residual_s == null ? "Unavailable" : `${e.speed_check.validation_max_residual_s.toFixed(3)} s`}</dd>
+      <dt>{zh ? "留出窗口最大偏差" : "Held-out maximum deviation"}</dt><dd>{e.speed_check.validation_max_residual_s == null ? "Unavailable" : `${e.speed_check.validation_max_residual_s.toFixed(3)} s`}</dd>
       <dt>{zh ? "位置差中位数" : "Median position difference"}</dt><dd>{e.spatial_check.median_error_m == null ? "Unavailable" : `${e.spatial_check.median_error_m.toFixed(2)} m`}</dd>
       {e.geometry_check && <>
         <dt>{zh ? "轨迹候选偏移" : "Geometry candidate offset"}</dt><dd>{e.geometry_check.proposed_offset_s?.toFixed(3) ?? "Unavailable"} {e.geometry_check.proposed_offset_s != null && "s"}</dd>
         <dt>{zh ? "留出位置差 / P95" : "Held-out median / P95"}</dt><dd>{e.geometry_check.validation_median_m == null ? "Unavailable" : `${e.geometry_check.validation_median_m.toFixed(2)} / ${e.geometry_check.validation_p95_m?.toFixed(2)} m`}</dd>
       </>}
     </dl>
+    {e.offset_diagnostics && <details className="mt-3 border-t border-slate-800 pt-3 text-xs" data-testid="gnss-offset-diagnostics">
+      <summary className="cursor-pointer text-cyan-200">{zh ? "为什么几个偏移值不同？" : "Why do the offset estimates differ?"}</summary>
+      <dl className="mt-3 grid grid-cols-2 gap-2">{e.offset_diagnostics.estimators.map(row => <div key={row.method} className="contents">
+        <dt>{({ clock_sample_median: zh ? "时钟样本中位数" : "Clock sample median", clock_linear_intercept: zh ? "时钟直线拟合" : "Clock linear fit",
+          speed_windows: zh ? "速度窗口匹配" : "Speed-window match", gps_geometry: zh ? "GPS 轨迹匹配" : "GPS geometry match" } as Record<string, string>)[row.method] ?? row.method}
+          {row.method === e.offset_diagnostics!.selected_method && (zh ? "（当前候选）" : " (current candidate)")}</dt>
+        <dd>{row.offset_s.toFixed(3)} s</dd>
+      </div>)}</dl>
+      {e.offset_diagnostics.tow_is_held && <p className="mt-3 leading-5 text-amber-200">{zh
+        ? "记录仪的周内时钟以阶梯值保存；中位数与直线拟合会受采样相位影响。估计值不同，不等于实际时钟发生漂移。"
+        : "The logger time-of-week is held in steps. Sampling phase affects median and linear-fit estimates; different estimates do not establish clock drift."}</p>}
+      {e.speed_check.worst_validation_window && <p className="mt-2 leading-5">{zh
+        ? `最不一致的速度窗口位于遥测 ${e.speed_check.worst_validation_window.session_center_s.toFixed(2)}s 附近；最大偏差 ${e.speed_check.validation_max_residual_s?.toFixed(3)}s，门槛 ${e.speed_check.residual_limit_s?.toFixed(3)}s。未剔除该窗口。`
+        : `The least consistent speed window is near telemetry ${e.speed_check.worst_validation_window.session_center_s.toFixed(2)}s; maximum deviation ${e.speed_check.validation_max_residual_s?.toFixed(3)}s, limit ${e.speed_check.residual_limit_s?.toFixed(3)}s. This window was not discarded.`}</p>}
+      <p className="mt-2 leading-5 text-slate-400">{zh
+        ? "这些方法共享 GNSS 数据，不是独立的帧级真值，也不是同步准确率。自动结果不会覆盖人工锚点；保留已核对的圈号与起终点，逐段看画面确认。"
+        : "These methods share GNSS data, not independent frame-level truth or an accuracy percentage. Automatic results do not overwrite manual anchors. Retain checked lap/start/end anchors and verify the footage."}</p>
+    </details>}
     {e.geometry_check && <GoproGpsOverlay check={e.geometry_check} />}
     <p className="mt-3 text-xs">{zh ? "覆盖整圈（待核对）" : "Full laps (unverified)"}: {e.lap_coverage.filter((p) => p.coverage === "full").map((p) => `L${p.lap}`).join(", ") || "—"}</p>
     <p className="mt-1 text-xs">{zh ? "视频重叠范围" : "Video overlap"}: {e.matched_video_range_s.map((v) => v.toFixed(2)).join(" - ")} s</p>

@@ -61,3 +61,18 @@ test("narrative in another language never masquerades as a successful localized 
   assert.doesNotMatch(html, /English only narrative|本次 AI 叙事已生成/);
   assert.match(html, /语言切换/);
 });
+
+test("Top 3 segment observations explain a lost downstream gain in both languages", () => {
+  const data={...analysis,top_lap_segments:{status:"calculated",segments:[{
+    id:"sector_1",number:1,status:"calculated",rows:[{lap:5,time_s:10},{lap:4,time_s:10.1}],winner_laps:[5],
+    comparisons:[{reference_lap:5,target_lap:4,local_gain_s:.1,next_sector_delta_s:-.2,net_gain_through_next_s:-.1}]}]}};
+  for(const locale of ["zh","en"]) {
+    const html=renderToStaticMarkup(createElement(CoachReviewTest,{analysis:data,locale,videoUrl:"",videoFile:null,
+      videoDurationS:0,calibration:null,onSync(){},onCursor(){},readOnly:true}));
+    assert.match(html,/data-testid="top-lap-segments"/);
+    assert.match(html,/L5/); assert.match(html,/0.100/); assert.match(html,/0.200/);
+    assert.ok(html.includes(locale==="zh"?"反而慢":"across both it is"));
+    assert.ok(html.includes(locale==="zh"?"参照物仅用于解释":"landmarks only explain"));
+    assert.doesNotMatch(html,/<video/);
+  }
+});

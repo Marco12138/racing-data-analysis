@@ -50,6 +50,32 @@ def test_quantized_tow_keeps_warning_and_can_be_refined():
     assert "AIM_TOW_QUANTIZED" in result["evidence"]["reason_codes"]
     assert result["offset_ms"] == pytest.approx(23700, abs=55)
     assert result["evidence"]["aim_tow_step_s"] == 1
+    diagnostic = result["evidence"]["offset_diagnostics"]
+    assert diagnostic["tow_is_held"]
+    assert diagnostic["selected_method"] == "speed_windows"
+    assert diagnostic["shared_gnss_evidence"] is True
+    assert diagnostic["frame_accuracy_established"] is False
+    assert diagnostic["manual_anchor_policy"] == "never_overwrite"
+    assert {r["method"] for r in diagnostic["estimators"]} == {
+        "clock_sample_median", "clock_linear_intercept", "speed_windows", "gps_geometry"}
+
+
+def test_one_inconsistent_holdout_window_is_reported_not_discarded():
+    """A strong correlation does not erase a local time-offset disagreement."""
+    clock, gps, ref = fixture()
+    for row in gps:
+        t = row["time_s"] - 23.7
+        if 20 <= t <= 42:
+            row["speed_kmh"] = float(60+15*np.sin((t-.6)/4)+6*np.sin((t-.6)/1.6))
+    result = verify_gnss_alignment(clock, gps, ref)
+    check = result["evidence"]["speed_check"]
+    assert not check["passed"]
+    assert check["residual_limit_s"] == .25
+    assert check["validation_max_residual_s"] >= .5
+    assert check["failed_validation_windows"]
+    assert check["worst_validation_window"]["role"] == "validation"
+    assert result["evidence"]["offset_diagnostics"]["selected_method"] == "clock_sample_median"
+    assert result["status"] == "weak" and result["manually_confirmed"] is False
 
 
 @pytest.mark.parametrize("fault,code", [("date", "GNSS_SESSION_DATE_MISMATCH"),

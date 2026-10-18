@@ -22,6 +22,7 @@ def main() -> int:
     parser.add_argument("--camera", type=Path, required=True)
     parser.add_argument("--file", type=Path, default=os.getenv("XRK_TEST_FILE_PATH"))
     parser.add_argument("--output", type=Path, default=Path("tmp/gpmf-audit/pair"))
+    parser.add_argument("--baseline-offset-s", type=float, help="Previously recorded candidate; comparison only, never ground truth")
     args = parser.parse_args()
     if not args.file:
         parser.error("Use --file or XRK_TEST_FILE_PATH for a private XRK.")
@@ -36,12 +37,21 @@ def main() -> int:
         result = verify_gnss_alignment(camera["video_clock"], camera["video_gps"], read_gnss_reference(record))
     result["camera_summary"] = camera["summary"]
     result["xrk_fingerprint"] = manifest["fingerprint"]
+    if args.baseline_offset_s is not None:
+        result["baseline_comparison"] = {
+            "baseline_offset_s": args.baseline_offset_s,
+            "difference_s": round(result["offset_ms"]/1000-args.baseline_offset_s, 6),
+            "baseline_is_ground_truth": False,
+            "interpretation": "different_estimators_do_not_establish_clock_drift",
+        }
     output.mkdir(parents=True, exist_ok=True, mode=0o700)
     (output/"summary.json").write_text(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False)+"\n")
     evidence = result["evidence"]
     lines = ["# Private GNSS synchronization audit", "", "Local evidence only. Human visual confirmation is still required.",
              f"- Status: {result['status']}", f"- Candidate offset: {result['offset_ms']/1000:.3f} s",
              f"- Clock-only offset: {evidence['clock_offset_ms']/1000:.3f} s",
+             f"- Estimator diagnostics: {json.dumps(evidence['offset_diagnostics'])}",
+             f"- Prior candidate comparison: {json.dumps(result.get('baseline_comparison'))}",
              "- Convention: video = telemetry session time + offset",
              f"- Held-out speed check: {json.dumps(evidence['speed_check'])}",
              f"- Spatial check (no translation): {json.dumps(evidence['spatial_check'])}",

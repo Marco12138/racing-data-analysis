@@ -451,6 +451,8 @@ accuracy or driving truth. Demo controls must remain disabled even with local vi
 python -m pytest backend/tests -q
 pnpm run test:frontend
 pnpm run test:coach-debrief
+pnpm run test:gnss-sync
+pnpm run test:rpm-sync
 pnpm run lint
 pnpm run build
 pnpm run build:vercel
@@ -463,6 +465,12 @@ python scripts/verify_pilot_deployment.py --require-llm
 Check CORS with the real frontend domain and confirm cloud mode returns
 `local_video_library: false` and `xrk_server_import.available: true` before
 exposing the API publicly.
+
+Real Top 3 segment review and GNSS offset diagnostics are additive fields. See
+[TOP3_SEGMENT_REVIEW.md](TOP3_SEGMENT_REVIEW.md) for evidence boundaries and private
+acceptance commands. Deploy the compatible API before the frontend. A weak GNSS
+candidate must remain weak; do not relax limits or overwrite a manual anchor to
+make a release check pass.
 
 ## Production API routing
 

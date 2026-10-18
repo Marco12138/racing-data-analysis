@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { calibratedReviewWindow, reviewIdentity, reviewValue, selectCoachReviews } from "../frontend/lib/coachReview.ts";
+import { calibratedReviewWindow, reviewIdentity, reviewValue, selectCoachReviews, selectSegmentReview } from "../frontend/lib/coachReview.ts";
 import { submitClipFeedback } from "../frontend/lib/feedbackApi.ts";
 
 function fixture() {
@@ -44,6 +44,32 @@ test("bounded trace lookup rejects extrapolation, nulls and long gaps", () => {
   trace[4].speed = null;
   assert.equal(reviewValue(trace, 3.5, "speed"), null);
   assert.equal(reviewValue([trace[1], trace[40]], 20, "speed"), null);
+});
+
+test("sector review uses only the winning real lap and selected Top 3 lap, never visual similarity", () => {
+  const analysis = fixture();
+  analysis.top_lap_segments = {segments:[{id:"sector_1",number:1,status:"calculated",entry_m:20,exit_m:60,
+    comparisons:[{reference_lap:2,target_lap:1,local_gain_s:.4,next_sector_delta_s:-.5,net_gain_through_next_s:-.1}]},
+    {id:"sector_2",number:2,exit_m:90}]};
+  const result = selectSegmentReview(analysis,"sector_1",1);
+  assert.equal(result.referenceLap,2);
+  assert.equal(result.targetLap,1);
+  assert.equal(result.netLoss,-.1);
+  assert.equal(result.downstreamEnd,90);
+  assert.equal(result.kind,"sector");
+  assert.equal(selectSegmentReview(analysis,"sector_1",4),null);
+  analysis.lap_quality.top_valid_laps[1].analysis_eligible=false;
+  assert.equal(selectSegmentReview(analysis,"sector_1",1),null);
+});
+
+test("last-sector review does not invent downstream evidence or video coverage", () => {
+  const analysis = fixture();
+  analysis.top_lap_segments = {segments:[{id:"sector_3",number:3,status:"calculated",entry_m:60,exit_m:110,
+    comparisons:[{reference_lap:2,target_lap:1,local_gain_s:.1,next_sector_delta_s:null,net_gain_through_next_s:null}]}]};
+  const review = selectSegmentReview(analysis,"sector_3",1);
+  assert.equal(review.downstreamAvailable,false);
+  assert.equal(review.downstreamEnd,110);
+  assert.equal(calibratedReviewWindow(review.target,1,review.focus,{...calibration,target_lap:1,offset_ms:-100000},file,30,{entry:60,exit:110}),null);
 });
 
 const file = { size: 200, lastModified: 100, type: "video/mp4" };

@@ -124,6 +124,7 @@ def build_xrk_narrative_evidence(result: dict[str, Any]) -> dict[str, Any]:
         "fastest_lap": _pick(result.get("fastest_lap") or {}, "lap", "lap_time"),
         "reference_lap": result.get("reference_lap"),
         "selected_lap": result.get("target_lap"),
+        "real_top_lap_segments": result.get("top_lap_segments", {}),
         "lap_quality_gate": {
             "reference_eligible_count": quality.get("reference_eligible_count"),
             "minimum_top_laps_met": quality.get("minimum_top_laps_met"),

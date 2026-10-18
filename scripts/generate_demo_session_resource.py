@@ -37,6 +37,10 @@ def main() -> None:
         default=Path("backend/app/resources/demo_session.json"),
     )
     parser.add_argument(
+        "--refresh-segments", action="store_true",
+        help="Recompute split summaries from the already reviewed public artifact only.",
+    )
+    parser.add_argument(
         "--generate-narrative",
         action="store_true",
         help=(
@@ -47,6 +51,17 @@ def main() -> None:
     args = parser.parse_args()
 
     reviewed = json.loads(args.source.read_text(encoding="utf-8"))
+    if args.refresh_segments:
+        from backend.app.analysis.top_lap_segments import build_top_lap_segments
+        if reviewed.get("privacy_review", {}).get("status") != "passed":
+            parser.error("Only a privacy-reviewed public artifact may be refreshed.")
+        analysis = reviewed["analysis"]
+        sectors = analysis.get("sectors") or {}
+        analysis["top_lap_segments"] = build_top_lap_segments(
+            analysis["lap_quality"]["top_valid_laps"], sectors.get("lap_rows", []),
+            sectors.get("boundaries_m", []),
+        )
+        args.source.write_text(json.dumps(reviewed, ensure_ascii=False, separators=(",", ":"))+"\n", encoding="utf-8")
     if args.generate_narrative:
         _generate_reviewed_narrative(reviewed, args.source)
     payload = build_demo_session_payload(reviewed)

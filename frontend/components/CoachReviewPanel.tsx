@@ -6,12 +6,13 @@ import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Too
 import { useI18n } from "../lib/i18n";
 import { resolveApiConfig } from "../lib/config";
 import { submitClipFeedback, type ClipFeedbackInput } from "../lib/feedbackApi";
-import { REVIEW_VERSION, reviewValue, selectCoachReviews,
+import { REVIEW_VERSION, reviewValue, selectCoachReviews, selectSegmentReview,
   type ReviewPoint, type ReviewSelection, type ReviewWindow } from "../lib/coachReview";
 import type { VideoSyncCalibration } from "../lib/videoTelemetrySync";
 import { parseVideoSyncCalibration } from "../lib/videoTelemetrySync";
 import type { XrkAnalysis, XrkAnalyzeOptions } from "../lib/xrkAnalysisApi";
 import { ManualReviewVideo } from "./ManualReviewVideo";
+import { TopLapSegments } from "./TopLapSegments";
 
 const COPY = {
   zh: {
@@ -70,6 +71,10 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
   const { locale } = useI18n(), c = COPY[locale];
   const [chosenReference, setChosenReference] = useState<number | null>(null), [lapError, setLapError] = useState(false);
   const [changing, setChanging] = useState(false);
+  const [segmentChoice, setSegmentChoice] = useState<{ fingerprint: string; id: string; lap: number } | null>(null);
+  const segmentReview = useMemo(() => segmentChoice?.fingerprint === analysis.file_fingerprint
+    ? selectSegmentReview(analysis, segmentChoice.id, segmentChoice.lap) : null, [analysis, segmentChoice]);
+  const segmentArea = useRef<HTMLDivElement>(null);
   const reviews = useMemo(() => selectCoachReviews(analysis, chosenReference), [analysis, chosenReference]);
   async function changeLap(side: "reference" | "target", value: string) {
     if (!onAnalyze || changing || analyzing) return;
@@ -100,6 +105,20 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
   }, [historyKey, calibration?.calibrated_at]);
   const mappings: Record<string, VideoSyncCalibration> = { ...history, ...(calibration ? { [calibration.target_lap]: calibration } : {}) };
   return <div className="min-w-0 space-y-6" data-testid="coach-review-panel">
+    <TopLapSegments analysis={analysis} selected={segmentReview && segmentChoice ? `${segmentChoice.id}:${segmentChoice.lap}` : null}
+      onSelect={(id, lap) => {
+        setSegmentChoice({ fingerprint: analysis.file_fingerprint, id, lap });
+        requestAnimationFrame(() => segmentArea.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      }} />
+    <div ref={segmentArea} className="scroll-mt-24">
+      {segmentReview && <ReviewCard key={`${analysis.file_fingerprint}:${segmentReview.id}:${segmentReview.targetLap}`}
+        review={segmentReview} analysis={analysis} videoUrl={videoUrl} file={videoFile} duration={videoDurationS}
+        targetCalibration={mappings[segmentReview.targetLap] ?? null} referenceCalibration={mappings[segmentReview.referenceLap] ?? null}
+        onCursor={onCursor} c={c} readOnly={readOnly} />}
+      {segmentChoice?.fingerprint === analysis.file_fingerprint && !segmentReview && <p className="text-sm text-amber-200">
+        {locale === "zh" ? "该段连续 GPS / 计时覆盖不足，不能自动定位视频；分段用时仍保留。" : "Continuous GPS/timing coverage is insufficient to locate this clip; split times remain available."}
+      </p>}
+    </div>
     <TopThreeCharts analysis={analysis} c={c} />
     <div className="grid gap-3 sm:grid-cols-2">
       <label className="min-w-0 text-xs text-slate-400">{c.reference}<select className="mt-1 w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm" aria-label={c.reference} value={chosenReference ?? "auto"} disabled={!onAnalyze || analyzing || changing || readOnly} onChange={e => void changeLap("reference", e.target.value)}>
@@ -164,6 +183,8 @@ function ReviewCard({ review, analysis, videoUrl, file, duration, targetCalibrat
   readOnly: boolean;
 }) {
   const { locale } = useI18n();
+  const sector = review.kind === "sector";
+  const contextLabel = sector ? (locale === "zh" ? "完整分段与下一段" : "Full sector and next sector") : c.context;
   const [context, setContext] = useState(false), [cursor, setCursor] = useState(review.focus);
   const name = locale === "zh" ? review.name.replace(/^Suggested Zone\s+/i, "建议区间 ").replace(/^Zone\s+/i, "区间 ") : review.name;
   const landmarkEvents = Object.fromEntries([review.referenceLap, review.targetLap].map(lap => {
@@ -180,11 +201,14 @@ function ReviewCard({ review, analysis, videoUrl, file, duration, targetCalibrat
   return <article className="min-w-0 rounded-md border border-slate-700 p-4 sm:p-5" data-testid="coach-review-card">
     <header className="mb-4 flex flex-wrap items-center justify-between gap-3"><h4 className="text-base font-semibold text-white">{name} · L{review.targetLap} / L{review.referenceLap}</h4>
       <button className={button} onClick={() => { setCursor(review.focus); onCursor(review.focus); }}><MapPin size={14} />{c.scope}</button></header>
-    <div className="mb-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">{[[c.local, review.localLoss], [c.downstream, review.downstreamDelta], [c.net, review.netLoss]].map(([label, value]) =>
+    <div className="mb-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">{[[sector ? (locale === "zh" ? "本段时间差" : "Sector delta") : c.local, review.localLoss], [sector ? (locale === "zh" ? "下一段时间差" : "Next-sector delta") : c.downstream, review.downstreamAvailable === false ? null : review.downstreamDelta], [c.net, review.downstreamAvailable === false ? null : review.netLoss]].map(([label, value]) =>
       <div key={String(label)}><span className="text-xs text-slate-400">{label}</span><p className="font-mono text-lg text-white">{fmt(value)}s</p></div>)}</div>
     <p className="mb-4 text-xs text-slate-400">{c.loss}</p>
-    <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label={c.context}>
-      {[false, true].map(v => <button key={String(v)} className={button} aria-pressed={context === v} onClick={() => setContext(v)}>{context === v && <Check size={14} />}{v ? c.context : c.preview}</button>)}
+    {sector && <p className="mb-3 text-xs text-slate-400">{locale === "zh"
+      ? "预览取目标圈本段最低速度附近，不代表时间损失一定发生在这里。完整分段用于查看前后过程；缺少边界计时时不会补造视频范围。"
+      : "The preview is near this sector's minimum speed in the selected lap, not a claim that the loss originates there. Full context shows the surrounding sequence; missing boundary times are never invented."}</p>}
+    <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label={contextLabel}>
+      {[false, true].map(v => <button key={String(v)} className={button} aria-pressed={context === v} onClick={() => setContext(v)}>{context === v && <Check size={14} />}{v ? contextLabel : c.preview}</button>)}
     </div>
     <ManualReviewVideo review={review} fingerprint={analysis.file_fingerprint} defaultFile={file} defaultUrl={videoUrl}
       defaultDuration={duration} targetCalibration={targetCalibration} referenceCalibration={referenceCalibration} context={context}
@@ -196,7 +220,7 @@ function ReviewCard({ review, analysis, videoUrl, file, duration, targetCalibrat
         clip={state.clip} enabled={state.enabled} c={c} source={state.source} side={state.side} syncConfirmed={state.syncConfirmed} correction={state.correction} />} />
     <p className="mt-4 text-sm leading-6 text-slate-200">{c.review}</p>
     <p className="mt-2 text-sm leading-6 text-slate-300">{c.drill}</p>
-    <p className="mt-2 text-xs text-slate-500">{c.repeated}: {review.sourceLaps.map(l => `L${l}`).join(", ") || "—"}. {c.notConfirmed}</p>
+    <p className="mt-2 text-xs text-slate-500">{!sector && <>{c.repeated}: {review.sourceLaps.map(l => `L${l}`).join(", ") || "—"}. </>}{c.notConfirmed}</p>
     <details className="mt-5 border-t border-slate-800 pt-3"><summary className="cursor-pointer text-sm text-slate-300">{c.details}</summary>
       <div className="mt-3 grid min-w-0 gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
         <ReviewMap trace={review.target} review={review} cursor={cursor} onCursor={d => { setCursor(d); onCursor(d); }} />

@@ -75,7 +75,12 @@ export function ManualReviewVideo(props: Props) {
 
 function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, defaultDuration, targetCalibration, referenceCalibration,
   context, onCursor, feedback, side, command, onReady, landmarkEvents, readOnly = false }: Props & { side: ReviewSide; command: PairCommand; onReady: (side: ReviewSide, ready: boolean) => void }) {
-  const { locale } = useI18n(), c = TEXT[locale];
+  const { locale } = useI18n();
+  const c = review.kind === "sector" ? { ...TEXT[locale],
+    entry: locale === "zh" ? "分段入口" : "Sector entry",
+    exit: locale === "zh" ? "分段出口" : "Sector exit",
+    boundaryNote: locale === "zh" ? "人工片段仅覆盖分段的一部分；时间差仍对应完整分段。" : "This manual clip covers only part of the sector; the time delta still describes the full sector.",
+  } : TEXT[locale];
   const lap = side === "reference" ? review.referenceLap : review.targetLap;
   const trace = side === "reference" ? review.reference : review.target;
   const calibration = side === "reference" ? referenceCalibration : targetCalibration;
