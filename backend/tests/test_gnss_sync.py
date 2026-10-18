@@ -76,6 +76,52 @@ def test_one_inconsistent_holdout_window_is_reported_not_discarded():
     assert check["worst_validation_window"]["role"] == "validation"
     assert result["evidence"]["offset_diagnostics"]["selected_method"] == "clock_sample_median"
     assert result["status"] == "weak" and result["manually_confirmed"] is False
+    diagnostic = check["window_diagnostic"]
+    assert diagnostic["window_discarded"] is False
+    assert diagnostic["acceptance_changed"] is False
+    assert diagnostic["offset_deviation_is_proven_timing_error"] is False
+    assert diagnostic["at_local_best_offset"]["rmse_kmh"] < diagnostic["at_fit_offset"]["rmse_kmh"]
+
+
+def test_speed_shape_fault_does_not_become_a_clock_correction():
+    """A local receiver speed dip changes a match peak despite unchanged clocks."""
+    clock, gps, ref = fixture()
+    for row in gps:
+        t = row["time_s"]-23.7
+        row["speed_kmh"] -= float(35*np.exp(-((t-34)/.7)**2))
+    result = verify_gnss_alignment(clock, gps, ref)
+    check = result["evidence"]["speed_check"]
+    assert not check["passed"]
+    assert check["residual_limit_s"] == .25 and check["correlation_minimum"] == .8
+    d = check["window_diagnostic"]
+    assert d["at_fit_offset"]["max_absolute_difference_kmh"] > 25
+    assert d["at_local_best_offset"]["max_absolute_difference_kmh"] > 20
+    assert d["camera_clock_epoch_span_s"] < .001
+    assert d["position_at_fit_offset"]["p95_m"] < .01
+    assert d["at_fit_offset"]["sample_count"] == len(d["trace"])
+    assert result["offset_ms"] == pytest.approx(23700, abs=1)
+    assert result["status"] == "weak"
+    assert result["requires_manual_confirmation"] and not result["manually_confirmed"]
+    assert result["evidence"]["offset_diagnostics"]["manual_anchor_policy"] == "never_overwrite"
+    json.dumps(result, allow_nan=False)
+
+
+def test_window_diagnostics_preserve_gaps_and_do_not_extrapolate():
+    """Diagnostic curves use identical common samples and retain null gaps."""
+    from backend.app.analysis.gnss_diagnostics import diagnose_speed_window
+    t = np.arange(0, 20, .1)
+    values = 60+10*np.sin(t)
+    keep = (t < 8) | (t > 10)
+    q = np.arange(-1, 21, .2)
+    result = diagnose_speed_window(q, (t, values), (t[keep], values[keep]), 0, .3, [], {}, {})
+    assert result["camera_sample_timing"]["maximum_gap_s"] > 2
+    assert result["camera_clock_epoch_span_s"] is None
+    assert result["position_at_fit_offset"] is None
+    assert result["trace"][0]["camera_at_fit_kmh"] is None
+    assert result["trace"][-1]["aim_speed_kmh"] is None
+    assert all(p["camera_at_fit_kmh"] is None for p in result["trace"] if 8.5 < p["session_time_s"] < 9.5)
+    assert result["at_fit_offset"]["sample_count"] == sum(p["aim_speed_kmh"] is not None for p in result["trace"])
+    json.dumps(result, allow_nan=False)
 
 
 @pytest.mark.parametrize("fault,code", [("date", "GNSS_SESSION_DATE_MISMATCH"),

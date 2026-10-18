@@ -472,6 +472,15 @@ acceptance commands. Deploy the compatible API before the frontend. A weak GNSS
 candidate must remain weak; do not relax limits or overwrite a manual anchor to
 make a release check pass.
 
+Failed GNSS speed windows now include additive `speed_check.window_diagnostic`
+evidence: unchanged window, common-sample speed residuals before/after its local
+best shift, native/summary spacing, GPS position disagreement and camera clock
+residual span. The public UI calls the offset spread a **matching disagreement**,
+not a measured video delay. Neither regular timestamps nor a high correlation
+prove frame accuracy. No failed window is dropped and no threshold, selected
+offset or manual-anchor policy changes. See [GNSS_WINDOW_AUDIT.md](GNSS_WINDOW_AUDIT.md)
+for private original-packet acceptance. Deploy the additive backend first.
+
 ## Production API routing
 
 The primary public deployment uses a Vercel external rewrite directly to the

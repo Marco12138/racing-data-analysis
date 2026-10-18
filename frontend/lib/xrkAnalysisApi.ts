@@ -853,13 +853,26 @@ export type VideoSyncGnssResult = {
     matched_telemetry_range_s: [number, number];
     lap_coverage: Array<{ lap: number; coverage: "full" | "partial" }>;
     speed_check: { passed?: boolean; validation_max_residual_s?: number; validation_samples?: number;
-      residual_limit_s?: number; worst_validation_window?: { session_center_s: number; offset_s: number; correlation: number } };
+      residual_limit_s?: number; worst_validation_window?: { session_center_s: number; offset_s: number; correlation: number };
+      window_diagnostic?: GnssWindowDiagnostic };
     offset_diagnostics?: { version: string; selected_method: string; tow_is_held: boolean;
       estimator_spread_s: number; estimators: Array<{ method: string; offset_s: number }> };
     spatial_check: { median_error_m?: number; p95_error_m?: number };
     geometry_check?: GnssGeometryCheck;
     reason_codes: string[];
   };
+};
+
+export type GnssWindowDiagnostic = {
+  session_range_s: [number, number]; video_range_s: [number, number];
+  fit_offset_s: number; local_best_offset_s: number;
+  at_fit_offset: { sample_count: number; rmse_kmh: number | null; max_absolute_difference_kmh: number | null;
+    peak: { session_time_s: number; aim_speed_kmh: number; camera_speed_kmh: number } | null };
+  at_local_best_offset: { rmse_kmh: number | null; max_absolute_difference_kmh: number | null };
+  position_at_fit_offset: { median_m: number; p95_m: number; max_m: number } | null;
+  camera_clock_epoch_span_s: number | null;
+  trace: Array<{ session_time_s: number; aim_speed_kmh: number | null;
+    camera_at_fit_kmh: number | null; camera_at_local_best_kmh: number | null }>;
 };
 
 /** Only numeric GNSS summaries leave the browser; no video or camera IMU. */

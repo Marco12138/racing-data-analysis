@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, CircleHelp, Play, Satellite, X } from "lucide-react";
+import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useI18n } from "../lib/i18n";
 import { extractGoproTelemetry, type GoproAudit } from "../lib/gpmfTelemetry";
-import { autoSyncVideoGnss, type VideoSyncGnssResult } from "../lib/xrkAnalysisApi";
+import { autoSyncVideoGnss, type GnssWindowDiagnostic, type VideoSyncGnssResult } from "../lib/xrkAnalysisApi";
 import { rpmReviewPoints, type TelemetrySyncPoint } from "../lib/videoTelemetrySync";
 import type { SyncReviewPoint, SyncReviewVerdict } from "./RpmSyncReview";
 import { GoproGpsOverlay } from "./GoproGpsOverlay";
@@ -59,7 +60,7 @@ export function GnssSyncReview({ result, points, playbackUnavailable = false, on
     <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
       <dt>{zh ? "候选偏移" : "Candidate offset"}</dt><dd>{(result.offset_ms / 1000).toFixed(3)} s</dd>
       <dt>{zh ? "仅时钟偏移" : "Clock-only offset"}</dt><dd>{(e.clock_offset_ms / 1000).toFixed(3)} s</dd>
-      <dt>{zh ? "留出窗口最大偏差" : "Held-out maximum deviation"}</dt><dd>{e.speed_check.validation_max_residual_s == null ? "Unavailable" : `${e.speed_check.validation_max_residual_s.toFixed(3)} s`}</dd>
+      <dt>{zh ? "速度匹配偏移差（非实测延迟）" : "Speed-match offset spread (not measured delay)"}</dt><dd>{e.speed_check.validation_max_residual_s == null ? "Unavailable" : `${e.speed_check.validation_max_residual_s.toFixed(3)} s`}</dd>
       <dt>{zh ? "位置差中位数" : "Median position difference"}</dt><dd>{e.spatial_check.median_error_m == null ? "Unavailable" : `${e.spatial_check.median_error_m.toFixed(2)} m`}</dd>
       {e.geometry_check && <>
         <dt>{zh ? "轨迹候选偏移" : "Geometry candidate offset"}</dt><dd>{e.geometry_check.proposed_offset_s?.toFixed(3) ?? "Unavailable"} {e.geometry_check.proposed_offset_s != null && "s"}</dd>
@@ -84,6 +85,7 @@ export function GnssSyncReview({ result, points, playbackUnavailable = false, on
         ? "这些方法共享 GNSS 数据，不是独立的帧级真值，也不是同步准确率。自动结果不会覆盖人工锚点；保留已核对的圈号与起终点，逐段看画面确认。"
         : "These methods share GNSS data, not independent frame-level truth or an accuracy percentage. Automatic results do not overwrite manual anchors. Retain checked lap/start/end anchors and verify the footage."}</p>
     </details>}
+    {e.speed_check.window_diagnostic && <GnssWindowReview diagnostic={e.speed_check.window_diagnostic} />}
     {e.geometry_check && <GoproGpsOverlay check={e.geometry_check} />}
     <p className="mt-3 text-xs">{zh ? "覆盖整圈（待核对）" : "Full laps (unverified)"}: {e.lap_coverage.filter((p) => p.coverage === "full").map((p) => `L${p.lap}`).join(", ") || "—"}</p>
     <p className="mt-1 text-xs">{zh ? "视频重叠范围" : "Video overlap"}: {e.matched_video_range_s.map((v) => v.toFixed(2)).join(" - ")} s</p>
@@ -112,6 +114,45 @@ export function GnssSyncReview({ result, points, playbackUnavailable = false, on
       ? (zh ? "已保存人工确认" : "Human confirmation saved")
       : (zh ? "已记录本地判断，原校准未改动" : "Local judgement recorded; prior calibration unchanged")}</p>}
   </section>;
+}
+
+/** Failed matches remain visible; a local correlation optimum is not a clock correction. */
+function GnssWindowReview({ diagnostic: d }: { diagnostic: GnssWindowDiagnostic }) {
+  const { locale } = useI18n();
+  const zh = locale === "zh";
+  const number = (v: number | null | undefined, digits = 2) => v == null ? (zh ? "不可用" : "Unavailable") : v.toFixed(digits);
+  return <details className="mt-3 min-w-0 border-t border-slate-800 pt-3 text-xs" data-testid="gnss-window-diagnostic">
+    <summary className="cursor-pointer text-amber-200">{zh ? "查看未通过窗口：GPS 信号还是时间问题？" : "Inspect failed window: GPS signals or timing?"}</summary>
+    <p className="mt-3 leading-5">{zh
+      ? "局部速度匹配会被曲线变形影响，不能据此断言视频晚了相同秒数。此窗口仍未通过，未删除样本或放宽门槛。"
+      : "A distorted speed curve can move the local matching peak. This does not prove the video is delayed by that amount. The window still fails; no samples were removed or limits relaxed."}</p>
+    <dl className="mt-3 grid grid-cols-2 gap-2">
+      <dt>{zh ? "遥测时间范围" : "Telemetry range"}</dt><dd>{d.session_range_s.map(v => v.toFixed(2)).join(" - ")} s</dd>
+      <dt>{zh ? "视频候选范围" : "Candidate video range"}</dt><dd>{d.video_range_s.map(v => v.toFixed(2)).join(" - ")} s</dd>
+      <dt>{zh ? "当前候选的最大速度差" : "Maximum speed difference at candidate"}</dt><dd>{number(d.at_fit_offset.max_absolute_difference_kmh)} km/h</dd>
+      <dt>{zh ? "局部最佳平移后仍差" : "Difference remaining at local best shift"}</dt><dd>{number(d.at_local_best_offset.max_absolute_difference_kmh)} km/h</dd>
+      <dt>{zh ? "位置差 P95（未平移）" : "Position difference P95 (unshifted)"}</dt><dd>{number(d.position_at_fit_offset?.p95_m)} m</dd>
+      <dt>{zh ? "相机时钟残差跨度" : "Camera clock residual span"}</dt><dd>{number(d.camera_clock_epoch_span_s, 3)} s</dd>
+    </dl>
+    {d.at_fit_offset.peak && <p className="mt-2 leading-5">{zh
+      ? `差异最大处：遥测 ${d.at_fit_offset.peak.session_time_s.toFixed(2)}s，AiM ${d.at_fit_offset.peak.aim_speed_kmh.toFixed(1)} km/h，GoPro ${d.at_fit_offset.peak.camera_speed_kmh.toFixed(1)} km/h。`
+      : `Largest difference: telemetry ${d.at_fit_offset.peak.session_time_s.toFixed(2)}s, AiM ${d.at_fit_offset.peak.aim_speed_kmh.toFixed(1)} km/h, GoPro ${d.at_fit_offset.peak.camera_speed_kmh.toFixed(1)} km/h.`}</p>}
+    <div className="mt-3 h-64 min-w-0" role="img" aria-label={zh ? "失败窗口两路 GPS 速度对照" : "GPS speed comparison in the failed window"}>
+      <ResponsiveContainer width="100%" height="100%"><LineChart data={d.trace} margin={{ top: 8, right: 8, bottom: 8, left: 0 }}>
+        <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
+        <XAxis dataKey="session_time_s" type="number" domain={["dataMin", "dataMax"]} tickFormatter={v => `${Number(v).toFixed(0)}s`} />
+        <YAxis width={40} unit="" />
+        <Tooltip labelFormatter={v => `${Number(v).toFixed(2)} s`} formatter={v => [`${Number(v).toFixed(2)} km/h`]} />
+        <Legend />
+        <Line dataKey="aim_speed_kmh" name="AiM GPS" stroke="#22d3ee" dot={false} isAnimationActive={false} connectNulls={false} />
+        <Line dataKey="camera_at_fit_kmh" name={zh ? "GoPro · 当前候选" : "GoPro · candidate"} stroke="#fbbf24" dot={false} isAnimationActive={false} connectNulls={false} />
+        <Line dataKey="camera_at_local_best_kmh" name={zh ? "GoPro · 局部最佳平移" : "GoPro · local best shift"} stroke="#f472b6" strokeDasharray="4 3" dot={false} isAnimationActive={false} connectNulls={false} />
+      </LineChart></ResponsiveContainer>
+    </div>
+    <p className="mt-2 leading-5 text-slate-400">{zh
+      ? "局部平移仅用于排查，未用于校准。两套 GPS 都不是独立真值；时钟连续也不能证明逐帧精度。请保留已确认的人工锚点，并核对上述视频区间。"
+      : "The local shift is diagnostic only, not applied to calibration. Neither GPS is independent ground truth; continuous clocks do not prove frame accuracy. Keep confirmed manual anchors and review this video interval."}</p>
+  </details>;
 }
 
 /** Key this component by inspection, video fingerprint and target lap. */

@@ -79,3 +79,24 @@ test("offset diagnostics name the failed window without claiming accuracy or ove
     assert.match(html,/<button[^>]+disabled=""/);
   }
 });
+
+test("failed speed match shows evidence without calling it a measured video delay", () => {
+  const diagnostic = {
+    session_range_s:[22,40],video_range_s:[45.7,63.7],fit_offset_s:23.7,local_best_offset_s:24.05,
+    at_fit_offset:{sample_count:90,rmse_kmh:10,max_absolute_difference_kmh:40,
+      peak:{session_time_s:34,aim_speed_kmh:70,camera_speed_kmh:30}},
+    at_local_best_offset:{rmse_kmh:9,max_absolute_difference_kmh:35},
+    position_at_fit_offset:{median_m:2,p95_m:12,max_m:14},camera_clock_epoch_span_s:.09,trace:[],
+  };
+  for (const locale of ["zh","en"]) {
+    const html=renderToStaticMarkup(createElement(GnssSyncTest,{locale,
+      result:{...result,evidence:{...result.evidence,speed_check:{...result.evidence.speed_check,window_diagnostic:diagnostic}}},
+      points:[],onPreview(){},onDecision(){return true;}}));
+    assert.match(html,/gnss-window-diagnostic/);
+    for(const text of ["40.00","35.00","0.090","70.0","30.0"]) assert.ok(html.includes(text),text);
+    assert.ok(html.includes(locale==="zh"?"非实测延迟":"not measured delay"));
+    assert.ok(html.includes(locale==="zh"?"未删除样本或放宽门槛":"no samples were removed or limits relaxed"));
+    assert.ok(html.includes(locale==="zh"?"请保留已确认的人工锚点":"Keep confirmed manual anchors"));
+    assert.match(html,/<button[^>]+disabled=""/);
+  }
+});

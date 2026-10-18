@@ -10,6 +10,7 @@ import pandas as pd
 
 from .rpm_sync_verification import _sample
 from .gnss_spatial import verify_spatial_alignment
+from .gnss_diagnostics import diagnose_speed_window
 from ..importers.xrk_inspection import convert_units
 
 GPS_EPOCH = datetime(1980, 1, 6, tzinfo=UTC).timestamp()
@@ -171,6 +172,7 @@ def verify_gnss_alignment(video_clock: list[dict], video_gps: list[dict], refere
         reasons.append("CLOCK_DRIFT_REQUIRES_ANCHORS")
     offset = clock_offset
     windows, speed_check, spatial = [], {}, {}
+    window_queries = []
     gps = pd.DataFrame(video_gps)
     if not gps.empty and "speed" in reference["series"]:
         gt, gs = _ordered(gps.time_s.to_numpy(), gps.speed_kmh.to_numpy())
@@ -188,6 +190,7 @@ def verify_gnss_alignment(video_clock: list[dict], video_gps: list[dict], refere
                 windows.append({"session_center_s": round(float(np.mean(q)), 3),
                                 "offset_s": round(o, 3), "correlation": round(r, 4),
                                 "role": "fit" if index % 2 == 0 else "validation"})
+                window_queries.append(q)
         fit = [w for w in windows if w["role"] == "fit" and w["correlation"] >= .8]
         held = [w for w in windows if w["role"] == "validation"]
         if len(fit) >= 2 and len(held) >= 2:
@@ -204,6 +207,17 @@ def verify_gnss_alignment(video_clock: list[dict], video_gps: list[dict], refere
                 offset = proposed
             else:
                 reasons.append("GNSS_SPEED_DISAGREEMENT")
+                # Do not drop the failed window or use its optimized shift to
+                # recalibrate. Correlation can shift a distorted speed curve.
+                worst = speed_check["worst_validation_window"]
+                positions = {key: _fixed_series(reference, key) for key in ("gps_lat", "gps_lon")
+                             if key in reference["series"]}
+                vg = gps.drop_duplicates("time_s")
+                camera_positions = {key: np.where(vg.fix.to_numpy() >= 3, vg[key], np.nan)
+                                    for key in ("lat", "lon") if key in vg}
+                speed_check["window_diagnostic"] = diagnose_speed_window(
+                    window_queries[windows.index(worst)], (st, ss), (gt, gs), proposed,
+                    worst["offset_s"], video_clock, positions, camera_positions)
         else:
             reasons.append("GNSS_SPEED_VALIDATION_INSUFFICIENT")
         if {"gps_lat", "gps_lon"}.issubset(reference["series"]):
