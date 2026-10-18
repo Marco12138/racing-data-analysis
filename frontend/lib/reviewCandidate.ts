@@ -17,7 +17,7 @@ const finite = (n: unknown): n is number => typeof n === "number" && Number.isFi
 /** Same-session, same-file proposals only. Never save or promote a propagated anchor. */
 export function inferReviewCandidate(trace: ReviewPoint[], lap: number, focus: number,
   anchors: VideoSyncCalibration[], ranges: LoggerLapRange[], video: VideoIdentity | null,
-  context?: { entry: number; exit: number }): CandidateResult {
+  context?: { entry: number; exit: number }, startDistance?: number): CandidateResult {
   const unavailable = (reason: string): CandidateResult => ({ candidate: null, reason });
   const validRange = (r: LoggerLapRange) => finite(r.telemetry_start_s) && finite(r.telemetry_end_s)
     && r.telemetry_end_s > r.telemetry_start_s;
@@ -39,7 +39,7 @@ export function inferReviewCandidate(trace: ReviewPoint[], lap: number, focus: n
   if (Math.max(...sources.map(a => a.offset_ms)) - Math.min(...sources.map(a => a.offset_ms)) > 250)
     return unavailable("anchors_disagree");
   const source = sources[0], offset = source.offset_ms / 1000;
-  const window = reviewWindowAtOffset(trace, focus, offset, video.duration_s, context);
+  const window = reviewWindowAtOffset(trace, focus, offset, video.duration_s, context, startDistance);
   if (!window) return unavailable("outside_video_or_timing");
   const start = window.start_s - offset, end = window.end_s - offset;
   const a = reviewDistanceAtTime(trace, start), b = reviewDistanceAtTime(trace, end);

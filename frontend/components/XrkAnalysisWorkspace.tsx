@@ -2435,7 +2435,7 @@ export function SingleLapAnalysisPanel({
             verdict={rpmVerdict} onPreview={previewRpmCandidate} onDecision={reviewRpmCandidate} />}
           {videoFile && analysis.inspection_id && <GoproSyncPanel
             key={`${analysis.inspection_id}:${analysis.target_lap}:${videoFile.name}:${videoFile.size}:${videoFile.lastModified}`}
-            file={videoFile} duration={videoDurationS} inspectionId={analysis.inspection_id} points={targetPoints}
+            file={videoFile} duration={videoDurationS} inspectionId={analysis.inspection_id} fingerprint={analysis.file_fingerprint} points={targetPoints}
             disabled={!!readOnly || analyzing || rpmSyncing || autoSyncing}
             onPreview={previewRpmCandidate} onDecision={reviewGnssCandidate} />}
           {!analysis.capabilities.rpm && <p className="mt-2 text-xs text-amber-300">{t("xrk.unavailable.rpm")}</p>}

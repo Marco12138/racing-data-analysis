@@ -500,6 +500,39 @@ must cover one anchored lap with two unanchored real Top 3 laps, manual correcti
 priority, disabled candidate voting, and no changes to the saved source anchor.
 This frontend-only change does not require a Railway API deployment.
 
+### Start-only review boundaries
+
+Short Top 3/zone comparisons derive one start distance from the reference lap,
+then interpolate each real lap's timestamp at that distance. Both clips run for
+exactly five seconds; missing coverage is not padded, shifted or shortened.
+Full-context playback and legacy manual ranges remain available.
+
+The default manual editor requires only a start and explicit lap/location
+confirmation. The end is start +5s. A local, clip-specific revision retains the
+original source anchor, proposed start and human picking uncertainty (+/-0.5s).
+This is not a statistical confidence interval, a clock correction or a relaxed
+acceptance limit. Global lap anchors and their history are never overwritten.
+Advanced custom ranges remain optional; old saved crops are not migrated.
+
+Boundary review decodes two reference frames and at most 27 target frames
+locally. Two background regions reuse the 0.72 similarity / 0.06 ambiguity
+rules, with a 0.25s inter-region candidate agreement check. Results only offer
+frames to inspect. They cannot save calibration, confirm feedback, or clear a
+GPS failure. The five-second endpoint is advisory because real speed differences
+can produce different end positions. Cancellation disposes the hidden decoder.
+
+GPS checks retain a small same-file, same-session diagnostic timeline locally.
+The clip maps those telemetry intervals using its current manual/candidate offset,
+not the rejected GNSS proposal. GPS disagreement remains visible with a +/-0.5s
+boundary margin. Missing diagnostics, fit-only and untested intervals are not
+passes. Run GPS timing again for files whose older diagnostics were not retained.
+
+Acceptance: replay the private one-anchor/two-candidate flow, confirm only the
+start, check five-second stopping, unchanged global anchors, local restoration,
+ambiguous image results, GPS warning overlap, bilingual/mobile layout, and no
+video/feedback uploads. Real video, screenshots and audit output stay in ignored
+`tmp/`; only reusable scripts and mock tests are committed.
+
 ## Production API routing
 
 The primary public deployment uses a Vercel external rewrite directly to the

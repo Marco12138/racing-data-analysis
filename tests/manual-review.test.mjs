@@ -12,7 +12,8 @@ const dir = mkdtempSync(`${root}/tmp/manual-review-test-`);
 execFileSync(`${root}/node_modules/.bin/esbuild`, [`${root}/tests/fixtures/manual-review-entry.tsx`, "--bundle", "--format=esm", "--platform=node", "--jsx=automatic",
   "--external:react", "--external:react-dom", "--external:lucide-react", `--outfile=${dir}/entry.mjs`], { stdio: "pipe" });
 const { ManualReviewTest, validateManualReview, restoreManualReview, reviewDistanceAtTime, manualReviewWindow, selectCoachReviews,
-  inferReviewCandidate, candidateLandmarkCheck, searchLandmarkVideo } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
+  inferReviewCandidate, candidateLandmarkCheck, searchLandmarkVideo, sharedReviewStart, manualStartBounds, reviewWindowAtOffset,
+  reviewGpsEvidence, parseReviewGpsEvidence, reviewGpsOverlaps, rankBoundaryFrames } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
 after(() => rmSync(dir, { recursive: true, force: true }));
 const trace = Array.from({ length: 101 }, (_, i) => ({ distance_m: i, session_time_s: 100 + i / 5, lap_time_s: i / 5, speed: 60, rpm: 9000 }));
 const video = { duration_s: 30, size_bytes: 200, last_modified_ms: 1000, mime_type: "video/mp4" };
@@ -177,4 +178,61 @@ test("a target's own confirmed anchor takes priority over a cross-lap prediction
   assert.doesNotMatch(html, /data-testid="review-timing-candidate"/);
   assert.equal(states.find(s => s.side === "target").syncConfirmed, true);
   assert.ok(Math.abs(states.find(s => s.side === "target").clip.focus_s - 175.25) < 1e-9);
+});
+
+test("short clips use one real-lap spatial start and exactly five seconds on both sides", () => {
+  const start = sharedReviewStart({ reference: trace, focus: 50 });
+  assert.equal(start, 40);
+  const slower = trace.map(p => ({ ...p, session_time_s: 150 + p.distance_m / 4 }));
+  const a = reviewWindowAtOffset(trace, 50, 0, 500, undefined, start);
+  const b = reviewWindowAtOffset(slower, 50, 0, 500, undefined, start);
+  assert.equal(a.start_s, 108); assert.equal(b.start_s, 160);
+  assert.equal(a.end_s - a.start_s, 5); assert.equal(b.end_s - b.start_s, 5);
+  assert.equal(reviewDistanceAtTime(trace, a.start_s), reviewDistanceAtTime(slower, b.start_s));
+  assert.deepEqual(manualStartBounds(159.55), [159.05, 160.05]);
+});
+
+test("five-second clips never shrink, cross a gap or move their requested start", () => {
+  assert.equal(reviewWindowAtOffset(trace, 95, 0, 500, undefined, 90), null);
+  assert.equal(reviewWindowAtOffset(trace, 50, 0, 110, undefined, 40), null);
+  const gap = structuredClone(trace); gap[50].session_time_s = null;
+  assert.equal(reviewWindowAtOffset(gap, 55, 0, 500, undefined, 40), null);
+  gap[50] = trace[50]; gap[5].session_time_s = null;
+  assert.ok(reviewWindowAtOffset(gap, 55, 0, 500, undefined, 40), "irrelevant earlier gaps do not erase a later clip");
+  assert.equal(reviewWindowAtOffset(trace, 50, 0, 500, undefined, NaN), null);
+});
+
+test("manual start metadata round-trips without rewriting the source anchor or widening its gates", () => {
+  const before = JSON.stringify(source);
+  const marked = { ...clip, end_s: 10, start_confirmation: { method: "manual_start_plus_five_v1", uncertainty_s: .5,
+    distance_m: 25, proposed_start_s: 5.2, source_anchor: source } };
+  assert.equal(validateManualReview(marked, trace, 2, video), null);
+  assert.deepEqual(restoreManualReview(JSON.stringify([marked]), trace, 2, video), marked);
+  assert.equal(JSON.stringify(source), before);
+  assert.equal(validateManualReview({ ...marked, end_s: 11 }, trace, 2, video), "invalid_window");
+  assert.equal(validateManualReview({ ...marked, start_confirmation: { ...marked.start_confirmation, uncertainty_s: 2 } }, trace, 2, video), "invalid_window");
+  assert.ok(restoreManualReview(JSON.stringify([clip]), trace, 2, video), "legacy manual ranges are retained");
+});
+
+test("GPS warnings follow manual offset, retain failures and reject another video", () => {
+  const check = { segments: [{ session_range_s: [223.537, 241.337], video_range_s: [247.336, 265.136], status: "gps_inconsistent" }] };
+  const stored = reviewGpsEvidence(longVideo, check);
+  assert.equal(stored.offset_ms, undefined);
+  const parsed = parseReviewGpsEvidence(JSON.stringify(stored), longVideo);
+  const overlaps = reviewGpsOverlaps(parsed, 258.313, 263.313, 23.464);
+  assert.equal(overlaps.length, 1);
+  assert.equal(overlaps[0].status, "gps_inconsistent");
+  assert.ok(Math.abs(overlaps[0].video_range_s[0] - 247.001) < 1e-9);
+  assert.equal(reviewGpsOverlaps(parsed, 200, 205, 23.464).length, 0);
+  assert.equal(parseReviewGpsEvidence(JSON.stringify(stored), { ...longVideo, size_bytes: 201 }), null);
+  assert.equal(parseReviewGpsEvidence('{"version":1}', longVideo), null);
+});
+
+test("flat or repeatedly similar backgrounds cannot confirm synchronization", () => {
+  const width = 96, height = 60;
+  const flat = { width, height, rgba: new Uint8ClampedArray(width * height * 4).fill(100), time: 5 };
+  assert.equal(rankBoundaryFrames(flat, [flat], 5).status, "weak");
+  const textured = { ...flat, rgba: Uint8ClampedArray.from({ length: width * height * 4 }, (_, i) => i * 79 % 256) };
+  const result = rankBoundaryFrames(textured, [{ ...textured, time: 3 }, { ...textured, time: 5 }, { ...textured, time: 7 }], 5);
+  assert.equal(result.status, "ambiguous"); assert.equal(result.sync_confirmed, false); assert.equal(result.time, null);
 });

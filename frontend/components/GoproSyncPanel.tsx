@@ -11,6 +11,8 @@ import type { SyncReviewPoint, SyncReviewVerdict } from "./RpmSyncReview";
 import { GoproGpsOverlay } from "./GoproGpsOverlay";
 import { GoproSensorResearch } from "./GoproSensorResearch";
 import { GnssSegmentReview } from "./GnssSegmentReview";
+import { reviewVideoIdentity } from "../lib/manualReview";
+import { reviewGpsKey, reviewGpsEvidence, REVIEW_GPS_EVENT } from "../lib/reviewGpsEvidence";
 
 const REASONS: Record<string, [string, string]> = {
   AIM_TIME_VALIDITY_UNEXPOSED: ["AiM 时间有效性标志未由解析器提供", "AiM time-validity flags are not exposed by the parser"],
@@ -158,8 +160,9 @@ function GnssWindowReview({ diagnostic: d }: { diagnostic: GnssWindowDiagnostic 
 }
 
 /** Key this component by inspection, video fingerprint and target lap. */
-export function GoproSyncPanel({ file, duration, inspectionId, points, disabled, onPreview, onDecision }: {
+export function GoproSyncPanel({ file, duration, inspectionId, fingerprint, points, disabled, onPreview, onDecision }: {
   file: File; duration: number; inspectionId: string; points: TelemetrySyncPoint[]; disabled: boolean;
+  fingerprint?: string;
   onPreview: (point: SyncReviewPoint) => void;
   onDecision: (result: VideoSyncGnssResult, verdict: SyncReviewVerdict, point?: SyncReviewPoint) => boolean;
 }) {
@@ -185,6 +188,12 @@ export function GoproSyncPanel({ file, duration, inspectionId, points, disabled,
       const next = await autoSyncVideoGnss({ inspection_id: inspectionId, video_clock: data.video_clock, video_gps: data.video_gps }, controller.signal);
       controller.signal.throwIfAborted();
       setResult(next);
+      if (fingerprint && next.evidence.segmented_check) {
+        try {
+          localStorage.setItem(reviewGpsKey(fingerprint), JSON.stringify(reviewGpsEvidence(reviewVideoIdentity(file, duration), next.evidence.segmented_check)));
+          window.dispatchEvent(new Event(REVIEW_GPS_EVENT));
+        } catch { /* Optional local diagnostics never change synchronization. */ }
+      }
     } catch (cause) {
       if (!controller.signal.aborted) {
         const code = cause instanceof Error ? cause.message : "GPMF_PARSE_FAILED";

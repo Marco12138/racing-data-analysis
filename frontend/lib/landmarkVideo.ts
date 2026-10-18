@@ -14,7 +14,7 @@ export function captureLandmarkFrame(video: HTMLVideoElement): LandmarkFrame {
 
 async function seekFrame(video: HTMLVideoElement, time: number, signal: AbortSignal): Promise<void> {
   signal.throwIfAborted();
-  if (Math.abs(video.currentTime - time) < .005 && video.readyState >= 2) return;
+  if (!video.seeking && Math.abs(video.currentTime - time) < .005 && video.readyState >= 2) return;
   await new Promise<void>((resolve, reject) => {
     const done = () => { cleanup(); resolve(); }, fail = () => { cleanup(); reject(Error("frame_unavailable")); };
     const timer = setTimeout(fail, 5000);
@@ -23,6 +23,28 @@ async function seekFrame(video: HTMLVideoElement, time: number, signal: AbortSig
     video.currentTime = time;
   });
   signal.throwIfAborted();
+}
+
+/** Small local-only frame batch for explicit boundary review. The visible player is untouched. */
+export async function readLandmarkFrames(url: string, times: number[], signal: AbortSignal): Promise<LandmarkFrame[]> {
+  signal.throwIfAborted();
+  if (!url.startsWith("blob:") || !times.length || times.length > 32 || !times.every(t => Number.isFinite(t) && t >= 0))
+    throw Error("invalid_local_search");
+  const probe = document.createElement("video"); probe.muted = true; probe.preload = "auto";
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(failed, 10000);
+      function cleanup() { clearTimeout(timer); probe.removeEventListener("loadeddata", loaded); probe.removeEventListener("error", failed); signal.removeEventListener("abort", failed); }
+      function loaded() { cleanup(); resolve(); }
+      function failed() { cleanup(); reject(Error("frame_unavailable")); }
+      probe.addEventListener("loadeddata", loaded, { once: true }); probe.addEventListener("error", failed, { once: true }); signal.addEventListener("abort", failed, { once: true });
+      probe.src = url;
+    });
+    if (times.some(t => t >= probe.duration)) throw Error("outside_video");
+    const frames: LandmarkFrame[] = [];
+    for (const time of times) { await seekFrame(probe, time, signal); frames.push(captureLandmarkFrame(probe)); await new Promise(resolve => setTimeout(resolve, 0)); }
+    return frames;
+  } finally { probe.pause(); probe.removeAttribute("src"); probe.load(); }
 }
 
 /** Decode at most 25 local frames, without seeking the user's visible player or uploading pixels. */

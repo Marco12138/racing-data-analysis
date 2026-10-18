@@ -115,16 +115,16 @@ export function selectCoachReviews(analysis: XrkAnalysis, referenceOverride: num
 /** Require a matching manually calibrated lap/video; never borrow the other lap's offset. */
 export function calibratedReviewWindow(trace: ReviewPoint[], lap: number, focus: number,
   calibration: VideoSyncCalibration | null, file: Pick<File, "size" | "lastModified" | "type"> | null,
-  duration: number, context?: { entry: number; exit: number }): ReviewWindow | null {
+  duration: number, context?: { entry: number; exit: number }, startDistance?: number): ReviewWindow | null {
   if (!calibration || !file || calibration.target_lap !== lap || duration < 3
     || calibration.video.size_bytes !== file.size || calibration.video.last_modified_ms !== file.lastModified
     || Math.abs(calibration.video.duration_s - duration) > .1) return null;
-  return reviewWindowAtOffset(trace, focus, calibration.offset_ms / 1000, duration, context);
+  return reviewWindowAtOffset(trace, focus, calibration.offset_ms / 1000, duration, context, startDistance);
 }
 
 /** Locate a bounded preview; an offset alone does not establish confirmed synchronization. */
 export function reviewWindowAtOffset(trace: ReviewPoint[], focus: number, offset: number,
-  duration: number, context?: { entry: number; exit: number }): ReviewWindow | null {
+  duration: number, context?: { entry: number; exit: number }, startDistance?: number): ReviewWindow | null {
   if (!Number.isFinite(offset) || !Number.isFinite(duration) || duration < 3) return null;
   const at = reviewValue(trace, focus, "session_time_s");
   const timed = trace.filter(p => p.session_time_s !== null);
@@ -135,6 +135,23 @@ export function reviewWindowAtOffset(trace: ReviewPoint[], focus: number, offset
   if (focusTime < lower || focusTime > upper || upper - lower < 3) return null;
   let start = Math.max(lower, Math.min(focusTime - 2, upper - 4));
   let end = Math.min(upper, start + 4);
+  if (startDistance !== undefined && !context) {
+    const time = reviewValue(trace, startDistance, "session_time_s");
+    if (time === null || !Number.isFinite(startDistance)) return null;
+    start = time + offset; end = start + 5;
+    if (start < lower || end > upper) return null;
+    const endIndex = trace.findIndex(p => p.session_time_s !== null && p.session_time_s >= time + 5);
+    if (endIndex < 0) return null;
+    // Do not hide a gap by shortening or shifting the requested five seconds.
+    if (trace.slice(0, endIndex + 1).some((p, i) => {
+      const previous = trace[i - 1];
+      if (!previous || p.distance_m <= startDistance || (previous.session_time_s !== null && previous.session_time_s + offset >= end)
+        || (p.session_time_s !== null && p.session_time_s + offset <= start)) return false;
+      return p.session_time_s === null || previous.session_time_s === null
+        || p.distance_m <= previous.distance_m || p.distance_m - previous.distance_m > 10
+        || p.session_time_s <= previous.session_time_s || p.session_time_s - previous.session_time_s > 1;
+    })) return null;
+  }
   if (context) {
     const a = reviewValue(trace, context.entry, "session_time_s"), b = reviewValue(trace, context.exit, "session_time_s");
     if (a === null || b === null || a + offset < lower || b + offset > upper || b - a > 120) return null;
