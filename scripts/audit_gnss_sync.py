@@ -91,6 +91,17 @@ def main() -> int:
              f"- Lap coverage: {json.dumps(evidence['lap_coverage'])}",
              f"- Warnings: {', '.join(evidence['reason_codes'])}",
              "- No inferred body axes, frame-accuracy guarantee, or automatic calibration overwrite."]
+    segmented = evidence["segmented_check"]
+    lines.extend(["", "## Segmented GPS speed consistency",
+        f"- Counts: {json.dumps(segmented['counts'])}",
+        f"- Evaluation offset: {segmented['evaluation_offset_s']:.3f} s (not applied)",
+        "- Fitting windows are not held-out passes. Gaps and edges are untested.",
+        "- No claim of whole-recording, frame-level or manual-anchor validation.", "",
+        "| Session range (s) | Candidate video (s) | Laps | Role | Status | Spread (s) | Reasons |",
+        "| --- | --- | --- | --- | --- | --- | --- |"])
+    for row in segmented["segments"]:
+        lines.append(f"| {row['session_range_s']} | {row['video_range_s']} | {row['laps']} | {row['role']} | "
+                     f"{row['status']} | {row.get('offset_spread_s')} | {', '.join(row['reason_codes'])} |")
     if "native_packet_comparison" in result:
         comparison = result["native_packet_comparison"]
         lines.extend(["", "## Original GPS5 packet comparison",

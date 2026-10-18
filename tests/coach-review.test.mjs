@@ -84,6 +84,22 @@ test("video windows require their own lap calibration and matching file identity
   assert.equal(calibratedReviewWindow(trace, 4, 500, calibration, file, 30), null);
 });
 
+test("weak segmented GNSS evidence cannot invalidate manually calibrated Top 3 video review", () => {
+  const analysis=fixture();
+  analysis.top_lap_segments={segments:[{id:"sector_1",number:1,status:"calculated",entry_m:20,exit_m:60,
+    comparisons:[{reference_lap:2,target_lap:1,local_gain_s:.4,next_sector_delta_s:null,net_gain_through_next_s:null}]}]};
+  const review=selectSegmentReview(analysis,"sector_1",1);
+  const manual={...calibration,target_lap:1,offset_ms:-100000};
+  const before=calibratedReviewWindow(review.target,1,50,manual,file,30);
+  assert.ok(before);
+  const saved=structuredClone(manual);
+  analysis.video_sync={status:"weak",evidence:{segmented_check:{whole_recording_verified:false,
+    counts:{gps_inconsistent:1,passed:3},manual_anchor_policy:"never_overwrite"}}};
+  const after=selectSegmentReview(analysis,"sector_1",1);
+  assert.deepEqual(calibratedReviewWindow(after.target,1,50,manual,file,30),before);
+  assert.deepEqual(manual,saved);
+});
+
 test("longer context is derived from real boundary times, not a fixed duration", () => {
   assert.deepEqual(calibratedReviewWindow(fixture().track.target, 4, 50, calibration, file, 30, { entry: 20, exit: 90 }),
     { start_s: 5, end_s: 22.5, focus_s: 12.5 });

@@ -232,6 +232,10 @@ def test_api_reads_token_cache_not_filesystem_or_client_aim_data(monkeypatch, tm
         assert response.status_code == 200, response.text
         assert response.json()["request_id"]
         assert response.json()["offset_ms"] == pytest.approx(23700, abs=50)
+        segmented = response.json()["evidence"]["segmented_check"]
+        assert segmented["counts"]["passed"] > 0
+        assert segmented["whole_recording_verified"] is False
+        assert segmented["manual_anchor_policy"] == "never_overwrite"
         assert client.post("/api/v1/xrk/video-sync/gnss", json={**payload, "video_path": "/private/test"}).status_code == 422
         assert client.post("/api/v1/xrk/video-sync/gnss", json={**payload, "video_clock": clock*30}).status_code == 422
         broken = {**payload, "video_clock": [{**clock[0], "time_s": -1}, *clock[1:]]}

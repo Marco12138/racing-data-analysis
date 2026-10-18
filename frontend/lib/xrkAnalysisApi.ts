@@ -859,9 +859,27 @@ export type VideoSyncGnssResult = {
       estimator_spread_s: number; estimators: Array<{ method: string; offset_s: number }> };
     spatial_check: { median_error_m?: number; p95_error_m?: number };
     geometry_check?: GnssGeometryCheck;
+    segmented_check?: GnssSegmentedCheck;
     reason_codes: string[];
   };
 };
+
+export type GnssSegmentedCheck = {
+  version: "gnss-segments-v1"; scope: "gps_speed_consistency_only";
+  evaluation_offset_s: number; offset_applied: false;
+  residual_limit_s: number; correlation_minimum: number;
+  whole_recording_verified: false; manual_anchor_policy: "never_overwrite";
+  counts: Record<GnssSegmentStatus, number>;
+  segments: Array<{
+    session_range_s: [number, number]; video_range_s: [number, number]; laps: number[];
+    role: "fit" | "validation" | "none"; status: GnssSegmentStatus; reason_codes: string[];
+    sample_count?: number; query_sample_count?: number;
+    correlation_at_fit_offset?: number | null; offset_spread_s?: number | null;
+    local_best_offset_s?: number | null; local_best_correlation?: number | null;
+    diagnostic?: GnssWindowDiagnostic;
+  }>;
+};
+export type GnssSegmentStatus = "passed" | "gps_inconsistent" | "fit_only" | "insufficient" | "untested";
 
 export type GnssWindowDiagnostic = {
   session_range_s: [number, number]; video_range_s: [number, number];

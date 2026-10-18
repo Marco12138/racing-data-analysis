@@ -100,3 +100,30 @@ test("failed speed match shows evidence without calling it a measured video dela
     assert.match(html,/<button[^>]+disabled=""/);
   }
 });
+
+test("segment review distinguishes held-out passes, fitting, failures and missing evidence bilingually", () => {
+  const states=["passed","gps_inconsistent","fit_only","insufficient","untested"];
+  const check={evaluation_offset_s:23.799,residual_limit_s:.25,correlation_minimum:.8,
+    counts:Object.fromEntries(states.map(s=>[s,1])),segments:states.map((status,i)=>({
+      status,role:status==="fit_only"?"fit":status==="untested"?"none":"validation",
+      session_range_s:[i*20,i*20+18],video_range_s:[i*20+23.799,i*20+41.799],laps:[5],
+      reason_codes:status==="gps_inconsistent"?["OFFSET_SPREAD_EXCEEDS_LIMIT"]:[],
+      sample_count:90,query_sample_count:90,offset_spread_s:status==="gps_inconsistent"?.35:0,
+      correlation_at_fit_offset:.91,
+    }))};
+  for(const locale of ["zh","en"]) {
+    let writes=0;
+    const html=renderToStaticMarkup(createElement(GnssSyncTest,{locale,
+      result:{...result,evidence:{...result.evidence,segmented_check:check}},points:[],
+      onPreview(){writes++;},onDecision(){writes++;return true;}}));
+    assert.equal(writes,0);
+    assert.match(html,/gnss-segments/);
+    assert.ok(html.includes(locale==="zh"?"分段通过不代表整段通过":"does not verify the full recording"));
+    assert.ok(html.includes(locale==="zh"?"用于拟合，非独立验证":"Fit only, not held out"));
+    assert.ok(html.includes(locale==="zh"?"已人工确认的圈仍可":"Manually confirmed laps remain available"));
+    assert.ok(html.includes(locale==="zh"?"证据不足":"Insufficient evidence"));
+    assert.ok(html.includes(locale==="zh"?"未检查":"Not checked"));
+    assert.ok(html.includes("0.250")&&html.includes("0.350"));
+    assert.doesNotMatch(html,/100%|同步准确率/);
+  }
+});

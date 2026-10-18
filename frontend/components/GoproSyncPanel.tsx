@@ -10,6 +10,7 @@ import { rpmReviewPoints, type TelemetrySyncPoint } from "../lib/videoTelemetryS
 import type { SyncReviewPoint, SyncReviewVerdict } from "./RpmSyncReview";
 import { GoproGpsOverlay } from "./GoproGpsOverlay";
 import { GoproSensorResearch } from "./GoproSensorResearch";
+import { GnssSegmentReview } from "./GnssSegmentReview";
 
 const REASONS: Record<string, [string, string]> = {
   AIM_TIME_VALIDITY_UNEXPOSED: ["AiM 时间有效性标志未由解析器提供", "AiM time-validity flags are not exposed by the parser"],
@@ -85,7 +86,8 @@ export function GnssSyncReview({ result, points, playbackUnavailable = false, on
         ? "这些方法共享 GNSS 数据，不是独立的帧级真值，也不是同步准确率。自动结果不会覆盖人工锚点；保留已核对的圈号与起终点，逐段看画面确认。"
         : "These methods share GNSS data, not independent frame-level truth or an accuracy percentage. Automatic results do not overwrite manual anchors. Retain checked lap/start/end anchors and verify the footage."}</p>
     </details>}
-    {e.speed_check.window_diagnostic && <GnssWindowReview diagnostic={e.speed_check.window_diagnostic} />}
+    {e.segmented_check ? <GnssSegmentReview check={e.segmented_check} renderDiagnostic={d => <GnssWindowReview diagnostic={d} />} />
+      : e.speed_check.window_diagnostic && <GnssWindowReview diagnostic={e.speed_check.window_diagnostic} />}
     {e.geometry_check && <GoproGpsOverlay check={e.geometry_check} />}
     <p className="mt-3 text-xs">{zh ? "覆盖整圈（待核对）" : "Full laps (unverified)"}: {e.lap_coverage.filter((p) => p.coverage === "full").map((p) => `L${p.lap}`).join(", ") || "—"}</p>
     <p className="mt-1 text-xs">{zh ? "视频重叠范围" : "Video overlap"}: {e.matched_video_range_s.map((v) => v.toFixed(2)).join(" - ")} s</p>

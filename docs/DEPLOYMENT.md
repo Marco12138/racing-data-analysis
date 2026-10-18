@@ -481,6 +481,17 @@ prove frame accuracy. No failed window is dropped and no threshold, selected
 offset or manual-anchor policy changes. See [GNSS_WINDOW_AUDIT.md](GNSS_WINDOW_AUDIT.md)
 for private original-packet acceptance. Deploy the additive backend first.
 
+`evidence.segmented_check` adds a read-only per-window timeline. Only held-out
+speed windows can be labelled `passed`; fitting windows remain `fit_only`.
+`gps_inconsistent` means signal disagreement, not a proven receiver fault or
+measured video delay. Missing samples/variation are `insufficient`; unsampled
+edges and inter-window gaps are `untested`. The existing 0.25s/0.8 limits and
+whole-candidate gate remain unchanged. Additional fixed-offset/gap diagnostics
+never promote a result or alter calibration. `whole_recording_verified` is
+always false. Manual per-lap anchors continue to drive real Top 3 video review.
+The private audit script includes this timeline; compare the previous response
+after removing only `segmented_check` to verify legacy candidate compatibility.
+
 ## Production API routing
 
 The primary public deployment uses a Vercel external rewrite directly to the

@@ -11,6 +11,7 @@ import pandas as pd
 from .rpm_sync_verification import _sample
 from .gnss_spatial import verify_spatial_alignment
 from .gnss_diagnostics import diagnose_speed_window
+from .gnss_segments import segment_speed_checks
 from ..importers.xrk_inspection import convert_units
 
 GPS_EPOCH = datetime(1980, 1, 6, tzinfo=UTC).timestamp()
@@ -173,11 +174,14 @@ def verify_gnss_alignment(video_clock: list[dict], video_gps: list[dict], refere
     offset = clock_offset
     windows, speed_check, spatial = [], {}, {}
     window_queries = []
+    attempts = []
+    speed_series = None
     gps = pd.DataFrame(video_gps)
     if not gps.empty and "speed" in reference["series"]:
         gt, gs = _ordered(gps.time_s.to_numpy(), gps.speed_kmh.to_numpy())
         gs = np.where(gps.fix.to_numpy()[np.r_[True, np.diff(gps.time_s) > 0]] >= 3, gs, np.nan)
         st, ss = _fixed_series(reference, "speed")
+        speed_series = ((st, ss), (gt, gs))
         start, end = max(st[0], gt[0]-offset), min(st[-1], gt[-1]-offset)
         for index, a in enumerate(np.arange(start+2, end-17, 20)):
             q = np.arange(a, min(a+18, end-2), .2)
@@ -185,12 +189,15 @@ def verify_gnss_alignment(video_clock: list[dict], video_gps: list[dict], refere
             candidates = [(float(o), _correlation(speed, _sample(gt, gs, q+o)))
                           for o in np.arange(clock_offset-2, clock_offset+2.001, .05)]
             candidates = [(o, r) for o, r in candidates if r is not None]
+            attempt = {"query": q, "match": None, "role": "fit" if index % 2 == 0 else "validation"}
             if candidates:
                 o, r = max(candidates, key=lambda item: item[1])
                 windows.append({"session_center_s": round(float(np.mean(q)), 3),
                                 "offset_s": round(o, 3), "correlation": round(r, 4),
                                 "role": "fit" if index % 2 == 0 else "validation"})
                 window_queries.append(q)
+                attempt["match"] = windows[-1]
+            attempts.append(attempt)
         fit = [w for w in windows if w["role"] == "fit" and w["correlation"] >= .8]
         held = [w for w in windows if w["role"] == "validation"]
         if len(fit) >= 2 and len(held) >= 2:
@@ -269,6 +276,15 @@ def verify_gnss_alignment(video_clock: list[dict], video_gps: list[dict], refere
         estimators.append({"method": "speed_windows", "offset_s": speed_check["proposed_offset_s"]})
     if "proposed_offset_s" in geometry:
         estimators.append({"method": "gps_geometry", "offset_s": geometry["proposed_offset_s"]})
+    # Additive evidence only: no failed windows are removed from the legacy gate.
+    positions = {key: _fixed_series(reference, key) for key in ("gps_lat", "gps_lon")
+                 if key in reference["series"]}
+    vg = gps.drop_duplicates("time_s") if not gps.empty else gps
+    camera_positions = {key: np.where(vg.fix.to_numpy() >= 3, vg[key], np.nan)
+                        for key in ("lat", "lon") if key in vg}
+    segmented = segment_speed_checks(attempts, *(speed_series or (None, None)),
+        speed_check.get("proposed_offset_s"), clock_offset, (start, end),
+        reference.get("lap_timing", []), video_clock, positions, camera_positions)
     return {"method": "gpmf_gnss_v1", "offset_ms": round(offset*1000),
             "status": "candidate" if candidate else "weak", "requires_manual_confirmation": True,
             "manually_confirmed": False, "body_dynamics_available": False,
@@ -280,6 +296,7 @@ def verify_gnss_alignment(video_clock: list[dict], video_gps: list[dict], refere
                          "matched_video_range_s": [round(start+offset, 3), round(end+offset, 3)],
                          "matched_telemetry_range_s": [round(start, 3), round(end, 3)],
                          "lap_coverage": coverage, "speed_check": speed_check, "windows": windows,
+                         "segmented_check": segmented,
                          "offset_diagnostics": {
                              "version": "gnss-offset-audit-v1", "estimators": estimators,
                              "selected_method": "speed_windows" if speed_check.get("passed") else "clock_sample_median",
