@@ -6,8 +6,9 @@
 2. Open AI Coach Summary. The segment summary lists each real Top 3 lap's split,
    the shortest split (including ties), and pairwise gains through the next sector.
 3. Choose a real pair with **Review Lx / Ly**. Use the four-second preview or
-   the full sector and next-sector context. Each side requires its own confirmed
-   lap/video mapping; otherwise use Add / Adjust clip to save an unlinked preview.
+   the full sector and next-sector context. A side with its own confirmed mapping
+   uses it first. Otherwise a confirmed anchor in the **same session and file**
+   can propose a preview using the logger's actual session timestamps.
 4. Confirm the lap and a visible timing anchor before accepting telemetry-linked
    playback. A manual crop alone does not establish synchronization.
 5. Use a fixed trackside landmark to explain the location in ordinary language.
@@ -17,6 +18,34 @@ GPS distance and confirmed timing determine location. Landmarks explain it.
 Two videos play at their original rates, not with DTW or time stretching.
 The four-second preview is centered near the selected lap's minimum speed within
 the sector; it does not establish that this is where the time loss originated.
+
+## Timing Candidates From One Anchor
+
+`video_time = confirmed_anchor.video_time + (target.session_time - anchor.session_time)`.
+This uses real elapsed time, including unequal lap durations and nonconsecutive
+lap numbers, not a repeated fastest-lap duration. Logger lap boundaries establish
+the lap identity; continuous GPS/distance timestamps locate the review position.
+The displayed start-to-start difference is calculated from the logger boundaries.
+
+- Candidates remain **unconfirmed**, even when another method reports weak GPS.
+  They do not change GNSS thresholds or overwrite manual calibration/crops.
+- The continuous-recording assumption is explicit. Edited, paused or concatenated
+  videos need new manual anchors. No clock drift or time stretching is inferred.
+- No proposal crosses video bounds, missing timing, a >10m distance gap or a >1s
+  time gap. Anchors disagreeing by >0.25s stop cross-lap proposals, not average them.
+- Only existing confirmed anchors are sources; proposals never become a chain of
+  new anchors. Session history is scoped by the inspection's file fingerprint.
+- Preview votes remain disabled until explicit per-clip human confirmation.
+  The candidate anchor is prefilled in Add / Adjust but its checkbox is unchecked.
+  Confirming a crop saves only that crop, not a global offset for another lap.
+- If a learned, confirmed passing landmark exists at this clip's position in the
+  source lap, search at most 25 local frames within +/-2s of its predicted time
+  (clipped to the preview). The existing 0.72 similarity and 0.06 ambiguity limits
+  are unchanged. A similar frame is not position truth or measured synchronization
+  error; it never moves the anchor. Without a learned landmark, report unavailable
+  visual evidence and retain the timing preview for human review.
+- Videos, frames and landmark thumbnails remain in the browser. No new API or
+  model training is needed. UI tests of confirmation are not independent truth labels.
 
 ## Evidence Contract
 

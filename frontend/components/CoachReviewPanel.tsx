@@ -32,6 +32,7 @@ const COPY = {
     lapChangeError: "切换圈失败，请重试。", changeNote: "切换圈将重新计算对应遥测；原片段修正仍按原圈号保留。",
     reason: "主要问题（选填）", none: "不补充", too_early: "片段偏早", too_late: "片段偏晚", wrong_corner: "不是这个弯", too_short: "片段太短", not_relevant: "与建议无关", sync_uncertain: "同步不确定",
     submit: "提交反馈", saving: "正在保存", saved: "反馈已保存，感谢核对。", failed: "反馈未保存，请重试。", watch: "播放片段后即可评价。",
+    confirmCandidate: "请先核对或微调推算片段，再评价精准度。",
     privacy: "只保存选择、圈号及片段时间，不上传视频。反馈用于后续评估，不自动训练模型或确认驾驶行为。",
     play: "播放", pause: "暂停", replay: "重播", loop: "循环", speed: "播放速度", details: "遥测证据", unavailable: "暂无可用数据",
     videoError: "浏览器无法播放此视频。请尝试兼容浏览器或 H.264 视频。", scope: "当前选择", partial: "没有该圈已确认的视频，保留遥测对照。",
@@ -53,6 +54,7 @@ const COPY = {
     lapChangeError: "Could not change laps. Please retry.", changeNote: "Changing laps reloads their telemetry; saved corrections remain bound to their original lap.",
     reason: "Main issue (optional)", none: "No additional reason", too_early: "Too early", too_late: "Too late", wrong_corner: "Wrong corner", too_short: "Too short", not_relevant: "Unrelated to advice", sync_uncertain: "Sync uncertain",
     submit: "Submit feedback", saving: "Saving", saved: "Feedback saved. Thank you for checking.", failed: "Feedback was not saved. Please retry.", watch: "Play the clip before rating it.",
+    confirmCandidate: "Review or adjust the timing candidate before rating its accuracy.",
     privacy: "Only the choice, lap numbers and clip times are stored. Video is not uploaded. Feedback is for later evaluation, not automatic training or driving confirmation.",
     play: "Play", pause: "Pause", replay: "Replay", loop: "Loop", speed: "Playback speed", details: "Telemetry evidence", unavailable: "Not available",
     videoError: "This browser could not play the video. Try a compatible browser or H.264 video.", scope: "Current selection", partial: "No confirmed video for this lap; telemetry comparison remains available.",
@@ -90,7 +92,7 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
     finally { setChanging(false); }
   }
   const historyKey = `racing-review-calibrations:${analysis.file_fingerprint}`;
-  const [history, setHistory] = useState<Record<string, VideoSyncCalibration>>({});
+  const [history, setHistory] = useState<{ key: string; mappings: Record<string, VideoSyncCalibration> }>({ key: "", mappings: {} });
   useEffect(() => {
     try {
       const value = JSON.parse(localStorage.getItem(historyKey) ?? "{}");
@@ -99,11 +101,13 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
           const parsed = parseVideoSyncCalibration(JSON.stringify(raw));
           return parsed && String(parsed.target_lap) === lap ? [[lap, parsed]] : [];
         }));
-        queueMicrotask(() => setHistory(valid));
+        queueMicrotask(() => setHistory({ key: historyKey, mappings: valid }));
       }
     } catch { /* Storage is optional. */ }
   }, [historyKey, calibration?.calibrated_at]);
-  const mappings: Record<string, VideoSyncCalibration> = { ...history, ...(calibration ? { [calibration.target_lap]: calibration } : {}) };
+  const mappings: Record<string, VideoSyncCalibration> = useMemo(() => ({ ...(history.key === historyKey ? history.mappings : {}),
+    ...(calibration ? { [calibration.target_lap]: calibration } : {}) }), [history, historyKey, calibration]);
+  const sessionCalibrations = useMemo(() => Object.values(mappings), [mappings]);
   return <div className="min-w-0 space-y-6" data-testid="coach-review-panel">
     <TopLapSegments analysis={analysis} selected={segmentReview && segmentChoice ? `${segmentChoice.id}:${segmentChoice.lap}` : null}
       onSelect={(id, lap) => {
@@ -114,6 +118,7 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
       {segmentReview && <ReviewCard key={`${analysis.file_fingerprint}:${segmentReview.id}:${segmentReview.targetLap}`}
         review={segmentReview} analysis={analysis} videoUrl={videoUrl} file={videoFile} duration={videoDurationS}
         targetCalibration={mappings[segmentReview.targetLap] ?? null} referenceCalibration={mappings[segmentReview.referenceLap] ?? null}
+        sessionCalibrations={sessionCalibrations}
         onCursor={onCursor} c={c} readOnly={readOnly} />}
       {segmentChoice?.fingerprint === analysis.file_fingerprint && !segmentReview && <p className="text-sm text-amber-200">
         {locale === "zh" ? "该段连续 GPS / 计时覆盖不足，不能自动定位视频；分段用时仍保留。" : "Continuous GPS/timing coverage is insufficient to locate this clip; split times remain available."}
@@ -140,6 +145,7 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
     {reviews.map(review => <ReviewCard key={`${analysis.file_fingerprint}:${review.id}`}
       review={review} analysis={analysis} videoUrl={videoUrl} file={videoFile} duration={videoDurationS}
       targetCalibration={mappings[review.targetLap] ?? null} referenceCalibration={mappings[review.referenceLap] ?? null}
+      sessionCalibrations={sessionCalibrations}
       onCursor={onCursor} c={c} readOnly={readOnly} />)}
   </div>;
 }
@@ -176,9 +182,10 @@ function TopThreeCharts({ analysis, c }: { analysis: XrkAnalysis; c: Copy }) {
   </div>;
 }
 
-function ReviewCard({ review, analysis, videoUrl, file, duration, targetCalibration, referenceCalibration, onCursor, c, readOnly }: {
+function ReviewCard({ review, analysis, videoUrl, file, duration, targetCalibration, referenceCalibration, sessionCalibrations, onCursor, c, readOnly }: {
   review: ReviewSelection; analysis: XrkAnalysis; videoUrl: string; file: File | null; duration: number;
   targetCalibration: VideoSyncCalibration | null; referenceCalibration: VideoSyncCalibration | null;
+  sessionCalibrations: VideoSyncCalibration[];
   onCursor: (distance: number) => void; c: Copy;
   readOnly: boolean;
 }) {
@@ -212,6 +219,7 @@ function ReviewCard({ review, analysis, videoUrl, file, duration, targetCalibrat
     </div>
     <ManualReviewVideo review={review} fingerprint={analysis.file_fingerprint} defaultFile={file} defaultUrl={videoUrl}
       defaultDuration={duration} targetCalibration={targetCalibration} referenceCalibration={referenceCalibration} context={context}
+      sessionCalibrations={sessionCalibrations} lapRanges={analysis.video_sync.lap_video_ranges}
       landmarkEvents={landmarkEvents} readOnly={readOnly}
       onCursor={distance => { setCursor(distance); onCursor(distance); }}
       feedback={state => readOnly || !/^[0-9a-f]{32}$/.test(analysis.inspection_id)
@@ -296,7 +304,7 @@ function ClipAccuracyFeedback({ clipId, analysis, review, clip, enabled, c, sour
       </select></label>}
       <button className={`${button} mt-3`} type="submit" disabled={!verdict || status === "saved"}><Send size={14} />{status === "saving" ? c.saving : c.submit}</button>
     </fieldset>
-    <p className={`mt-2 text-xs ${status === "failed" ? "text-red-300" : "text-emerald-300"}`} role="status">{status === "saved" ? c.saved : status === "failed" ? c.failed : !enabled ? c.watch : ""}</p>
+    <p className={`mt-2 text-xs ${status === "failed" ? "text-red-300" : "text-emerald-300"}`} role="status">{status === "saved" ? c.saved : status === "failed" ? c.failed : source === "automatic" && clip && !syncConfirmed ? c.confirmCandidate : !enabled ? c.watch : ""}</p>
     <p className="mt-2 text-[11px] leading-5 text-slate-500">{c.privacy}</p>
   </form>;
 }

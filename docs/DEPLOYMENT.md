@@ -492,6 +492,14 @@ always false. Manual per-lap anchors continue to drive real Top 3 video review.
 The private audit script includes this timeline; compare the previous response
 after removing only `segmented_check` to verify legacy candidate compatibility.
 
+Same-file Top 3 review now supports unconfirmed timing candidates from one existing
+confirmed lap anchor. Use actual session timestamps, not a repeated lap duration;
+never persist a propagated anchor. Learned-landmark checks are browser-local and
+cannot promote synchronization. See TOP3_SEGMENT_REVIEW.md for guards. Acceptance
+must cover one anchored lap with two unanchored real Top 3 laps, manual correction
+priority, disabled candidate voting, and no changes to the saved source anchor.
+This frontend-only change does not require a Railway API deployment.
+
 ## Production API routing
 
 The primary public deployment uses a Vercel external rewrite directly to the

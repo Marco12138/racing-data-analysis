@@ -9,6 +9,8 @@ import { manualReviewWindow, restoreManualReview, reviewDistanceAtTime, reviewVi
   type ManualReviewClip, type ReviewSide } from "../lib/manualReview";
 import type { ClipFeedbackInput } from "../lib/feedbackApi";
 import { TrackLandmarkEditor } from "./TrackLandmarkEditor";
+import { inferReviewCandidate, type LoggerLapRange } from "../lib/reviewCandidate";
+import { ReviewCandidateNotice } from "./ReviewCandidateNotice";
 
 const TEXT = {
   zh: {
@@ -23,7 +25,8 @@ const TEXT = {
     windowError: "请选择视频范围内的有效起点、终点，时长须为 0.1–120 秒。", linkError: "此片段无法完整对应本圈连续遥测，请调整范围或重新核对锚点。",
     anchorMissing: "请先绑定一个可确认的位置，再勾选同步。", localOnly: "视频不上传。时间差来自相同赛道区间的遥测，不是剪辑时长之差。",
     cropNote: "裁剪不会自动完成同步；没有可靠锚点时可以先保存预览。", boundaryNote: "人工片段仅覆盖该弯的一部分；上方时间差仍对应完整公共区间。",
-    scope: "对应遥测圈", history: "已恢复该视频的人工片段", anchorAt: "已绑定", revision: "修正时间", speed: "GPS 速度", rpm: "RPM",
+    scope: "对应遥测圈", history: "已恢复该视频的人工片段", anchorAt: "锚点（需核对）", revision: "修正时间", speed: "GPS 速度", rpm: "RPM",
+    candidate: "计时推算候选", conflict: "已有锚点彼此冲突，暂不跨圈推算。请核对人工标记。",
   },
   en: {
     reference: "Reference fast lap", target: "Selected lap", add: "Add / Adjust clip", choose: "Choose local video", current: "Use loaded video",
@@ -37,7 +40,8 @@ const TEXT = {
     windowError: "Select valid start/end times within the video, spanning 0.1–120 seconds.", linkError: "This clip does not map to continuous telemetry in this lap. Adjust its range or anchor.",
     anchorMissing: "Bind an identifiable location before confirming synchronization.", localOnly: "Video stays local. Deltas use the same track interval, not the difference between crop durations.",
     cropNote: "Cropping does not establish synchronization. Save a preview first if no reliable anchor is available.", boundaryNote: "This manual clip covers only part of the corner; the deltas above still use the complete shared interval.",
-    scope: "Bound telemetry lap", history: "Restored the manual clip for this video", anchorAt: "Anchor", revision: "Revision", speed: "GPS speed", rpm: "RPM",
+    scope: "Bound telemetry lap", history: "Restored the manual clip for this video", anchorAt: "Anchor (check before confirming)", revision: "Revision", speed: "GPS speed", rpm: "RPM",
+    candidate: "Timing-based candidate", conflict: "Existing anchors disagree. Check the manual marks before estimating other laps.",
   },
 };
 const btn = "inline-flex items-center justify-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400 disabled:opacity-40";
@@ -50,6 +54,7 @@ export type ReviewFeedbackState = {
 type Props = {
   review: ReviewSelection; fingerprint: string; defaultFile: File | null; defaultUrl: string; defaultDuration: number;
   targetCalibration: VideoSyncCalibration | null; referenceCalibration: VideoSyncCalibration | null;
+  sessionCalibrations?: VideoSyncCalibration[]; lapRanges?: LoggerLapRange[];
   context: boolean; onCursor: (distance: number) => void; feedback: (state: ReviewFeedbackState) => ReactNode;
   readOnly?: boolean;
   landmarkEvents?: Record<number, { recovery: number | null; rpm_drop: number | null }>;
@@ -73,7 +78,7 @@ export function ManualReviewVideo(props: Props) {
   </div>;
 }
 
-function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, defaultDuration, targetCalibration, referenceCalibration,
+function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, defaultDuration, targetCalibration, referenceCalibration, sessionCalibrations, lapRanges,
   context, onCursor, feedback, side, command, onReady, landmarkEvents, readOnly = false }: Props & { side: ReviewSide; command: PairCommand; onReady: (side: ReviewSide, ready: boolean) => void }) {
   const { locale } = useI18n();
   const c = review.kind === "sector" ? { ...TEXT[locale],
@@ -99,11 +104,14 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
   const [playing, setPlaying] = useState(false), [loop, setLoop] = useState(false), [rate, setRate] = useState(1);
   const [error, setError] = useState(""), [notice, setNotice] = useState("");
   const auto = calibratedReviewWindow(trace, lap, review.focus, calibration, file, duration, context ? { entry: review.entry, exit: review.downstreamEnd } : undefined);
+  const proposal = useMemo(() => inferReviewCandidate(trace, lap, review.focus, sessionCalibrations ?? [], lapRanges ?? [], identity,
+    context ? { entry: review.entry, exit: review.downstreamEnd } : undefined), [trace, lap, review.focus, review.entry, review.downstreamEnd, sessionCalibrations, lapRanges, identity, context]);
+  const candidate = !auto && mode === "automatic" ? proposal.candidate : null;
   const original = calibratedReviewWindow(trace, lap, review.focus, calibration, defaultFile, defaultDuration, context ? { entry: review.entry, exit: review.downstreamEnd } : undefined);
   const validManual = manual && identity && !validateManualReview(manual, trace, lap, identity) ? manual : null;
-  const clip = mode === "manual" ? validManual ? manualReviewWindow(validManual, trace, review.focus) : null : auto;
+  const clip = mode === "manual" ? validManual ? manualReviewWindow(validManual, trace, review.focus) : null : auto ?? candidate?.window ?? null;
   const activeAnchor = mode === "manual" ? validManual?.sync_confirmed ? validManual.calibration : null : auto ? calibration : null;
-  const signature = JSON.stringify(["manual-review-v1", fingerprint, review.id, side, lap, mode, clip, identity, activeAnchor, review.entry, review.exit, review.downstreamEnd, review.referenceLap, review.targetLap]);
+  const signature = JSON.stringify(["manual-review-v1", fingerprint, review.id, side, lap, mode, clip, identity, activeAnchor, review.entry, review.exit, review.downstreamEnd, review.referenceLap, review.targetLap, candidate]);
   const originalSignature = JSON.stringify(["manual-review-v1", fingerprint, review.id, side, lap, "automatic", original,
     defaultFile ? reviewVideoIdentity(defaultFile, defaultDuration) : null, original ? calibration : null, review.entry, review.exit, review.downstreamEnd, review.referenceLap, review.targetLap]);
   const [hash, setHash] = useState<{ signature: string; id: string; originalSignature: string; original: string } | null>(null);
@@ -160,7 +168,12 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
   function openEditor() {
     video.current?.pause(); setError(""); setNotice("");
     setStart(clip?.start_s ?? 0); setEnd(clip?.end_s ?? Math.min(duration || 4, 4));
-    setDraftAnchor(activeAnchor); setConfirmed(Boolean(activeAnchor)); setEditing(true);
+    const proposedAnchor = candidate && file ? createVideoSyncCalibration({ videoTimeS: candidate.window.focus_s,
+      telemetryPoint: { distance_m: review.focus, session_time_s: candidate.focus_session_s }, targetLap: lap,
+      videoDurationS: duration, fileSizeBytes: file.size, fileLastModifiedMs: file.lastModified, fileMimeType: file.type }) : null;
+    setAnchorDistance(proposedAnchor ? review.focus : activeAnchor?.telemetry_distance_m ?? review.focus);
+    setDraftAnchor(activeAnchor ?? proposedAnchor); setConfirmed(Boolean(activeAnchor)); setEditing(true);
+    if (proposedAnchor) seek(proposedAnchor.video_time_s);
   }
   function loadFile(next: File) {
     video.current?.pause(); setOwnFile(next); setOwnDuration(0); setManual(null); setMode("automatic");
@@ -213,6 +226,10 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
       <button className={btn} onClick={openEditor}><Scissors size={15} />{c.add}</button>
     </div>
     <p className="mb-2 text-xs text-slate-400">{c.scope}: L{lap}</p>
+    {candidate && !editing && <ReviewCandidateNotice key={`candidate:${signature}`} candidate={candidate} trace={trace}
+      scope={`${fingerprint}:${review.entry}:${review.exit}`} cornerId={review.id} videoKey={JSON.stringify(identity)} videoUrl={url}
+      onReview={openEditor} onSeek={time => { video.current?.pause(); seek(time); }} />}
+    {!clip && proposal.reason === "anchors_disagree" && <p className="mb-2 text-xs text-amber-200">{c.conflict}</p>}
     {url && (editing || clip) ? <video ref={video} src={url} muted playsInline preload="metadata" className="aspect-video w-full bg-black object-contain" aria-label={`${c[side]} L${lap}`}
       onError={() => setError("error")} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
       onLoadedMetadata={event => { const el = event.currentTarget; if (ownFile && Number.isFinite(el.duration)) { setOwnDuration(el.duration); setEnd(p => Math.min(p, el.duration)); } el.playbackRate = rate; if (!editing && clip) el.currentTime = clip.start_s; }}
@@ -251,7 +268,7 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
       <label className="flex items-center gap-1 text-xs text-slate-300"><input type="checkbox" checked={loop} onChange={e => setLoop(e.target.checked)} />{c.loop}</label>
       <select className="rounded border border-slate-700 bg-slate-950 p-2 text-xs" aria-label={c.rate} value={rate} onChange={e => { const next = Number(e.target.value); setRate(next); if (video.current) video.current.playbackRate = next; }}>{[.25, .5, 1].map(r => <option key={r} value={r}>{r}×</option>)}</select>
     </div>}
-    {!editing && <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-400"><span>{c[mode === "manual" ? "manual" : "auto"]}{clip ? ` · ${clip.start_s.toFixed(2)}–${clip.end_s.toFixed(2)}s` : ""}</span>
+    {!editing && <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-400"><span>{c[mode === "manual" ? "manual" : candidate ? "candidate" : "auto"]}{clip ? ` · ${clip.start_s.toFixed(2)}–${clip.end_s.toFixed(2)}s` : ""}</span>
       {validManual && <button className={btn} onClick={() => { setMode(p => p === "manual" ? "automatic" : "manual"); setError(""); setNotice(""); }}>{mode === "manual" ? c.reset : c.manual}</button>}
     </div>}
     {clip && !editing && <p className={`mt-2 text-xs ${activeAnchor ? "text-emerald-300" : "text-amber-300"}`}>{activeAnchor ? c.linked : c.unlinked}</p>}
@@ -263,13 +280,13 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
     {error && <p role="alert" className="mt-2 text-sm text-red-300">{c[error as keyof typeof c]}</p>}
     {notice && <p role="status" className="mt-2 text-xs text-slate-400">{c[notice as keyof typeof c]}</p>}
     {mode === "manual" && validManual && <p className="mt-1 text-xs text-slate-500">{c.revision}: {validManual.saved_at.replace("T", " ").slice(0, 19)} UTC</p>}
-    {url && clip && !editing && <TrackLandmarkEditor key={signature} video={video} videoUrl={url}
+    {url && clip && !editing && <TrackLandmarkEditor key={`landmarks:${signature}`} video={video} videoUrl={url}
       scope={`${fingerprint}:${review.entry}:${review.exit}`} cornerId={review.id} lap={lap} videoKey={JSON.stringify(identity)}
       syncKey={activeAnchor ? JSON.stringify(activeAnchor) : ""} window={clip} readOnly={readOnly}
       onSeek={time => { video.current?.pause(); seek(time); }}
       distanceAtTime={time => activeAnchor ? reviewDistanceAtTime(trace, time - activeAnchor.offset_ms / 1000) : null}
       events={landmarkEvents?.[lap] ?? { recovery: null, rpm_drop: null }} />}
     {feedback({ clipId: hash?.signature === signature ? hash.id : "", side, source: mode, clip,
-      enabled: Boolean(!editing && clip && hash?.signature === signature && hash.originalSignature === originalSignature && watched === signature), syncConfirmed: Boolean(activeAnchor), correction })}
+      enabled: Boolean(!candidate && !editing && clip && hash?.signature === signature && hash.originalSignature === originalSignature && watched === signature), syncConfirmed: Boolean(activeAnchor), correction })}
   </section>;
 }

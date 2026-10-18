@@ -119,11 +119,18 @@ export function calibratedReviewWindow(trace: ReviewPoint[], lap: number, focus:
   if (!calibration || !file || calibration.target_lap !== lap || duration < 3
     || calibration.video.size_bytes !== file.size || calibration.video.last_modified_ms !== file.lastModified
     || Math.abs(calibration.video.duration_s - duration) > .1) return null;
+  return reviewWindowAtOffset(trace, focus, calibration.offset_ms / 1000, duration, context);
+}
+
+/** Locate a bounded preview; an offset alone does not establish confirmed synchronization. */
+export function reviewWindowAtOffset(trace: ReviewPoint[], focus: number, offset: number,
+  duration: number, context?: { entry: number; exit: number }): ReviewWindow | null {
+  if (!Number.isFinite(offset) || !Number.isFinite(duration) || duration < 3) return null;
   const at = reviewValue(trace, focus, "session_time_s");
   const timed = trace.filter(p => p.session_time_s !== null);
   const first = timed[0]?.session_time_s, last = timed.at(-1)?.session_time_s;
   if (at === null || first == null || last == null) return null;
-  const offset = calibration.offset_ms / 1000, focusTime = at + offset;
+  const focusTime = at + offset;
   const lower = Math.max(0, first + offset), upper = Math.min(duration, last + offset);
   if (focusTime < lower || focusTime > upper || upper - lower < 3) return null;
   let start = Math.max(lower, Math.min(focusTime - 2, upper - 4));

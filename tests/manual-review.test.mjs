@@ -11,7 +11,8 @@ mkdirSync(`${root}/tmp`, { recursive: true });
 const dir = mkdtempSync(`${root}/tmp/manual-review-test-`);
 execFileSync(`${root}/node_modules/.bin/esbuild`, [`${root}/tests/fixtures/manual-review-entry.tsx`, "--bundle", "--format=esm", "--platform=node", "--jsx=automatic",
   "--external:react", "--external:react-dom", "--external:lucide-react", `--outfile=${dir}/entry.mjs`], { stdio: "pipe" });
-const { ManualReviewTest, validateManualReview, restoreManualReview, reviewDistanceAtTime, manualReviewWindow, selectCoachReviews } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
+const { ManualReviewTest, validateManualReview, restoreManualReview, reviewDistanceAtTime, manualReviewWindow, selectCoachReviews,
+  inferReviewCandidate, candidateLandmarkCheck, searchLandmarkVideo } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
 after(() => rmSync(dir, { recursive: true, force: true }));
 const trace = Array.from({ length: 101 }, (_, i) => ({ distance_m: i, session_time_s: 100 + i / 5, lap_time_s: i / 5, speed: 60, rpm: 9000 }));
 const video = { duration_s: 30, size_bytes: 200, last_modified_ms: 1000, mime_type: "video/mp4" };
@@ -77,4 +78,103 @@ for (const locale of ["zh", "en"]) test(`both sides have a manual entry even whe
   assert.ok(html.indexOf('data-testid="review-video-reference"') < html.indexOf('data-testid="review-video-target"'));
   assert.doesNotMatch(html, /<video/);
   assert.doesNotMatch(html, /THEORETICAL BEST|theoretical RPM/i);
+});
+
+const longVideo = { ...video, duration_s: 500 };
+const source = { ...anchor, target_lap: 4, telemetry_session_time_s: 100, video_time_s: 123.45,
+  offset_ms: 23450, video: longVideo, review: { method: "manual_lap_bounds_v1", verdict: "confirmed", scope: "selected_lap", checked_points: 2 } };
+const ranges = [
+  { lap: 4, telemetry_start_s: 100, telemetry_end_s: 141.7 },
+  { lap: 5, telemetry_start_s: 141.7, telemetry_end_s: 182.95 },
+  { lap: 7, telemetry_start_s: 225.4, telemetry_end_s: 268 },
+];
+const targetTrace = trace.map(p => ({ ...p, session_time_s: 141.7 + p.lap_time_s }));
+const estimate = (changes = {}) => inferReviewCandidate(changes.trace ?? targetTrace, changes.lap ?? 5, 50,
+  changes.anchors ?? [source], changes.ranges ?? ranges, changes.video ?? longVideo, changes.context);
+
+test("one real anchor locates other laps using actual session time, not lap numbers or a repeated lap duration", () => {
+  const before = JSON.stringify(source);
+  const result = estimate().candidate;
+  assert.ok(result); assert.equal(result.sync_confirmed, false);
+  assert.ok(Math.abs(result.lap_start_delta_s - 41.7) < 1e-9);
+  assert.ok(Math.abs(result.window.focus_s - 175.15) < 1e-9);
+  const seventh = estimate({ lap: 7, trace: targetTrace.map(p => ({ ...p, session_time_s: 225.4 + p.lap_time_s })) }).candidate;
+  assert.ok(Math.abs(seventh.lap_start_delta_s - 125.4) < 1e-9);
+  assert.equal(JSON.stringify(source), before);
+  assert.equal(result.calibration, undefined, "a candidate must not masquerade as a saved calibration");
+});
+
+test("candidate timing supports earlier laps and does not use untrusted video ranges", () => {
+  const laterAnchor = { ...source, target_lap: 7, telemetry_session_time_s: 225.4, video_time_s: 248.85 };
+  const result = estimate({ anchors: [laterAnchor], ranges: ranges.map(r => ({ ...r, video_start_s: 999, video_end_s: 1000 })) }).candidate;
+  assert.ok(result.lap_start_delta_s < 0);
+  assert.ok(Math.abs(result.window.focus_s - 175.15) < 1e-9);
+});
+
+test("missing real timing, another file, conflicting anchors and out-of-video proposals stay unavailable", () => {
+  assert.equal(estimate({ ranges: [] }).candidate, null);
+  assert.equal(estimate({ video: { ...longVideo, last_modified_ms: 1001 } }).candidate, null);
+  assert.equal(estimate({ video: { ...longVideo, mime_type: "video/quicktime" } }).candidate, null);
+  assert.equal(estimate({ anchors: [{ ...source, telemetry_session_time_s: 999 }] }).candidate, null);
+  const conflict = { ...source, target_lap: 7, telemetry_session_time_s: 225.4, video_time_s: 249.2, offset_ms: 23800 };
+  assert.equal(estimate({ anchors: [source, conflict] }).reason, "anchors_disagree");
+  assert.equal(estimate({ anchors: [{ ...source, video_time_s: 490, offset_ms: 390000 }] }).candidate, null);
+  assert.equal(estimate({ anchors: [{ ...source, offset_ms: 22000 }] }).candidate, null);
+  assert.equal(estimate({ anchors: [] }).candidate, null);
+});
+
+test("candidate windows reject missing or nonmonotonic samples, long gaps and missing full-context boundaries", () => {
+  const missing = structuredClone(targetTrace); missing[49].session_time_s = null;
+  assert.equal(estimate({ trace: missing }).reason, "telemetry_gap");
+  const reversed = structuredClone(targetTrace); reversed[49].session_time_s += 1;
+  assert.equal(estimate({ trace: reversed }).reason, "telemetry_gap");
+  assert.equal(estimate({ trace: targetTrace.filter((_, i) => i < 40 || i > 60) }).candidate, null);
+  assert.equal(estimate({ context: { entry: 0, exit: 200 } }).candidate, null);
+});
+
+test("landmark checks need a confirmed passing point in the source lap and search only the proposed clip", () => {
+  const candidate = estimate().candidate, videoKey = JSON.stringify(longVideo);
+  const sighting = { lap: 4, videoKey, syncKey: JSON.stringify(source), relation: "passing", distanceM: 50 };
+  const landmark = { id: "kerb", sightings: [sighting] };
+  const check = candidateLandmarkCheck([landmark], candidate, targetTrace, videoKey);
+  assert.ok(check); assert.ok(Math.abs(check.expected - 175.15) < 1e-9);
+  assert.ok(check.window.start_s >= candidate.window.start_s);
+  assert.ok(check.window.end_s <= candidate.window.end_s);
+  for (const changes of [{ syncKey: "" }, { videoKey: "other" }, { lap: 7 }, { relation: "visible" }, { distanceM: 0 }]) {
+    assert.equal(candidateLandmarkCheck([{ ...landmark, sightings: [{ ...sighting, ...changes }] }], candidate, targetTrace, videoKey), null);
+  }
+});
+
+test("visual checks refuse remote videos, overly wide windows and cancellation before decoding", async () => {
+  await assert.rejects(searchLandmarkVideo("https://remote/video.mp4", {}, { start_s: 0, end_s: 4 }, new AbortController().signal), /invalid_local_search/);
+  await assert.rejects(searchLandmarkVideo("blob:local", {}, { start_s: 0, end_s: 100 }, new AbortController().signal), /invalid_local_search/);
+  const abort = new AbortController(); abort.abort();
+  await assert.rejects(searchLandmarkVideo("blob:local", {}, { start_s: 0, end_s: 4 }, abort.signal), /abort/i);
+});
+
+for (const locale of ["zh", "en"]) test(`an unconfirmed timing proposal is playable but cannot collect confirmed feedback (${locale})`, () => {
+  const review = { ...selectCoachReviews(analysis)[0], referenceLap: 4, targetLap: 5, reference: trace, target: targetTrace, focus: 50 };
+  const states = [];
+  const html = renderToStaticMarkup(createElement(ManualReviewTest, { locale, review, fingerprint: "same-session",
+    defaultFile: { size: 200, lastModified: 1000, type: "video/mp4" }, defaultUrl: "blob:local", defaultDuration: 500,
+    targetCalibration: null, referenceCalibration: source, sessionCalibrations: [source], lapRanges: ranges,
+    context: false, onCursor() {}, feedback: state => { states.push(state); return null; } }));
+  assert.equal((html.match(/<video/g) ?? []).length, 2);
+  assert.match(html, /data-testid="review-timing-candidate"/);
+  assert.ok(html.includes(locale === "zh" ? "由已确认 L4 锚点推算" : "Estimated from confirmed L4 anchor"));
+  const target = states.find(s => s.side === "target");
+  assert.ok(target.clip); assert.equal(target.syncConfirmed, false); assert.equal(target.enabled, false);
+});
+
+test("a target's own confirmed anchor takes priority over a cross-lap prediction", () => {
+  const target = { ...source, target_lap: 5, telemetry_session_time_s: 151.7, video_time_s: 175.25, offset_ms: 23550 };
+  const review = { ...selectCoachReviews(analysis)[0], referenceLap: 4, targetLap: 5, reference: trace, target: targetTrace, focus: 50 };
+  const states = [];
+  const html = renderToStaticMarkup(createElement(ManualReviewTest, { locale: "en", review, fingerprint: "same-session",
+    defaultFile: { size: 200, lastModified: 1000, type: "video/mp4" }, defaultUrl: "blob:local", defaultDuration: 500,
+    targetCalibration: target, referenceCalibration: source, sessionCalibrations: [source, target], lapRanges: ranges,
+    context: false, onCursor() {}, feedback: state => { states.push(state); return null; } }));
+  assert.doesNotMatch(html, /data-testid="review-timing-candidate"/);
+  assert.equal(states.find(s => s.side === "target").syncConfirmed, true);
+  assert.ok(Math.abs(states.find(s => s.side === "target").clip.focus_s - 175.25) < 1e-9);
 });

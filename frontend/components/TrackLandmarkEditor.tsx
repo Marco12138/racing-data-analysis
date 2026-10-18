@@ -3,35 +3,12 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Camera, Check, Play, Search, Trash2, X } from "lucide-react";
 import { useI18n } from "../lib/i18n";
-import { grayscalePatch, LANDMARK_EVENT, landmarkEventText, matchLandmarkFrame, parseLandmarks,
-  patchCorrelation, rankLandmarkMatches, validLandmarkRect, type LandmarkRect, type TrackLandmark } from "../lib/trackLandmarks";
+import { grayscalePatch, LANDMARK_EVENT, landmarkEventText, parseLandmarks,
+  patchCorrelation, validLandmarkRect, type LandmarkRect, type TrackLandmark } from "../lib/trackLandmarks";
+import { captureLandmarkFrame as capture, searchLandmarkVideo, type LandmarkFrame as Frame } from "../lib/landmarkVideo";
 
 const btn = "inline-flex items-center gap-2 rounded border border-slate-700 px-3 py-2 text-xs text-slate-200 disabled:opacity-40";
 const input = "min-w-0 w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm text-white";
-type Frame = { url: string; width: number; height: number; rgba: Uint8ClampedArray; time: number };
-
-function capture(video: HTMLVideoElement): Frame {
-  if (video.readyState < 2 || !video.videoWidth) throw Error("frame_unavailable");
-  const canvas = document.createElement("canvas"); canvas.width = 320; canvas.height = Math.round(320 * video.videoHeight / video.videoWidth);
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) throw Error("canvas_unavailable");
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  return { url: canvas.toDataURL("image/jpeg", .8), width: canvas.width, height: canvas.height,
-    rgba: ctx.getImageData(0, 0, canvas.width, canvas.height).data, time: video.currentTime };
-}
-
-async function seekFrame(video: HTMLVideoElement, time: number, signal: AbortSignal): Promise<void> {
-  signal.throwIfAborted();
-  if (Math.abs(video.currentTime - time) < .005 && video.readyState >= 2) return;
-  await new Promise<void>((resolve, reject) => {
-    const done = () => { cleanup(); resolve(); }, fail = () => { cleanup(); reject(Error("frame_unavailable")); };
-    const timer = setTimeout(fail, 5000);
-    function cleanup() { clearTimeout(timer); video.removeEventListener("seeked", done); video.removeEventListener("error", fail); signal.removeEventListener("abort", fail); }
-    video.addEventListener("seeked", done, { once: true }); video.addEventListener("error", fail, { once: true }); signal.addEventListener("abort", fail, { once: true });
-    video.currentTime = time;
-  });
-  signal.throwIfAborted();
-}
 
 /** A local template library: automatic sightings are always proposals requiring human confirmation. */
 export function TrackLandmarkEditor({ video, videoUrl, scope, cornerId, lap, videoKey, syncKey, window,
@@ -68,36 +45,19 @@ export function TrackLandmarkEditor({ video, videoUrl, scope, cornerId, lap, vid
     const landmark = library.find(l => l.id === selected);
     if (!landmark || searching || !videoUrl) return;
     controller.current?.abort(); const abort = new AbortController(); controller.current = abort;
-    const probe = document.createElement("video"); probe.muted = true; probe.preload = "auto";
     setSearching(true); setMessage(""); setCandidate(null); setFrame(null); setConfirmed(false); setPassing(false);
     try {
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => { cleanup(); reject(Error("load_timeout")); }, 10000);
-        const loaded = () => { cleanup(); resolve(); }, failed = () => { cleanup(); reject(Error("load_failed")); };
-        function cleanup() { clearTimeout(timer); probe.removeEventListener("loadeddata", loaded); probe.removeEventListener("error", failed); abort.signal.removeEventListener("abort", failed); }
-        probe.addEventListener("loadeddata", loaded, { once: true }); probe.addEventListener("error", failed, { once: true }); abort.signal.addEventListener("abort", failed, { once: true });
-        probe.src = videoUrl;
-      });
-      abort.signal.throwIfAborted();
       // Bound decoding to this review clip, never scan the session or upload frames.
       const duration = Math.min(window.end_s - window.start_s, 12);
       if (duration <= 0) throw Error("empty_window");
       const from = Math.max(window.start_s, Math.min((video.current?.currentTime ?? window.start_s) - duration / 2, window.end_s - duration));
-      const matches: Array<{ time: number; score: number; rect: LandmarkRect }> = [];
-      for (let i = 0; i < 25; i++) {
-        await seekFrame(probe, from + duration * i / 25, abort.signal);
-        const f = capture(probe), match = matchLandmarkFrame(landmark, f.rgba, f.width, f.height);
-        if (match) matches.push({ time: f.time, ...match });
-        await new Promise(resolve => setTimeout(resolve, 0));
-      }
-      const result = rankLandmarkMatches(matches);
-      if (!result.candidate) { setMessage(zh ? "未找到足够相似的画面。请手动框选，不要据此调整同步。" : "No useful match. Select the landmark manually; do not change sync."); return; }
-      await seekFrame(probe, result.candidate.time, abort.signal);
-      const f = capture(probe);
+      const result = await searchLandmarkVideo(videoUrl, landmark, { start_s: from, end_s: from + duration }, abort.signal);
+      if (!result.candidate || !result.frame) { setMessage(zh ? "未找到足够相似的画面。请手动框选，不要据此调整同步。" : "No useful match. Select the landmark manually; do not change sync."); return; }
+      const f = result.frame;
       setCandidate({ landmark, frame: f, rect: result.candidate.rect, score: result.candidate.score, status: result.status });
       setFrame(f); setRect(result.candidate.rect); setName(landmark.name); setNameEn(landmark.nameEn);
     } catch { if (!abort.signal.aborted) setMessage(zh ? "画面搜索未完成，请重新选择可播放的视频。" : "Frame search failed. Reselect a playable video."); }
-    finally { probe.pause(); probe.removeAttribute("src"); probe.load(); if (controller.current === abort) setSearching(false); }
+    finally { if (controller.current === abort) setSearching(false); }
   }
   function save() {
     if (!frame || !rect || !confirmed || !name.trim() || readOnly || library.length >= 12 && !candidate) return;
