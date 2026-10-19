@@ -25,13 +25,13 @@ from backend.app.utils import storage
 from backend.tests.test_xrk_analysis_api import write_inspection
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-REVIEWED_ARTIFACT = REPOSITORY_ROOT / "public/demo/reviewed-real-session.json"
+REVIEWED_ARTIFACT = Path(__file__).parent / "fixtures/reviewed_storyboard_analysis.json"
 
 
 def demo_analysis() -> dict[str, Any]:
-    """Return the reviewed real analysis used by the public Demo."""
+    """Use the archived anonymous publication with transferable teaching examples."""
     reviewed = json.loads(REVIEWED_ARTIFACT.read_text(encoding="utf-8"))
-    return reviewed["analysis"]
+    return reviewed
 
 
 def alignment(**overrides: Any) -> StoryboardAlignment:

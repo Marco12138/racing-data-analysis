@@ -74,6 +74,7 @@ def build_demo_session_payload(reviewed: dict[str, Any]) -> dict[str, Any]:
                 if priority.get("what_to_test")
             ],
         },
+        "video_review": analysis.get("video_review"),
         "synthetic_curve_generated": False,
     }
 

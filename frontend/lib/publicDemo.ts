@@ -1,3 +1,5 @@
+import type { PublishedVideoReview } from "./publishedVideoReview";
+
 export type PublicDemoLap = {
   lap: number;
   lap_time: number;
@@ -45,6 +47,7 @@ export type PublicDemoSummary = {
     bullets: string[];
   };
   synthetic_curve_generated: false;
+  video_review?: PublishedVideoReview | null;
 };
 
 export function parsePublicDemoSummary(value: unknown): PublicDemoSummary | null {

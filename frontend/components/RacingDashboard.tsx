@@ -71,6 +71,11 @@ import {
   SESSION_STORAGE_KEY,
   parseStoredSessions,
   toStoredSession,
+  sessionMetadata,
+  restoreSessionLabels,
+  updateSessionLabel,
+  type SessionDisplayMetadata,
+  type WorkspaceSession,
 } from "../lib/sessionWorkspace";
 import { removeInspectionSessions } from "../lib/driverComparison";
 import { FrontendApiConfigError, frontendConfig } from "../lib/config";
@@ -122,10 +127,10 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
   const [videoModeRequested, setVideoModeRequested] = useState(false);
   const [dataError, setDataError] = useState("");
   const [aimImport, setAimImport] = useState<AimImportResponse | null>(null);
-  const [xrkInspection, setXrkInspection] = useState<XrkInspection | null>(null);
+  const [xrkInspection, setXrkInspection] = useState<WorkspaceSession | null>(null);
   const [xrkAnalysis, setXrkAnalysis] = useState<XrkAnalysis | null>(null);
   const [publishedDemo, setPublishedDemo] = useState<PublishedRealDemoSession | null>(null);
-  const [xrkSessions, setXrkSessions] = useState<XrkInspection[]>([]);
+  const [xrkSessions, setXrkSessions] = useState<WorkspaceSession[]>([]);
   const [pendingVideoFile, setPendingVideoFile] = useState<File | null>(null);
   const [activeVideoFile, setActiveVideoFile] = useState<File | null>(null);
   const [deploymentCapabilities, setDeploymentCapabilities] =
@@ -191,12 +196,13 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     Promise.allSettled(stored.map((session) => getXrkInspection(session.inspection_id)))
       .then((results) => {
         if (!active) return;
-        const restored = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
-        setXrkSessions(restored);
-        window.localStorage.setItem(
-          SESSION_STORAGE_KEY,
-          JSON.stringify(restored.map(toStoredSession))
-        );
+        const restored = results.flatMap((result, index) => result.status === "fulfilled"
+          ? [restoreSessionLabels(result.value, stored[index])] : []);
+        setXrkSessions(current => {
+          const next = [...restored.filter(s => !current.some(c => c.inspection_id === s.inspection_id)), ...current].slice(-MAX_TEMPORARY_SESSIONS);
+          window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(next.map(toStoredSession)));
+          return next;
+        });
       });
     return () => {
       active = false;
@@ -508,11 +514,25 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
     setAimImportStatus("inspected");
     setActiveVideoFile(null);
     setPendingVideoFile(null);
-    setDriverName(metadataText(session.metadata, "Driver", "Driver"));
-    setVehicleName(metadataText(session.metadata, "Vehicle", "Vehicle"));
-    setTrackName(metadataText(session.metadata, "Venue", "Unknown track"));
-    setSessionDate(normalizeAimDate(session.metadata["Log Date"]));
+    const labels = sessionMetadata(session);
+    setDriverName(metadataText(labels, "Driver", "Driver"));
+    setVehicleName(metadataText(labels, "Vehicle", "Vehicle"));
+    setTrackName(metadataText(labels, "Venue", "Unknown track"));
+    setSessionDate(session.display_metadata?.["Log Date"] ?? normalizeAimDate(session.metadata["Log Date"]));
     setDataError("");
+  }
+
+  function editSessionLabel(key: keyof SessionDisplayMetadata, value: string) {
+    const setters = { Driver: setDriverName, Vehicle: setVehicleName, Venue: setTrackName, "Log Date": setSessionDate };
+    setters[key](value);
+    if (!xrkInspection || publishedDemo) return;
+    const id = xrkInspection.inspection_id;
+    setXrkInspection(current => current?.inspection_id === id ? updateSessionLabel(current, key, value) : current);
+    setXrkSessions(current => {
+      const next = current.map(session => session.inspection_id === id ? updateSessionLabel(session, key, value) : session);
+      window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(next.map(toStoredSession)));
+      return next;
+    });
   }
 
   function removeTemporarySession(inspectionId: string) {
@@ -592,10 +612,10 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
             <h1 className="text-2xl font-semibold text-white md:text-3xl">{locale === "zh" ? "Session 分析工作台" : "Session Workspace"}</h1>
           </div>
           {workspaceHasData && <div className="grid gap-2 text-sm text-slate-300 sm:grid-cols-2 xl:min-w-[720px] xl:grid-cols-4">
-            <SessionInput label="Driver" value={driverName} onChange={setDriverName} />
-            <SessionInput label="Vehicle" value={vehicleName} onChange={setVehicleName} />
-            <SessionInput label="Track" value={trackName} onChange={setTrackName} />
-            <SessionInput label="Date" value={sessionDate} onChange={setSessionDate} />
+          <SessionInput label="Driver" value={driverName} onChange={value => editSessionLabel("Driver", value)} />
+          <SessionInput label="Vehicle" value={vehicleName} onChange={value => editSessionLabel("Vehicle", value)} />
+          <SessionInput label="Track" value={trackName} onChange={value => editSessionLabel("Venue", value)} />
+          <SessionInput label="Date" value={sessionDate} onChange={value => editSessionLabel("Log Date", value)} />
           </div>}
         </header>
 
@@ -1663,10 +1683,10 @@ function SessionRail({
             <div key={session.inspection_id} className={`grid grid-cols-[1fr_34px] items-center rounded-md border ${active ? "border-[#f6c945]/55 bg-[#f6c945]/8" : "border-slate-800 bg-slate-950/35"}`}>
               <button type="button" className="min-w-0 px-3 py-2.5 text-left" onClick={() => onSelect(session.inspection_id)}>
                 <span className={`block truncate text-xs font-semibold ${active ? "text-[#f6c945]" : "text-slate-200"}`}>
-                  {metadataText(session.metadata, "Driver", "Driver")}
+                  {metadataText(sessionMetadata(session), "Driver", "Driver")}
                 </span>
                 <span className="mt-1 block truncate text-[11px] text-slate-500">
-                  {metadataText(session.metadata, "Venue", "Unknown track")} · {session.valid_laps.length} laps
+                  {metadataText(sessionMetadata(session), "Venue", "Unknown track")} · {session.valid_laps.length} laps
                 </span>
               </button>
               <button type="button" className="flex h-8 w-8 items-center justify-center text-slate-600 hover:text-red-300" onClick={() => onRemove(session.inspection_id)} aria-label={`Remove ${session.filename}`} title="Remove temporary session">

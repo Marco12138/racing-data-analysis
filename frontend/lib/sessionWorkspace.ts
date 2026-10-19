@@ -4,10 +4,37 @@ export const MAX_TEMPORARY_SESSIONS = 4;
 export const SESSION_STORAGE_KEY = "racing-temporary-xrk-sessions:v1";
 export const EXPERIMENT_STORAGE_KEY = "racing-setup-experiments:v1";
 
+export type SessionDisplayMetadata = Partial<Record<"Driver" | "Vehicle" | "Venue" | "Log Date", string>>;
+export type WorkspaceSession = XrkInspection & { display_metadata?: SessionDisplayMetadata };
+
 export type StoredSession = Pick<
   XrkInspection,
   "inspection_id" | "expires_at" | "filename" | "metadata" | "laps" | "valid_laps" | "session_summary"
->;
+> & { display_metadata?: SessionDisplayMetadata };
+
+/** Keep user labels separate from recorder metadata and analysis identity. */
+export function sessionMetadata(session: Pick<WorkspaceSession, "metadata" | "display_metadata">) {
+  return { ...session.metadata, ...cleanDisplayMetadata(session.display_metadata) };
+}
+
+function cleanDisplayMetadata(value: unknown): SessionDisplayMetadata {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(["Driver", "Vehicle", "Venue", "Log Date"].flatMap(key => {
+    const label = (value as Record<string, unknown>)[key];
+    return typeof label === "string" ? [[key, label.slice(0, 200)]] : [];
+  }));
+}
+
+/** Restore labels only for the same token; the server still owns its expiry. */
+export function restoreSessionLabels(inspection: XrkInspection, stored?: StoredSession): WorkspaceSession {
+  const labels = inspection.inspection_id === stored?.inspection_id
+    ? cleanDisplayMetadata(stored.display_metadata) : {};
+  return Object.keys(labels).length ? { ...inspection, display_metadata: labels } : inspection;
+}
+
+export function updateSessionLabel(session: WorkspaceSession, key: keyof SessionDisplayMetadata, value: string): WorkspaceSession {
+  return { ...session, display_metadata: { ...cleanDisplayMetadata(session.display_metadata), [key]: value.slice(0, 200) } };
+}
 
 export type SetupChangeDraft = {
   category: string;
@@ -29,7 +56,7 @@ export type SetupExperimentDraft = {
   updatedAt: string;
 };
 
-export function toStoredSession(inspection: XrkInspection): StoredSession {
+export function toStoredSession(inspection: WorkspaceSession): StoredSession {
   return {
     inspection_id: inspection.inspection_id,
     expires_at: inspection.expires_at,
@@ -38,6 +65,7 @@ export function toStoredSession(inspection: XrkInspection): StoredSession {
     laps: inspection.laps,
     valid_laps: inspection.valid_laps,
     session_summary: inspection.session_summary,
+    ...(inspection.display_metadata ? { display_metadata: cleanDisplayMetadata(inspection.display_metadata) } : {}),
   };
 }
 

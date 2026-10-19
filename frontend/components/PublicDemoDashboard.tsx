@@ -3,6 +3,7 @@ import { Gauge, RefreshCw, Sparkles } from "lucide-react";
 
 import type { PublicDemoSummary, PublicDemoTrackPoint } from "../lib/publicDemo";
 import { useI18n } from "../lib/i18n";
+import { PublishedVideoReview } from "./PublishedVideoReview";
 
 /**
  * Read-only public sample-session panel rendered below the hero.
@@ -62,6 +63,7 @@ export function PublicDemoDashboard({
             <Metric label={t("demo.trackLength")} value={`${demo.track.lap_length_m.toFixed(1)} m`} detail={t("demo.cleanedGps")} />
           </div>
 
+          {demo.video_review && <div className="px-4 sm:px-7"><PublishedVideoReview review={demo.video_review} /></div>}
           <div className="public-demo-grid">
             <section className="public-demo-module" aria-labelledby="demo-track-title">
               <div className="module-heading">

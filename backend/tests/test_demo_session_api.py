@@ -78,10 +78,11 @@ def test_demo_session_endpoint_has_stable_contract_and_cache_headers(
         "track",
         "sector_loss",
         "summary",
+        "video_review",
         "synthetic_curve_generated",
     ]
-    assert body["fastest_lap"] == {"lap": 13, "lap_time": 40.326}
-    assert len(body["lap_rows"]) == 13
+    assert body["fastest_lap"] == {"lap": 5, "lap_time": 41.055}
+    assert len(body["lap_rows"]) == 6
     assert body["summary"]["source"] in {"llm", "structured"}
     response_schema = openapi["paths"]["/api/v1/xrk/demo-session"]["get"][
         "responses"
@@ -135,7 +136,7 @@ def test_build_demo_session_payload_preserves_reviewed_llm_narrative() -> None:
     payload = build_demo_session_payload(reviewed)
     assert payload["summary"]["source"] == "llm"
     assert payload["summary"]["narrative"] == narrative
-    assert payload["summary"]["bullets"]
+    assert payload["summary"]["bullets"] == [p["what_to_test"] for p in reviewed["analysis"]["ai_coach_summary"]["training_priorities"][:3] if p.get("what_to_test")]
 
     reviewed["analysis"]["narrative"] = None
     payload = build_demo_session_payload(reviewed)
@@ -154,3 +155,15 @@ def _walk_keys(value: Any) -> list[str]:
     if isinstance(value, list):
         return [key for nested in value for key in _walk_keys(nested)]
     return []
+
+
+def test_current_demo_preserves_insufficient_training_evidence() -> None:
+    """A more useful video demo must not gain fabricated transferable advice."""
+    from backend.app.analysis.session_storyboard import select_teaching_moments
+    import pytest
+
+    analysis = json.loads(REVIEWED_ARTIFACT.read_text())["analysis"]
+    assert analysis["ai_coach_summary"]["training_priorities"] == []
+    assert analysis["video_review"]["whole_recording_verified"] is False
+    with pytest.raises(ValueError, match="No transferable"):
+        select_teaching_moments(analysis)

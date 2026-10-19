@@ -178,13 +178,9 @@ def test_ai_coach_summary_locale_zh_and_en() -> None:
 
 
 def test_storyboard_fallback_is_specific_and_language_aware() -> None:
-    import json as jsonlib
-    from pathlib import Path
+    from backend.tests.test_storyboard import demo_analysis
 
-    repo = Path(__file__).resolve().parents[2]
-    analysis = jsonlib.loads(
-        (repo / "public/demo/reviewed-real-session.json").read_text(encoding="utf-8")
-    )["analysis"]
+    analysis = demo_analysis()
     from backend.app.analysis.session_storyboard import StoryboardAlignment
 
     alignment = StoryboardAlignment(offset_ms=0, video_duration_s=620.0)

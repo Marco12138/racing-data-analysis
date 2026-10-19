@@ -14,12 +14,14 @@ execFileSync(`${root}/node_modules/.bin/esbuild`, [`${root}/tests/fixtures/coach
 const { CoachReviewTest, CoachDebriefTest } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
 after(() => rmSync(dir, { recursive: true, force: true }));
 const { analysis: demoAnalysis } = JSON.parse(readFileSync(`${root}/public/demo/reviewed-real-session.json`));
-const analysis = { ...demoAnalysis, inspection_id: "a".repeat(32), file_fingerprint: "b".repeat(64) };
+const analysis = { ...demoAnalysis, video_review: undefined, inspection_id: "a".repeat(32), file_fingerprint: "b".repeat(64) };
 
 test("demo reviews never offer a vote, including with a local video attached", () => {
   const html = renderToStaticMarkup(createElement(CoachReviewTest, { analysis: demoAnalysis, locale: "zh", readOnly: true,
     videoUrl: "blob:local-only", videoFile: null, videoDurationS: 50, calibration: null, onSync() {}, onCursor() {} }));
-  assert.match(html, /演示模式不收集复核投票/);
+  assert.match(html, /样例不收集教练投票/);
+  assert.match(html, /data-testid="published-video-review"/);
+  assert.equal((html.match(/<video/g) ?? []).length, 2);
   assert.doesNotMatch(html, /<fieldset/);
 });
 

@@ -51,8 +51,8 @@ test("frontend contract accepts the backend packaged real-session summary", () =
     "utf8",
   ));
   const parsed = parsePublicDemoSummary(packaged);
-  assert.equal(parsed?.fastest_lap.lap, 13);
-  assert.equal(parsed?.fastest_lap.lap_time, 40.326);
-  assert.equal(parsed?.lap_rows.length, 13);
+  assert.equal(parsed?.fastest_lap.lap, 5);
+  assert.equal(parsed?.fastest_lap.lap_time, 41.055);
+  assert.equal(parsed?.lap_rows.length, 6);
   assert.equal(parsed?.synthetic_curve_generated, false);
 });

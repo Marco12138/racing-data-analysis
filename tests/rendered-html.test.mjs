@@ -50,7 +50,7 @@ test("server-renders the reviewed sample on its own demo route", async () => {
   const response = await render(undefined, "en-US,en;q=0.9", "", "/demo");
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /Anonymized sample XRK session/);
+  assert.match(html, /Real fast laps · Video and telemetry review/);
   assert.match(html, /href="\/workspace"/);
   assert.doesNotMatch(html, /Import telemetry, then inspect the evidence/);
 });
@@ -106,7 +106,7 @@ test("server-renders verified sample metrics injected by the Sites worker", asyn
     }, "en-US,en;q=0.9", "", "/demo");
     const html = await response.text();
     assert.match(html, /40\.326s/);
-    assert.match(html, /Anonymized sample XRK session/);
+    assert.match(html, /Real fast laps · Video and telemetry review/);
     assert.match(html, /GPS track/);
     assert.match(html, /Sector loss overview/);
     assert.match(html, /Structured fallback/);

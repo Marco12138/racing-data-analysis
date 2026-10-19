@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -88,6 +88,36 @@ class DemoSummary(DemoModel):
     bullets: list[str]
 
 
+class DemoReviewClip(DemoModel):
+    """Short, metadata-free excerpt of approved real footage."""
+
+    sector_id: str
+    lap: int
+    url: str
+    poster: str
+    duration_s: Literal[5]
+    source_start_s: float
+    telemetry_start_s: float
+    start_distance_m: float
+    gps_warning: bool
+    alignment_status: Literal["manual_anchor_extrapolated"]
+
+
+class DemoVideoReview(DemoModel):
+    """Manual-anchor provenance, not a claim of fully verified synchronization."""
+
+    version: Literal[1]
+    anchor_lap: int
+    anchor_video_start_s: float
+    anchor_uncertainty_s: Literal[0.5]
+    offset_s: float
+    whole_recording_verified: Literal[False]
+    audio_removed: Literal[True]
+    metadata_removed: Literal[True]
+    segments: list[dict[str, Any]]
+    clips: list[DemoReviewClip]
+
+
 class DemoSessionResponse(DemoModel):
     """Versioned response for the public reviewed XRK Demo session."""
 
@@ -99,4 +129,5 @@ class DemoSessionResponse(DemoModel):
     track: DemoTrack
     sector_loss: DemoSectorLoss
     summary: DemoSummary
+    video_review: DemoVideoReview | None = None
     synthetic_curve_generated: Literal[False]

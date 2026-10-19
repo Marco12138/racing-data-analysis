@@ -19,6 +19,7 @@ __pycache__
 *.db
 *.MP4
 *.mp4
+!public/demo/video/*.mp4
 *.MOV
 *.mov
 *.pdf

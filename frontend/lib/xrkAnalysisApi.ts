@@ -247,6 +247,7 @@ export type TopLapSegment = {
 };
 
 export type XrkAnalysis = {
+  video_review?: import("./publishedVideoReview").PublishedVideoReview;
   top_lap_segments?: { status: string; laps: number[]; segments: TopLapSegment[];
     position_source: string; landmarks_used_for_positioning: false; synthetic_curve_generated: false };
   corner_dynamics?: {

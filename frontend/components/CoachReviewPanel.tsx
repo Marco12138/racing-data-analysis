@@ -13,6 +13,7 @@ import { parseVideoSyncCalibration } from "../lib/videoTelemetrySync";
 import type { XrkAnalysis, XrkAnalyzeOptions } from "../lib/xrkAnalysisApi";
 import { ManualReviewVideo } from "./ManualReviewVideo";
 import { TopLapSegments } from "./TopLapSegments";
+import { PublishedVideoReview } from "./PublishedVideoReview";
 
 const COPY = {
   zh: {
@@ -108,6 +109,10 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
   const mappings: Record<string, VideoSyncCalibration> = useMemo(() => ({ ...(history.key === historyKey ? history.mappings : {}),
     ...(calibration ? { [calibration.target_lap]: calibration } : {}) }), [history, historyKey, calibration]);
   const sessionCalibrations = useMemo(() => Object.values(mappings), [mappings]);
+  if (readOnly && analysis.video_review) return <div className="min-w-0 space-y-6" data-testid="coach-review-panel">
+    <PublishedVideoReview review={analysis.video_review} />
+    <TopThreeCharts analysis={analysis} c={c} />
+  </div>;
   return <div className="min-w-0 space-y-6" data-testid="coach-review-panel">
     <TopLapSegments analysis={analysis} selected={segmentReview && segmentChoice ? `${segmentChoice.id}:${segmentChoice.lap}` : null}
       onSelect={(id, lap) => {

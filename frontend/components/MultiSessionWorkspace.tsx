@@ -40,6 +40,7 @@ import {
 import {
   EXPERIMENT_STORAGE_KEY,
   metadataLabel,
+  sessionMetadata,
   parseStoredExperiments,
   type SetupExperimentDraft,
 } from "../lib/sessionWorkspace";
@@ -99,10 +100,10 @@ export function MultiSessionWorkspace({
                 <div className="flex items-start justify-between gap-2">
                   <button type="button" className="min-w-0 text-left" onClick={() => onSelect(session.inspection_id)}>
                     <strong className="block truncate text-sm text-slate-100">
-                      {metadataLabel(session.metadata, "Driver", session.filename)}
+                      {metadataLabel(sessionMetadata(session), "Driver", session.filename)}
                     </strong>
                     <span className="mt-1 block truncate text-xs text-slate-500">
-                      {metadataLabel(session.metadata, "Venue", "Track unknown")}
+                      {metadataLabel(sessionMetadata(session), "Venue", "Track unknown")}
                     </span>
                   </button>
                   <button
@@ -586,7 +587,7 @@ function SetupZoneTable({ result }: { result: SetupExperimentResult }) {
 }
 
 function SessionSelect({ label, value, sessions, onChange }: { label: string; value: string; sessions: XrkInspection[]; onChange: (value: string) => void }) {
-  return <label className="block text-xs text-slate-400">{label}<select value={value} onChange={(event) => onChange(event.target.value)} className="mt-1 min-h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white"><option value="">Select session</option>{sessions.map((session) => <option key={session.inspection_id} value={session.inspection_id}>{metadataLabel(session.metadata, "Driver", session.filename)} · {metadataLabel(session.metadata, "Venue", "unknown track")}</option>)}</select></label>;
+  return <label className="block text-xs text-slate-400">{label}<select value={value} onChange={(event) => onChange(event.target.value)} className="mt-1 min-h-10 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white"><option value="">Select session</option>{sessions.map((session) => <option key={session.inspection_id} value={session.inspection_id}>{metadataLabel(sessionMetadata(session), "Driver", session.filename)} · {metadataLabel(sessionMetadata(session), "Venue", "unknown track")}</option>)}</select></label>;
 }
 
 function LapSelect({ label, value, session, onChange }: { label: string; value: string; session?: XrkInspection; onChange: (value: string) => void }) {

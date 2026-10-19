@@ -6,6 +6,10 @@ import {
   addStoredSession,
   parseStoredSessions,
   pruneExpiredSessions,
+  restoreSessionLabels,
+  sessionMetadata,
+  updateSessionLabel,
+  toStoredSession,
 } from "../frontend/lib/sessionWorkspace.ts";
 
 function inspection(id, expiresAt) {
@@ -34,6 +38,29 @@ test("temporary session workspace prunes fixed-expiry tokens", () => {
     parseStoredSessions(JSON.stringify([active, expired]), now),
     [active]
   );
+});
+
+test("edited session labels survive storage and refresh without rewriting recorder data", () => {
+  const original = inspection("marco", "2099-01-01T00:00:00Z");
+  const edited = updateSessionLabel(updateSessionLabel(original, "Driver", "martin"), "Venue", "New track");
+  const [stored] = parseStoredSessions(JSON.stringify([toStoredSession(edited)]));
+  const refreshed = restoreSessionLabels({ ...original, expires_at: "2098-01-01T00:00:00Z" }, stored);
+  assert.equal(sessionMetadata(refreshed).Driver, "martin");
+  assert.equal(sessionMetadata(refreshed).Venue, "New track");
+  assert.equal(refreshed.metadata.Driver, "marco");
+  assert.equal(original.metadata.Driver, "marco");
+  assert.equal(refreshed.expires_at, "2098-01-01T00:00:00Z");
+  const other = inspection("other", "2099-01-01T00:00:00Z");
+  assert.equal(sessionMetadata(restoreSessionLabels(other, stored)).Driver, "other");
+});
+
+test("only supported string display labels are restored, including an intentionally empty label", () => {
+  const original = inspection("marco", "2099-01-01T00:00:00Z");
+  const restored = restoreSessionLabels(original, { ...original, display_metadata: {
+    Driver: "", Vehicle: { invalid: true }, Venue: "Track", expires_at: "2100-01-01",
+  } });
+  assert.deepEqual(restored.display_metadata, { Driver: "", Venue: "Track" });
+  assert.equal(sessionMetadata(restored).Driver, "");
 });
 
 test("temporary session workspace enforces the four-session limit", () => {

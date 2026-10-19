@@ -116,9 +116,9 @@ test("bundled artifact is a reviewed real session without private coordinate fie
   );
 
   assert.equal(isPublishedRealDemo(artifact), true);
-  assert.equal(artifact.analysis.lap_rows.length, 13);
-  assert.equal(artifact.analysis.fastest_lap.lap, 13);
-  assert.equal(artifact.analysis.fastest_lap.lap_time, 40.326);
+  assert.equal(artifact.analysis.lap_rows.length, 6);
+  assert.equal(artifact.analysis.fastest_lap.lap, 5);
+  assert.equal(artifact.analysis.fastest_lap.lap_time, 41.055);
   assert.deepEqual(artifact.analysis.metadata, { data_source: "Anonymized real session" });
   assert.equal(artifact.analysis.inspection_id, "published-demo");
   assert.equal(artifact.analysis.file_fingerprint, "redacted");
