@@ -40,9 +40,10 @@ export async function readLandmarkFrames(url: string, times: number[], signal: A
       probe.addEventListener("loadeddata", loaded, { once: true }); probe.addEventListener("error", failed, { once: true }); signal.addEventListener("abort", failed, { once: true });
       probe.src = url;
     });
-    if (times.some(t => t >= probe.duration)) throw Error("outside_video");
+    if (times.some(t => t > probe.duration)) throw Error("outside_video");
     const frames: LandmarkFrame[] = [];
-    for (const time of times) { await seekFrame(probe, time, signal); frames.push(captureLandmarkFrame(probe)); await new Promise(resolve => setTimeout(resolve, 0)); }
+    // At the exact file endpoint, inspect the last decodable frame, not a nonexistent next frame.
+    for (const time of times) { await seekFrame(probe, Math.min(time, Math.max(0, probe.duration - .001)), signal); frames.push(captureLandmarkFrame(probe)); await new Promise(resolve => setTimeout(resolve, 0)); }
     return frames;
   } finally { probe.pause(); probe.removeAttribute("src"); probe.load(); }
 }

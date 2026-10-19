@@ -451,6 +451,7 @@ accuracy or driving truth. Demo controls must remain disabled even with local vi
 python -m pytest backend/tests -q
 pnpm run test:frontend
 pnpm run test:coach-debrief
+pnpm run test:video-comparison
 pnpm run test:gnss-sync
 pnpm run test:rpm-sync
 pnpm run lint
@@ -755,6 +756,15 @@ Local acceptance: `pnpm run test:coach-debrief`, backend pytest and normal
 release checks above. Private video/XRK evidence must not be committed or
 uploaded for smoke tests. Deploy the additive backend response before the
 frontend; older backend/demo responses show an explicit fallback.
+
+## Local two-driver video comparison
+
+The `/video-coach` entry now defaults to two local videos, manual same-location
+starts and five-second paired playback. The prior single-lap experiment remains
+in a separate tab. See [Driver Video Comparison](DRIVER_VIDEO_COMPARISON.md).
+This frontend-only addition reuses the existing landmark and boundary algorithms;
+no Railway deployment or video upload is required. Run the new comparison tests
+and desktop/mobile browser acceptance before publishing Vercel and Sites.
 
 ## Provider references
 

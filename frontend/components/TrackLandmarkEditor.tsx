@@ -12,11 +12,12 @@ const input = "min-w-0 w-full rounded border border-slate-700 bg-slate-950 p-2 t
 
 /** A local template library: automatic sightings are always proposals requiring human confirmation. */
 export function TrackLandmarkEditor({ video, videoUrl, scope, cornerId, lap, videoKey, syncKey, window,
-  distanceAtTime, events, onSeek, readOnly = false }: {
+  distanceAtTime, events, onSeek, readOnly = false, videoOnly = false }: {
   video: RefObject<HTMLVideoElement | null>; videoUrl: string; scope: string; cornerId: string; lap: number;
   videoKey: string; syncKey: string; window: { start_s: number; end_s: number };
   distanceAtTime: (time: number) => number | null; events: { recovery: number | null; rpm_drop: number | null }; readOnly?: boolean;
   onSeek: (time: number) => void;
+  videoOnly?: boolean;
 }) {
   const { locale } = useI18n(), zh = locale === "zh";
   const key = `racing-landmarks:v1:${scope}:${cornerId}`;
@@ -77,7 +78,9 @@ export function TrackLandmarkEditor({ video, videoUrl, scope, cornerId, lap, vid
   const display = candidate?.frame ?? frame;
   return <details className="mt-4 border-t border-slate-700 pt-3" data-testid="track-landmark-editor">
     <summary className="cursor-pointer text-sm text-teal-200">{zh ? "赛道边参照物 · 画面解释" : "Trackside landmarks · Visual explanation"}</summary>
-    <p className="mt-2 text-xs leading-5 text-slate-400">{zh ? "位置来自 GPS 遥测与已确认的视频同步。参照物用于说明动作发生在哪里；相似画面不是位置真值，也不用于自动调整同步。" : "Location comes from GPS telemetry and confirmed video sync. Landmarks explain where an action occurs; visual similarity is not location truth and never adjusts sync automatically."}</p>
+    <p className="mt-2 text-xs leading-5 text-slate-400">{videoOnly
+      ? (zh ? "此处只有视频，位置由你人工确认。不同机位可能匹配失败；相似画面不证明同一位置，也不修改起点。" : "Video only: location requires human confirmation. Different camera views may not match; similarity neither proves location nor edits the start.")
+      : (zh ? "位置来自 GPS 遥测与已确认的视频同步。参照物用于说明动作发生在哪里；相似画面不是位置真值，也不用于自动调整同步。" : "Location comes from GPS telemetry and confirmed video sync. Landmarks explain where an action occurs; visual similarity is not location truth and never adjusts sync automatically.")}</p>
     <p className="mt-2 text-xs leading-5 text-slate-400">{zh ? "仅在相近机位中搜索相似画面；分数不是识别准确率。候选需人工确认，不修改视频同步。裁剪小图只保存在本浏览器。" : "Same-view template search only; scores are not accuracy. Confirm every candidate. Sync is unchanged; cropped thumbnails stay in this browser."}</p>
     <div className="mt-3 flex flex-wrap gap-2">
       <button className={btn} disabled={readOnly || searching} onClick={takeFrame}><Camera size={14} />{zh ? "框选当前画面" : "Mark current frame"}</button>
@@ -99,14 +102,18 @@ export function TrackLandmarkEditor({ video, videoUrl, scope, cornerId, lap, vid
       </div>
       <div className="grid gap-2 sm:grid-cols-2"><label className="text-xs text-slate-400">{zh ? "参照物名称" : "Landmark name"}<input className={input} maxLength={60} value={name} disabled={!!candidate} onChange={e => setName(e.target.value)} placeholder={zh ? "例如：右侧红白路肩末端" : "e.g. End of right red-white kerb"} /></label>
         <label className="text-xs text-slate-400">{zh ? "英文名称（选填）" : "English name (optional)"}<input className={input} maxLength={80} value={nameEn} disabled={!!candidate} onChange={e => setNameEn(e.target.value)} /></label></div>
-      <label className="flex gap-2 text-xs text-slate-300"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />{zh ? "确认是固定赛道边标志，且对应此圈、此弯，不是车辆、人员或阴影" : "Confirmed fixed trackside landmark in this lap/corner, not a vehicle, person or shadow"}</label>
-      <label className="flex gap-2 text-xs text-slate-300"><input type="checkbox" checked={passing} disabled={!syncKey || distanceAtTime(display.time) === null} onChange={e => setPassing(e.target.checked)} />{zh ? "已核对：此帧车头与参照物齐平（否则只记为可见）" : "Checked: the kart is alongside this landmark in this frame (otherwise visible only)"}</label>
+      <label className="flex gap-2 text-xs text-slate-300"><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />{videoOnly
+        ? (zh ? "确认是此片段的固定赛道边标志，不是车辆、人员或阴影" : "Confirmed fixed trackside landmark in this clip, not a vehicle, person or shadow")
+        : (zh ? "确认是固定赛道边标志，且对应此圈、此弯，不是车辆、人员或阴影" : "Confirmed fixed trackside landmark in this lap/corner, not a vehicle, person or shadow")}</label>
+      {!videoOnly && <label className="flex gap-2 text-xs text-slate-300"><input type="checkbox" checked={passing} disabled={!syncKey || distanceAtTime(display.time) === null} onChange={e => setPassing(e.target.checked)} />{zh ? "已核对：此帧车头与参照物齐平（否则只记为可见）" : "Checked: the kart is alongside this landmark in this frame (otherwise visible only)"}</label>}
       <div className="flex gap-2"><button className={btn} disabled={readOnly || !confirmed || !name.trim() || !rect || !validLandmarkRect(rect)} onClick={save}><Check size={14} />{zh ? "确认并记住" : "Confirm and remember"}</button><button className={btn} onClick={() => { setFrame(null); setCandidate(null); }}><X size={14} />{zh ? "放弃" : "Discard"}</button></div>
     </div>}
     <ul className="mt-3 space-y-3">{library.map(l => {
       const seen = l.sightings.find(s => s.lap === lap && s.videoKey === videoKey && s.syncKey === syncKey);
       return <li key={l.id} className="border-t border-slate-800 pt-2 text-xs text-slate-300">
-        <div className="flex items-center justify-between gap-2"><span className="min-w-0 break-words">{zh ? l.name : l.nameEn || l.name}{seen ? (zh ? " · 此圈已确认" : " · Confirmed in this lap") : (zh ? " · 此圈待确认" : " · Unconfirmed in this lap")}</span>
+        <div className="flex items-center justify-between gap-2"><span className="min-w-0 break-words">{zh ? l.name : l.nameEn || l.name}{videoOnly
+          ? (seen ? (zh ? " · 此视频已确认可见" : " · Visible in this video") : (zh ? " · 此视频待确认" : " · Unconfirmed in this video"))
+          : (seen ? (zh ? " · 此圈已确认" : " · Confirmed in this lap") : (zh ? " · 此圈待确认" : " · Unconfirmed in this lap"))}</span>
           <button className={btn} title={zh ? "删除参照物" : "Delete landmark"} aria-label={zh ? "删除参照物" : "Delete landmark"} disabled={readOnly} onClick={() => persist(library.filter(r => r.id !== l.id))}><Trash2 size={13} /></button></div>
         {seen && Object.entries(events).map(([event, distance]) => {
           const text = distance === null ? null : landmarkEventText(l, seen, distance, event as "recovery" | "rpm_drop", locale);

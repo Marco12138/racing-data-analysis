@@ -5,7 +5,7 @@ import { ScanEye, X } from "lucide-react";
 import { useI18n } from "../lib/i18n";
 import { checkReviewBoundaries } from "../lib/reviewBoundaryVisual";
 
-export type BoundaryVideo = { url: string; start: number; duration: number; lap: number; confirmed: boolean };
+export type BoundaryVideo = { url: string; start: number; duration: number; lap: number; confirmed: boolean; label?: string };
 type Result = Awaited<ReturnType<typeof checkReviewBoundaries>>;
 
 /** Read-only visual evidence: no calibration setters or storage writes are accepted here. */
@@ -40,7 +40,7 @@ export function ReviewBoundaryCheck({ reference, target, onSeek }: { reference: 
           {/* Local decoded images must not pass through the remote image optimizer. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={result[side][index].url} alt={`${side === "reference" ? (zh ? "参考" : "Reference") : (zh ? "目标" : "Selected")} ${index === 0 ? "start" : "+5s"}`} className="aspect-video w-full object-contain" />
-          <figcaption className="mt-1 text-xs text-slate-400">L{side === "reference" ? reference.lap : target.lap} · {result[side][index].time.toFixed(3)}s</figcaption>
+          <figcaption className="mt-1 text-xs text-slate-400">{(side === "reference" ? reference : target).label ?? `L${side === "reference" ? reference.lap : target.lap}`} · {result[side][index].time.toFixed(3)}s</figcaption>
         </figure>)}</div>
       </div>)}
       {result.start.time !== null && <button className="mt-3 min-h-10 rounded border border-slate-600 px-3 text-sm" onClick={() => onSeek(result.start.time!)}>{zh ? "仅查看建议帧" : "View suggested frame only"} · {result.start.time.toFixed(3)}s</button>}

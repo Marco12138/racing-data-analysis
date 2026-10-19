@@ -24,7 +24,7 @@ export function rankBoundaryFrames(reference: LandmarkFrame, frames: LandmarkFra
 /** Search only around the proposed start; the five-second endpoint is advisory, never fitted. */
 export async function checkReviewBoundaries(reference: { url: string; start: number }, target: { url: string; start: number; duration: number }, signal: AbortSignal) {
   const low = Math.max(0, target.start - 2), high = Math.min(target.duration - 5, target.start + 2);
-  if (high <= low || target.start < low || target.start > high) throw Error("outside_video");
+  if (high < low || target.start < low || target.start > high) throw Error("outside_video");
   const ref = await readLandmarkFrames(reference.url, [reference.start, reference.start + 5], signal);
   const times = Array.from({ length: 25 }, (_, i) => low + (high - low) * i / 24);
   const frames = await readLandmarkFrames(target.url, [...times, target.start, target.start + 5], signal);

@@ -15,6 +15,8 @@ import {
 
 import { useI18n } from "../lib/i18n";
 import { SiteNavigation } from "./SiteNavigation";
+import { TrackLandmarkEditor } from "./TrackLandmarkEditor";
+import { comparisonVideoKey } from "../lib/videoComparison";
 import {
   analyzeLapAudio,
   type LapAudioAnalysis,
@@ -40,7 +42,7 @@ const OVERLAY_W = 640;
 const OVERLAY_H = 360;
 const TRACE_ROW = 0.55;
 
-export function VideoCoachExperiment() {
+export function VideoCoachExperiment({ embedded = false }: { embedded?: boolean }) {
   const { t } = useI18n();
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
@@ -50,6 +52,7 @@ export function VideoCoachExperiment() {
 
   const [videoUrl, setVideoUrl] = useState("");
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [landmarkFileKey, setLandmarkFileKey] = useState("");
   const [videoName, setVideoName] = useState("");
   const [durationS, setDurationS] = useState(0);
   const [videoWidth, setVideoWidth] = useState(0);
@@ -99,6 +102,12 @@ export function VideoCoachExperiment() {
     if (!videoUrl) return;
     return () => URL.revokeObjectURL(videoUrl);
   }, [videoUrl]);
+
+  useEffect(() => {
+    let active = true;
+    if (videoFile) void comparisonVideoKey(videoFile).then(key => { if (active) setLandmarkFileKey(key); }).catch(() => {});
+    return () => { active = false; };
+  }, [videoFile]);
 
   const drawOverlay = useCallback(() => {
     const video = videoRef.current;
@@ -150,6 +159,7 @@ export function VideoCoachExperiment() {
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoUrl(URL.createObjectURL(file));
     setVideoFile(file);
+    setLandmarkFileKey("");
     setVideoName(file.name);
     setSamples([]);
     setCorners([]);
@@ -504,8 +514,9 @@ export function VideoCoachExperiment() {
         ? t("videoCoach.markApex")
         : t("videoCoach.markExit");
 
+  const Container = embedded ? "section" : "main";
   return (
-    <><SiteNavigation /><main className="video-coach">
+    <>{!embedded && <SiteNavigation />}<Container className={embedded ? "video-coach !m-0 !max-w-none !p-0" : "video-coach"}>
       <header className="video-coach__header">
         <div>
           <p className="hero-kicker"><Scissors size={15} /> {t("videoCoach.kicker")}</p>
@@ -632,6 +643,13 @@ export function VideoCoachExperiment() {
           {!rpmAnalyzing && !rpmResult ? (
             <p className="video-coach__mark-hint">{t("videoCoach.audioMarkHint")}</p>
           ) : null}
+
+          {videoReady && landmarkFileKey && lapEnd > lapStart && <TrackLandmarkEditor key={`${landmarkFileKey}:${lapStart}:${lapEnd}`}
+            video={videoRef} videoUrl={videoUrl} scope={`single-video:${landmarkFileKey}`} cornerId={`window:${lapStart}:${lapEnd}`}
+            lap={1} videoKey={landmarkFileKey} syncKey={`video-only:${lapStart}:${lapEnd}`} window={{ start_s: lapStart, end_s: lapEnd }}
+            distanceAtTime={() => null} events={{ recovery: null, rpm_drop: null }} videoOnly onSeek={time => {
+              if (videoRef.current) { videoRef.current.pause(); videoRef.current.currentTime = time; }
+            }} />}
 
           <canvas ref={overlayRef} width={OVERLAY_W} height={OVERLAY_H} className="video-coach__overlay" />
 
@@ -818,6 +836,6 @@ export function VideoCoachExperiment() {
         <p className="video-coach__hint">{t("videoCoach.uploadHint")}</p>
       )}
       <canvas ref={sampleRef} className="hidden" />
-    </main></>
+    </Container></>
   );
 }
