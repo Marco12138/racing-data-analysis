@@ -41,6 +41,8 @@ selected video range; its original motion/audio experiments remain separate.
 - No automatic cross-driver ranking, braking recommendation or precision claim.
 - Changing tabs releases the video players. Save a comparison before leaving;
   saved marks return only after the matching local files are selected again.
+- Server-rendered file pickers stay disabled until browser handlers are ready,
+  including after refresh, so selecting a file cannot be lost before hydration.
 
 ## Verification
 

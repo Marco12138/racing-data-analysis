@@ -21,6 +21,7 @@ export function DriverVideoComparison() {
   const { locale } = useI18n(), zh = locale === "zh";
   const a = useRef<HTMLVideoElement>(null), b = useRef<HTMLVideoElement>(null);
   const [sides, setSides] = useState<[Side, Side]>([emptySide(), emptySide()]);
+  const [interactive, setInteractive] = useState(false);
   const [sameLocation, setSameLocation] = useState(false), [playing, setPlaying] = useState(false);
   const [busy, setBusy] = useState(false), [message, setMessage] = useState("");
   const [name, setName] = useState(""), [saved, setSaved] = useState<SavedVideoComparison[]>([]);
@@ -33,6 +34,9 @@ export function DriverVideoComparison() {
   const durationA = sides[0].duration, durationB = sides[1].duration;
   const labels = sides.map((s, i) => s.driver.trim() || (zh ? `车手 ${i === 0 ? "A" : "B"}` : `Driver ${i === 0 ? "A" : "B"}`));
   const checkKey = JSON.stringify(sides.map(s => [s.url, s.start?.start_s]));
+
+  // SSR can paint a file picker before its handler hydrates; do not accept a lost file selection.
+  useEffect(() => { queueMicrotask(() => setInteractive(true)); }, []);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -112,13 +116,14 @@ export function DriverVideoComparison() {
     if (b.current) b.current.currentTime = row.starts[1].start_s;
   }
 
-  return <section className="min-w-0 space-y-5" data-testid="driver-video-comparison">
+  return <section className="min-w-0 space-y-5" data-testid="driver-video-comparison" aria-busy={!interactive}>
+    {!interactive && <p role="status" className="text-sm text-slate-400">{zh ? "视频控件加载中…" : "Loading video controls…"}</p>}
     <div className="grid min-w-0 gap-6 lg:grid-cols-2">{sides.map((side, index) => <div key={index} className="min-w-0 space-y-3" data-testid={`video-side-${index}`}>
       <label className="block text-xs text-slate-400">{zh ? `车手 ${index === 0 ? "A" : "B"}` : `Driver ${index === 0 ? "A" : "B"}`}
         <input className={`${input} mt-1`} maxLength={60} value={side.driver} placeholder={zh ? "姓名（选填）" : "Name (optional)"} onChange={e => patch(index, { driver: e.target.value })} /></label>
       <label className="flex min-h-12 min-w-0 cursor-pointer items-center gap-2 rounded border border-dashed border-slate-600 p-3 text-sm text-cyan-200">
         <Upload size={16} className="shrink-0" /><span className="min-w-0 flex-1 break-all whitespace-normal">{side.name || (zh ? "选择本地车载视频" : "Choose onboard video")}</span>
-        <input className="sr-only" type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" aria-label={zh ? `车手 ${index === 0 ? "A" : "B"} 视频` : `Driver ${index === 0 ? "A" : "B"} video`}
+        <input className="sr-only" type="file" disabled={!interactive} accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" aria-label={zh ? `车手 ${index === 0 ? "A" : "B"} 视频` : `Driver ${index === 0 ? "A" : "B"} video`}
           onChange={e => { selectFile(index, e.target.files?.[0] ?? null); e.target.value = ""; }} /></label>
       {side.url ? <>
         <VideoSidePlayer key={side.url} side={side} video={index === 0 ? a : b} label={labels[index]} onLoaded={duration => patch(index, { duration, error: "" })}

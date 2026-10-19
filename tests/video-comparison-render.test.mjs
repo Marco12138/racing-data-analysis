@@ -15,6 +15,8 @@ test("video workspace starts with two local files, not synthetic metrics",()=>{
   for(const locale of ["zh","en"]){
     const html=renderToStaticMarkup(createElement(WorkspaceTest,{locale}));
     assert.equal((html.match(/type="file"/g)??[]).length,2);
+    assert.equal((html.match(/type="file" disabled=""/g)??[]).length,2);
+    assert.match(html,/aria-busy="true"/);
     assert.match(html,/data-testid="driver-video-comparison"/);
     assert.ok(html.includes(locale==="zh"?"双车手对照":"Two-driver comparison"));
     assert.ok(html.includes(locale==="zh"?"单圈实验":"Single-lap experiment"));
