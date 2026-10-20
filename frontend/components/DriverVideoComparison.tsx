@@ -8,11 +8,12 @@ import { comparisonStart, comparisonVideoKey, parseVideoComparisons, seekCompari
   type ComparisonStart, type SavedVideoComparison } from "../lib/videoComparison";
 import { ReviewBoundaryCheck } from "./ReviewBoundaryCheck";
 import { TrackLandmarkEditor } from "./TrackLandmarkEditor";
+import { GoproSpeedOverlay } from "./GoproSpeedOverlay";
 
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded border border-slate-600 px-3 py-2 text-sm text-slate-200 disabled:opacity-40";
 const input = "min-w-0 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white";
-type Side = { url: string; fileKey: string; name: string; driver: string; duration: number; start: ComparisonStart | null; error: string };
-const emptySide = (): Side => ({ url: "", fileKey: "", name: "", driver: "", duration: 0, start: null, error: "" });
+type Side = { file: File | null; url: string; fileKey: string; name: string; driver: string; duration: number; start: ComparisonStart | null; error: string };
+const emptySide = (): Side => ({ file: null, url: "", fileKey: "", name: "", driver: "", duration: 0, start: null, error: "" });
 const noDistance = () => null;
 const noEvents = { recovery: null, rpm_drop: null };
 
@@ -61,7 +62,7 @@ export function DriverVideoComparison() {
     stop(); const generation = ++generations.current[index];
     if (urls.current[index]) URL.revokeObjectURL(urls.current[index]);
     const url = URL.createObjectURL(file); urls.current[index] = url;
-    patch(index, { ...emptySide(), url, name: file.name, driver: sides[index].driver });
+    patch(index, { ...emptySide(), file, url, name: file.name, driver: sides[index].driver });
     setSameLocation(false); setMessage(""); setReviewId("draft");
     void comparisonVideoKey(file).then(fileKey => {
       if (generations.current[index] === generation) patch(index, { fileKey });
@@ -186,9 +187,11 @@ function VideoSidePlayer({ side, video, label, onLoaded, onError, onSeek, onStop
     });
   }, [video]);
   return <>
-    <video ref={video} src={side.url} controls playsInline muted preload="metadata" aria-label={`${label} ${zh ? "播放器" : "player"}`}
+    <div className="relative min-w-0"><video ref={video} src={side.url} controls playsInline muted preload="metadata" aria-label={`${label} ${zh ? "播放器" : "player"}`}
       className="aspect-video w-full bg-black object-contain" onLoadedMetadata={e => { const d = e.currentTarget.duration; if (Number.isFinite(d) && d > 0) onLoaded(d); else onError(); }}
       onPause={onStop} onSeeking={onStop} onError={onError} />
+      <GoproSpeedOverlay file={side.file} time={time} />
+    </div>
     <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-slate-400">
       <output className="font-mono" aria-label={`${label} ${zh ? "当前时间" : "current time"}`}>{time.toFixed(3)} / {side.duration.toFixed(2)}s</output>
       <button className={button} disabled={!side.duration} title={zh ? "后退 0.04 秒" : "Back 0.04s"} aria-label={`${label} ${zh ? "后退" : "back"}`} onClick={() => onSeek(time - .04)}><ChevronLeft size={16} /></button>

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { openAsBlob } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { consumeGpmfPacket, extractGoproTelemetry, parseGpsUtc, validateMovie } from "../frontend/lib/gpmfTelemetry.ts";
 
 function audit() {
@@ -35,6 +37,28 @@ test("bad fix is retained as unusable, not silently promoted to a GPS lock", () 
   const a = audit(); consumeGpmfPacket(a, packet({ GPSF: 0 }), timing);
   assert.ok(a.video_clock.every((p) => p.fix === 0));
   assert.ok(a.video_gps.every((p) => p.fix === 0));
+});
+
+test("HUD speed is opt-in, native GPS5 2D, and does not change the sync summary", () => {
+  const plain = audit(), hud = { ...audit(), video_speed: [] };
+  const rows = Array.from({ length: 20 }, (_, i) => [300000000,1140000000,0,i * 1000,99999]);
+  consumeGpmfPacket(plain, packet({ GPS5: rows }), timing);
+  consumeGpmfPacket(hud, packet({ GPS5: rows }), timing);
+  assert.equal(plain.video_speed, undefined);
+  assert.deepEqual(hud.video_gps, plain.video_gps);
+  assert.deepEqual(hud.video_clock, plain.video_clock);
+  assert.equal(hud.video_speed.length, 20);
+  assert.deepEqual(hud.video_speed[0], { time_s:20, speed_kmh:0, fix:3 });
+  assert.equal(hud.video_speed[1].time_s, 20.05);
+  assert.equal(hud.video_speed[1].speed_kmh, 3.6);
+});
+
+test("HUD preserves bad samples and fixes rather than interpolating over them", () => {
+  const a = { ...audit(), video_speed: [] };
+  consumeGpmfPacket(a, packet({ GPSF:0, GPS5:[[300000000,1140000000,0,NaN,0], [300000000,1140000000,0,0,0]] }), timing);
+  assert.deepEqual(a.video_speed, [{ time_s:20, speed_kmh:null, fix:0 }, { time_s:20.5, speed_kmh:0, fix:0 }]);
+  consumeGpmfPacket(a, packet({ GPS5:[[300000000,1140000000,0,Infinity,0]] }), {...timing,cts:42000});
+  assert.equal(a.video_speed[2].speed_kmh, null);
 });
 
 test("camera IMU is counted without producing body-frame values", () => {
@@ -94,4 +118,9 @@ test("cancelled, oversized, empty and malformed local files fail before any netw
   await assert.rejects(extractGoproTelemetry({ size: 21 * 1024 ** 3 }), /SIZE_LIMIT/);
   await assert.rejects(extractGoproTelemetry(new Blob()), /SIZE_LIMIT/);
   await assert.rejects(extractGoproTelemetry(new Blob(["bad"])), /INVALID_MP4/);
+});
+
+test("published metadata-free clip is not reported as a GPS-capable edited original", async () => {
+  const file = await openAsBlob(fileURLToPath(new URL("../public/demo/video/sector-1-lap-5.mp4", import.meta.url)));
+  await assert.rejects(extractGoproTelemetry(file, { includeGpsSpeed:true }), /GPMF_TRACK_UNAVAILABLE/);
 });

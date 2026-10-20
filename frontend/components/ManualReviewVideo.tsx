@@ -15,6 +15,7 @@ import { sharedReviewStart, MANUAL_PICK_UNCERTAINTY_S } from "../lib/reviewBound
 import { ReviewBoundaryCheck, type BoundaryVideo } from "./ReviewBoundaryCheck";
 import { ReviewGpsNotice } from "./ReviewGpsNotice";
 import { observeVideoClock } from "../lib/videoFrameClock";
+import { GoproSpeedOverlay } from "./GoproSpeedOverlay";
 
 const TEXT = {
   zh: {
@@ -29,7 +30,7 @@ const TEXT = {
     windowError: "请选择视频范围内的有效起点、终点，时长须为 0.1–120 秒。", linkError: "此片段无法完整对应本圈连续遥测，请调整范围或重新核对锚点。",
     anchorMissing: "请先绑定一个可确认的位置，再勾选同步。", localOnly: "视频不上传。时间差来自相同赛道区间的遥测，不是剪辑时长之差。",
     cropNote: "裁剪不会自动完成同步；没有可靠锚点时可以先保存预览。", boundaryNote: "人工片段仅覆盖该弯的一部分；上方时间差仍对应完整公共区间。",
-    scope: "对应遥测圈", history: "已恢复该视频的人工片段", anchorAt: "锚点（需核对）", revision: "修正时间", speed: "GPS 速度", rpm: "RPM",
+    scope: "对应遥测圈", history: "已恢复该视频的人工片段", anchorAt: "锚点（需核对）", revision: "修正时间", speed: "AiM GPS 速度", rpm: "RPM",
     candidate: "计时推算候选", conflict: "已有锚点彼此冲突，暂不跨圈推算。请核对人工标记。",
   },
   en: {
@@ -44,7 +45,7 @@ const TEXT = {
     windowError: "Select valid start/end times within the video, spanning 0.1–120 seconds.", linkError: "This clip does not map to continuous telemetry in this lap. Adjust its range or anchor.",
     anchorMissing: "Bind an identifiable location before confirming synchronization.", localOnly: "Video stays local. Deltas use the same track interval, not the difference between crop durations.",
     cropNote: "Cropping does not establish synchronization. Save a preview first if no reliable anchor is available.", boundaryNote: "This manual clip covers only part of the corner; the deltas above still use the complete shared interval.",
-    scope: "Bound telemetry lap", history: "Restored the manual clip for this video", anchorAt: "Anchor (check before confirming)", revision: "Revision", speed: "GPS speed", rpm: "RPM",
+    scope: "Bound telemetry lap", history: "Restored the manual clip for this video", anchorAt: "Anchor (check before confirming)", revision: "Revision", speed: "AiM GPS speed", rpm: "RPM",
     candidate: "Timing-based candidate", conflict: "Existing anchors disagree. Check the manual marks before estimating other laps.",
   },
 };
@@ -275,10 +276,10 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
       scope={`${fingerprint}:${review.entry}:${review.exit}`} cornerId={review.id} videoKey={JSON.stringify(identity)} videoUrl={url}
       onReview={openEditor} onSeek={time => { video.current?.pause(); seek(time); }} />}
     {!clip && proposal.reason === "anchors_disagree" && <p className="mb-2 text-xs text-amber-200">{c.conflict}</p>}
-    {url && (editing || clip) ? <video ref={video} src={url} muted playsInline preload="metadata" className="aspect-video w-full bg-black object-contain" aria-label={`${c[side]} L${lap}`}
+    {url && (editing || clip) ? <div className="relative min-w-0"><video ref={video} src={url} muted playsInline preload="metadata" className="aspect-video w-full bg-black object-contain" aria-label={`${c[side]} L${lap}`}
       onError={() => setError("error")} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
       onLoadedMetadata={event => { const el = event.currentTarget; if (ownFile && Number.isFinite(el.duration)) { setOwnDuration(el.duration); setEnd(p => Math.min(p, el.duration)); } el.playbackRate = rate; if (!editing && clip) el.currentTime = clip.start_s; }}
-      /> : <div className="flex aspect-video items-center justify-center bg-slate-950 p-4 text-center text-sm text-slate-400">{!url ? c.noVideo : c.missing}</div>}
+      /><GoproSpeedOverlay file={file} time={now} /></div> : <div className="flex aspect-video items-center justify-center bg-slate-950 p-4 text-center text-sm text-slate-400">{!url ? c.noVideo : c.missing}</div>}
     {editing && <div className="mt-3 space-y-3 border-y border-slate-700 py-3">
       <label className={`${btn} cursor-pointer`}><Upload size={15} />{c.choose}<input type="file" className="hidden" accept="video/mp4,video/quicktime,.mp4,.mov" onChange={e => { const next = e.target.files?.[0]; if (next) loadFile(next); e.target.value = ""; }} /></label>
       {ownFile && defaultFile && <button className={`${btn} ml-2`} onClick={() => { setOwnFile(null); setManual(null); setDraftAnchor(null); setConfirmed(false); setStart(0); setEnd(5); }}>{c.current}</button>}

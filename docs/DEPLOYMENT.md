@@ -306,6 +306,31 @@ them with a `NEXT_PUBLIC_` prefix.
 
 ## Release checks
 
+### Local GoPro speed overlay
+
+The two-driver video workspace and AI Coach five-second review show each video's
+own GPS5 2D speed (`m/s * 3.6`) over the picture. Optional unaveraged speed samples
+are separate from the existing coarse GNSS synchronization payload. Reads remain
+browser-local, sparse, bounded, cancellable and shared only for the same `File`.
+Neither video nor GPS samples are persisted or uploaded by this overlay.
+
+The HUD follows presented media-frame time, including pause, seek and slow playback.
+Packet CTS/timescale and uniformly estimated within-packet timestamps are used;
+sensor-to-image latency is still uncalibrated. Linear interpolation is limited to
+valid 3D-fix neighbors at most 0.25 seconds apart. No extrapolation, stale-value
+hold, cross-file substitution or AiM fallback is permitted. Invalid fixes, bad
+samples, gaps, unsupported edits/GPS9, and stripped metadata show unavailable.
+Manual anchors, their +/-0.5 second uncertainty and existing GPS anomaly notices
+are unchanged. GoPro and AiM readings remain explicitly labelled, not fused.
+Speed at the same elapsed video time need not represent the same track position.
+
+This is a browser playback overlay, not a burned-in export. Native video fullscreen
+or Picture-in-Picture can omit HTML overlays. Check desktop/mobile playback with
+a private metadata-preserving original locally and a metadata-free file; never
+add the private original or extracted GPS to public demo assets. Regression tests:
+`pnpm run test:video-comparison` and `pnpm run test:gnss-sync`, plus the release
+commands below.
+
 ### Manual lap binding and visual-score semantics
 
 Single Lap Analysis can bind explicitly marked video start/end to the selected

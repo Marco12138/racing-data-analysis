@@ -2,6 +2,7 @@ import { I18nProvider } from "../../frontend/lib/i18n";
 import { VideoAnalysisWorkspace } from "../../frontend/components/VideoAnalysisWorkspace";
 import { TrackLandmarkEditor } from "../../frontend/components/TrackLandmarkEditor";
 import { ReviewBoundaryCheck } from "../../frontend/components/ReviewBoundaryCheck";
+import { GoproSpeedDisplay } from "../../frontend/components/GoproSpeedOverlay";
 
 export function WorkspaceTest({ locale }: { locale: "zh" | "en" }) {
   return <I18nProvider initialLocale={locale}><VideoAnalysisWorkspace /></I18nProvider>;
@@ -14,4 +15,8 @@ export function LandmarkTest({ locale }: { locale: "zh" | "en" }) {
 export function BoundaryTest({ locale }: { locale: "zh" | "en" }) {
   const video = {url:"blob:local",start:10,duration:50,lap:1,confirmed:true,label:"Driver A"};
   return <I18nProvider initialLocale={locale}><ReviewBoundaryCheck reference={video} target={{...video,label:"Driver B"}} onSeek={() => {}} /></I18nProvider>;
+}
+export function SpeedTest({ locale, available }: { locale: "zh" | "en"; available: boolean }) {
+  const reason = available ? "available" : "gps_invalid";
+  return <I18nProvider initialLocale={locale}><GoproSpeedDisplay reading={{speed_kmh:available ? 42.3 : null,reason}} status={reason} time={12.5} /></I18nProvider>;
 }

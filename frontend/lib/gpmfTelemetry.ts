@@ -1,6 +1,7 @@
 /** Local-only metadata extraction. Movie creation dates are never GPS clocks. */
 export type GnssClockPoint = { time_s: number; utc_s: number; fix: number };
 export type GnssPositionPoint = { time_s: number; lat: number; lon: number; speed_kmh: number; fix: number };
+export type GoproSpeedPoint = { time_s: number; speed_kmh: number | null; fix: number };
 type Stream = Record<string, unknown>;
 export type GoproStreamSummary = {
   key: string; unit: string; sample_count: number; sample_rate_hz: number; first_time_s: number; last_time_s: number;
@@ -24,6 +25,7 @@ export type GoproAudit = {
   video_clock: GnssClockPoint[];
   video_gps: GnssPositionPoint[];
   camera_imu?: Partial<Record<"ACCL" | "GYRO", CameraImuSeries>>;
+  video_speed?: GoproSpeedPoint[];
 };
 
 /** GPSU is YYMMDDhhmmss.sss UTC, independent of local timezone or MP4 dates. */
@@ -123,6 +125,17 @@ export function consumeGpmfPacket(audit: GoproAudit, parsed: Stream, packet: Pic
     const fix = [0, 1, 2, 3].includes(Number(stream.GPSF)) ? Number(stream.GPSF) : 0;
     const utc = parseGpsUtc(stream.GPSU);
     if (utc != null) audit.video_clock.push({ time_s: start, utc_s: utc, fix });
+    // Optional local HUD samples, separate from the unchanged coarse sync payload.
+    // Retain invalid rows as barriers so the HUD cannot interpolate across them.
+    if (audit.video_speed) {
+      if (audit.video_speed.length + rows.length > 400000) throw new Error("GPMF_SPEED_SAMPLE_LIMIT");
+      for (const [index, row] of rows.entries()) {
+        const lat = row[0] / scale[0], lon = row[1] / scale[1], speed = row[3] / scale[3] * 3.6;
+        const valid = row.length === 5 && row.every((v: unknown) => typeof v === "number" && Number.isFinite(v))
+          && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && speed >= 0 && speed <= 600;
+        audit.video_speed.push({ time_s: start + index * duration / rows.length, speed_kmh: valid ? speed : null, fix });
+      }
+    }
     // A 0.2 s boxcar summary limits aliasing and payload size. This is not a
     // replacement for native telemetry and is used only for coarse sync checks.
     const binSize = Math.max(1, Math.ceil(rows.length * .2 / duration));
@@ -154,7 +167,7 @@ export function validateMovie(movie: Movie): number {
 
 /** Sparse reads of MP4 sample tables and gpmd packets, never audio/video decoding. */
 export async function extractGoproTelemetry(file: Blob, options: {
-  signal?: AbortSignal; onProgress?: (fraction: number) => void; includeCameraImu?: boolean;
+  signal?: AbortSignal; onProgress?: (fraction: number) => void; includeCameraImu?: boolean; includeGpsSpeed?: boolean;
 } = {}): Promise<GoproAudit> {
   const check = () => {
     options.signal?.throwIfAborted();
@@ -180,9 +193,9 @@ export async function extractGoproTelemetry(file: Blob, options: {
   }
   if (!info) throw new Error("GPMF_INVALID_MP4");
   const movie = info as Movie;
-  const duration = validateMovie(movie);
   const tracks = movie.tracks.filter((t) => t.codec === "gpmd");
   if (tracks.length !== 1) throw new Error("GPMF_TRACK_UNAVAILABLE");
+  const duration = validateMovie(movie);
   const packets: Packet[] = mp4.getTrackSamplesInfo(tracks[0].id);
   if (!packets.length || packets.length > 3600 || packets.reduce((sum, p) => sum + p.size, 0) > 32 * 1024 ** 2)
     throw new Error("GPMF_PACKET_LIMIT");
@@ -192,7 +205,8 @@ export async function extractGoproTelemetry(file: Blob, options: {
     camera_imu_body_calibrated: false, gps_clock_source: "GPSU only; no movie creation-date fallback",
     sample_time_method: "MP4 gpmd CTS/timescale; uniform timing within each payload, not native per-sample hardware timestamps",
     speed_summary_method: "within-payload 0.2s boxcar; center timestamp; not a dynamics signal",
-  }, video_clock: [], video_gps: [], ...(options.includeCameraImu ? { camera_imu: {} } : {}) };
+  }, video_clock: [], video_gps: [], ...(options.includeCameraImu ? { camera_imu: {} } : {}),
+  ...(options.includeGpsSpeed ? { video_speed: [] } : {}) };
   let previousEnd = -1;
   for (const [index, packet] of packets.entries()) {
     check();
@@ -211,6 +225,7 @@ export async function extractGoproTelemetry(file: Blob, options: {
   if (audit.video_gps.some((p) => p.time_s > duration)) audit.summary.warnings.push("METADATA_BEYOND_VIDEO_END_EXCLUDED");
   audit.video_clock = audit.video_clock.filter((p) => p.time_s <= duration);
   audit.video_gps = audit.video_gps.filter((p) => p.time_s <= duration);
+  if (audit.video_speed) audit.video_speed = audit.video_speed.filter((p) => p.time_s <= duration);
   if (!audit.video_clock.some((p) => p.fix >= 3)) audit.summary.warnings.push("GOPRO_GPS_UTC_UNAVAILABLE");
   return audit;
 }
