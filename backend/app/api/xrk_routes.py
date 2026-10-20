@@ -82,6 +82,47 @@ class LocalXrkInspectRequest(BaseModel):
     source_id: str = Field(min_length=24, max_length=24)
 
 
+class SelectedCornerRequest(BaseModel):
+    """A local five-second selection mapped through an existing human anchor."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    inspection_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    source_lap: int = Field(ge=1, le=100000)
+    start_session_s: float = Field(ge=0, le=86400)
+    end_session_s: float = Field(gt=0, le=86400)
+    confirmed_laps: list[int] = Field(default_factory=list, max_length=60)
+
+
+@router.post("/selected-corner")
+async def selected_corner(request: Request, payload: SelectedCornerRequest) -> dict[str, Any]:
+    """Compare a selected physical interval; no video bytes or anchors are stored."""
+    from ..analysis.selected_corner import analyze_selected_corner
+
+    try:
+        record = request.app.state.xrk_inspection_store.load(payload.inspection_id)
+    except InspectionExpiredError as exc:
+        raise PublicApiError(status_code=410, error_code="XRK_INSPECTION_EXPIRED",
+                             message=str(exc), error_type="expired_token") from exc
+    try:
+        telemetry = await asyncio.to_thread(pd.read_parquet, record.telemetry_path)
+        result = await asyncio.to_thread(analyze_selected_corner, telemetry, record.manifest,
+                                        source_lap=payload.source_lap, start_session_s=payload.start_session_s,
+                                        end_session_s=payload.end_session_s, confirmed_laps=payload.confirmed_laps)
+    except ValueError as exc:
+        reason = str(exc)
+        if not reason.startswith("corner_") or len(reason) > 80:
+            reason = "corner_data_unavailable"
+        raise PublicApiError(status_code=422, error_code=reason.upper(),
+                             message="This corner needs a quality-gated lap and continuous GPS/speed coverage. Choose another interval.",
+                             error_type="selected_corner_data") from exc
+    except Exception as exc:
+        raise PublicApiError(status_code=422, error_code="CORNER_DATA_UNAVAILABLE",
+                             message="This corner could not be compared. Re-import the session or choose another interval.",
+                             error_type="selected_corner_data") from exc
+    result["request_id"] = getattr(request.state, "request_id", "unknown")
+    return result
+
+
 class VideoFeaturePoint(BaseModel):
     """One browser-extracted, non-image video feature sample."""
 

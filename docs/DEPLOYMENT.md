@@ -306,6 +306,14 @@ them with a `NEXT_PUBLIC_` prefix.
 
 ## Release checks
 
+### User-selected corner reviews
+
+The additive `/api/v1/xrk/selected-corner` route supports arbitrary five-second
+source selections, real spatial-gate comparisons and exploratory profile groups.
+Deploy Railway before the frontend. Run `pnpm run test:selected-corner` in addition
+to the checks below. See [Selected Corner Review](SELECTED_CORNER_REVIEW.md) for
+manual confirmation, sample-size limits and unchanged synchronization boundaries.
+
 ### Local GoPro speed overlay
 
 The two-driver video workspace and AI Coach five-second review show each video's

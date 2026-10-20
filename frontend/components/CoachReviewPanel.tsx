@@ -14,6 +14,7 @@ import type { XrkAnalysis, XrkAnalyzeOptions } from "../lib/xrkAnalysisApi";
 import { ManualReviewVideo } from "./ManualReviewVideo";
 import { TopLapSegments } from "./TopLapSegments";
 import { PublishedVideoReview } from "./PublishedVideoReview";
+import { SelectedCornerPanel } from "./SelectedCornerPanel";
 
 const COPY = {
   zh: {
@@ -114,6 +115,8 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
     <TopThreeCharts analysis={analysis} c={c} />
   </div>;
   return <div className="min-w-0 space-y-6" data-testid="coach-review-panel">
+    {!readOnly && <SelectedCornerPanel analysis={analysis} file={videoFile} url={videoUrl} duration={videoDurationS}
+      anchors={sessionCalibrations} onSync={onSync} />}
     <TopLapSegments analysis={analysis} selected={segmentReview && segmentChoice ? `${segmentChoice.id}:${segmentChoice.lap}` : null}
       onSelect={(id, lap) => {
         setSegmentChoice({ fingerprint: analysis.file_fingerprint, id, lap });
