@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Activity, ArrowRight, BarChart3, Play, ShieldCheck, Upload, Zap } from "lucide-react";
+import { Activity, ArrowRight, BarChart3, ListChecks, Play, ShieldCheck, Upload, Zap } from "lucide-react";
 
 import type { PublicDemoSummary } from "../lib/publicDemo";
 import { useI18n, type TranslationKey } from "../lib/i18n";
@@ -15,7 +15,7 @@ const capabilities = [
 ] satisfies Array<[typeof Activity, TranslationKey, TranslationKey]>;
 
 export function LandingPageClient({ demo }: { demo: PublicDemoSummary | null }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   return (
     <><SiteNavigation /><main className="public-demo-page">
       <section className="public-hero" aria-labelledby="platform-title">
@@ -24,8 +24,9 @@ export function LandingPageClient({ demo }: { demo: PublicDemoSummary | null }) 
           <h1 id="platform-title">{t("hero.title")}</h1>
           <p className="hero-description">{t("hero.description")}</p>
           <div className="hero-actions">
-            <Link href="/demo" className="hero-primary"><Play size={18} fill="currentColor" /> {t("hero.tryDemo")}</Link>
-            <Link href="/workspace" className="hero-secondary"><Upload size={18} /> {t("hero.upload")}</Link>
+            <Link href="/review" className="hero-primary"><ListChecks size={18} /> {locale === "zh" ? "开始引导复盘" : "Start guided review"}</Link>
+            <Link href="/workspace" className="hero-secondary"><Upload size={18} /> {locale === "zh" ? "自由工作台" : "Free workspace"}</Link>
+            <Link href="/demo" className="hero-secondary"><Play size={18} /> {t("hero.tryDemo")}</Link>
           </div>
         </div>
         <a className="hero-scroll" href="#sample-preview" aria-label={t("hero.scroll")}><ArrowRight size={21} /></a>

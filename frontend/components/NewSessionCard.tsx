@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Clapperboard, Film, HardDrive, Play, Upload } from "lucide-react";
 
 import { useI18n } from "../lib/i18n";
@@ -24,6 +24,7 @@ export function NewSessionCard({
   onVideoSelect,
   maxUploadBytes,
   onCancel,
+  guided = false,
 }: {
   status: "idle" | "inspecting" | "inspected" | "analyzing" | "loaded";
   hasPendingVideo: boolean;
@@ -33,8 +34,10 @@ export function NewSessionCard({
   onVideoSelect?: (videoFile: File | null) => void;
   maxUploadBytes?: number;
   onCancel?: () => void;
+  guided?: boolean;
 }) {
   const { t, locale } = useI18n();
+  const titleId = useId();
   const [xrkFile, setXrkFile] = useState<File | null>(null);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [xrkError, setXrkError] = useState("");
@@ -95,16 +98,16 @@ export function NewSessionCard({
           : -1;
 
   return (
-    <section className="new-session-card" aria-labelledby="new-session-title">
+    <section className="new-session-card min-w-0" aria-labelledby={titleId}>
       <div className="new-session-card__header">
         <Clapperboard size={18} />
         <div>
-          <h3 id="new-session-title">{t("sessionCard.title")}</h3>
-          <p>{t("sessionCard.description")}</p>
+          <h3 id={titleId}>{guided ? (locale === "zh" ? "这一节的两份素材" : "This session's files") : t("sessionCard.title")}</h3>
+          {!guided && <p>{t("sessionCard.description")}</p>}
         </div>
       </div>
 
-      {localSources.length > 0 && onStartLocal && (
+      {!guided && localSources.length > 0 && onStartLocal && (
         <div className="new-session-card__local">
           <p className="new-session-card__local-title">
             <HardDrive size={13} />
@@ -182,7 +185,7 @@ export function NewSessionCard({
         }}
       >
         <Play size={16} fill="currentColor" />
-        {busy ? t("sessionCard.running") : t("sessionCard.start")}
+        {busy ? t("sessionCard.running") : guided ? (locale === "zh" ? "读取素材，查看数据概览" : "Read files and view session") : t("sessionCard.start")}
       </button>
       {busy && onCancel && <button type="button" className="nav-command mt-2" onClick={onCancel}>{locale === "zh" ? "取消导入" : "Cancel import"}</button>}
 

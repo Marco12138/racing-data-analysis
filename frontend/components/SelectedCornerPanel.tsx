@@ -29,25 +29,30 @@ const reasonText = (reason: string | null, zh: boolean) => {
   return names[reason ?? ""]?.[zh ? 0 : 1] ?? (zh ? "区段数据不足" : "Insufficient section data");
 };
 
-export function SelectedCornerPanel({ analysis, file, url, duration, anchors, onSync }: {
+export function SelectedCornerPanel({ analysis, file, url, duration, anchors, onSync, expanded = false, onResult, active = true }: {
   analysis: XrkAnalysis; file: File | null; url: string; duration: number;
   anchors: VideoSyncCalibration[]; onSync: () => void;
+  expanded?: boolean; onResult?: (result: SelectedCornerResult | null) => void;
+  active?: boolean;
 }) {
   const { locale } = useI18n(), zh = locale === "zh";
+  const [open, setOpen] = useState(expanded);
   const video = file ? reviewVideoIdentity(file, duration) : null;
   const usable = anchors.filter(a => video && matchesReviewVideo(a.video, video)
     && analysis.lap_quality.laps.some(l => l.lap === a.target_lap && l.analysis_eligible));
   return <section className="min-w-0 border-y border-slate-700 py-5" data-testid="selected-corner-panel">
-    <details><summary className="flex cursor-pointer items-center gap-2 py-2 text-lg font-semibold text-white"><Scissors size={20} />{zh ? "自选弯道 · 各圈开法" : "Choose a corner · Driving patterns"}</summary>
+    <details open={expanded || undefined} onToggle={event => setOpen(event.currentTarget.open)}><summary className="flex cursor-pointer items-center gap-2 py-2 text-lg font-semibold text-white"><Scissors size={20} />{zh ? "自选弯道 · 各圈开法" : "Choose a corner · Driving patterns"}</summary>
       {!file || !url || !usable.length ? <div className="mt-3"><p className="mb-3 text-sm text-slate-400">{zh ? "需要本地视频和至少一圈已确认的人工同步。" : "A local video and a confirmed real-lap anchor are required."}</p><button className={button} onClick={onSync}>{zh ? "选择视频 / 确认同步" : "Choose video / Confirm sync"}</button></div>
         : <CornerWorkspace key={`${analysis.file_fingerprint}:${file.size}:${file.lastModified}:${usable.map(a => a.calibrated_at).join(":")}`}
-          analysis={analysis} file={file} url={url} duration={duration} anchors={usable} />}
+          analysis={analysis} file={file} url={url} duration={duration} anchors={usable} onResult={onResult} active={active && (expanded || open)} />}
     </details>
   </section>;
 }
 
-function CornerWorkspace({ analysis, file, url, duration, anchors }: {
+function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, active: visible }: {
   analysis: XrkAnalysis; file: File; url: string; duration: number; anchors: VideoSyncCalibration[];
+  onResult?: (result: SelectedCornerResult | null) => void;
+  active: boolean;
 }) {
   const { locale } = useI18n(), zh = locale === "zh";
   const [sourceLap, setSourceLap] = useState(anchors[0].target_lap);
@@ -60,6 +65,7 @@ function CornerWorkspace({ analysis, file, url, duration, anchors }: {
   const [visuals, setVisuals] = useState<Record<number, Visual>>({}), [progress, setProgress] = useState("");
   const [visualErrors, setVisualErrors] = useState<number[]>([]), [groupCurrent, setGroupCurrent] = useState(false);
   const [fullInterval, setFullInterval] = useState(false), [gpsRaw, setGpsRaw] = useState<string | null>(null);
+  useEffect(() => { onResult?.(groupCurrent ? result : null); }, [groupCurrent, result, onResult]);
   const sourcePlayer = useRef<HTMLVideoElement>(null), targetPlayer = useRef<HTMLVideoElement>(null);
   const abort = useRef<AbortController | null>(null), visualAbort = useRef<AbortController | null>(null);
   const identity = useMemo(() => reviewVideoIdentity(file, duration), [file, duration]);
@@ -184,7 +190,7 @@ function CornerWorkspace({ analysis, file, url, duration, anchors }: {
       </section>)}</div>}
       <p className="text-xs text-slate-400">{zh ? "比较左右背景，不识别物体身份。画面相似度不是准确率；仍需核对圈号与首尾位置。确认仅对当前选区有效，不修改全局同步。" : "Compares background appearance, not object identity. Similarity is not accuracy. Check the lap and both locations; confirmation applies only to this selection, never global sync."}</p>
       <button className={`${button} text-cyan-200`} disabled={busy} onClick={() => void calculate(true)}><Check size={16} />{zh ? "比较已确认圈的开法" : "Compare confirmed driving patterns"} ({confirmed.filter(l => { const row = result.laps.find(r => r.lap === l); return row && !flagged(row); }).length})</button>
-      {groupCurrent && <CornerPatterns result={result} onLap={setSelectedLap} />}
+      {groupCurrent && <CornerPatterns result={result} onLap={setSelectedLap} active={visible} />}
     </>}
   </div>;
 }
@@ -195,7 +201,7 @@ function CornerPlayer({ file, url, start, end, label, playerRef }: { file: File;
   return <div className="min-w-0"><h4 className="mb-2 text-sm text-amber-200">{label}</h4><div className="relative"><video ref={playerRef} src={url} controls playsInline preload="metadata" className="aspect-video w-full bg-black" onLoadedMetadata={e => { e.currentTarget.currentTime = start; }} /><GoproSpeedOverlay file={file} time={time} /></div></div>;
 }
 
-function CornerPatterns({ result, onLap }: { result: SelectedCornerResult; onLap: (lap: number) => void }) {
+function CornerPatterns({ result, onLap, active }: { result: SelectedCornerResult; onLap: (lap: number) => void; active: boolean }) {
   const { locale } = useI18n(), zh = locale === "zh", patterns = result.patterns;
   const [channel, setChannel] = useState<"speed" | "rpm">("speed");
   const common = patterns.most_common_group_ids.length === 1 ? patterns.groups.find(g => g.id === patterns.most_common_group_ids[0]) : null;
@@ -214,7 +220,7 @@ function CornerPatterns({ result, onLap }: { result: SelectedCornerResult; onLap
         : (zh ? "频次或用时并列，不能指定唯一的最常用 / 最快模式。" : "Frequency or timing is tied; there is no unique most-common / fastest pattern.")}</p>
       <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="text-xs text-slate-400"><tr><th className="p-2">{zh ? "模式 / 真实圈" : "Pattern / Real laps"}</th><th>{zh ? "次数" : "Count"}</th><th>{zh ? "中位用时 / 范围" : "Median / Range"}</th><th>{zh ? "出弯速度" : "Exit speed"}</th><th>{zh ? "下游用时" : "Downstream time"}</th></tr></thead><tbody>{patterns.groups.map((g, i) => <tr key={g.id} className="border-t border-slate-800"><td className="p-2" style={{ color: colors[i] }}><button className={button} onClick={() => onLap(g.representative_lap)}><Play size={14} />{zh ? "模式" : "Pattern"} {g.id} · L{g.representative_lap}</button><p className="mt-1 text-xs">{g.laps.map(l => `L${l}`).join(", ")}</p></td><td>{g.count}</td><td>{num(g.median_time_s)}s<br /><span className="text-xs text-slate-400">{g.time_range_s.map(t => num(t)).join("–")}s</span></td><td>{num(g.metrics.exit_speed_kmh, 1)} km/h</td><td>{num(g.median_downstream_s)}s</td></tr>)}</tbody></table></div>
       <div className="flex gap-2" role="group" aria-label={zh ? "代表圈通道" : "Representative lap channel"}>{(["speed", "rpm"] as const).map(key => <button key={key} className={button} aria-pressed={key === channel} disabled={key === "rpm" && !patterns.channels?.includes("rpm")} onClick={() => setChannel(key)}>{key === channel && <Check size={14} />}{key === "speed" ? (zh ? "速度 km/h" : "Speed km/h") : "RPM"}</button>)}</div>
-      <div className="h-56 min-w-0"><ResponsiveContainer width="100%" height="100%"><LineChart data={chart}><CartesianGrid stroke="#26313d" /><XAxis dataKey="progress" unit="%" tick={{ fontSize: 10 }} /><YAxis width={48} unit="" tick={{ fontSize: 10 }} /><Tooltip contentStyle={{ background: "#111820", borderColor: "#334155" }} />{patterns.groups.map((g, i) => <Line key={g.id} name={`L${g.representative_lap} ${channel === "speed" ? "km/h" : "rpm"}`} dataKey={`lap_${g.representative_lap}`} stroke={colors[i]} dot={false} isAnimationActive={false} />)}</LineChart></ResponsiveContainer></div>
+      {active && <div className="h-56 min-w-0"><ResponsiveContainer width="100%" height="100%"><LineChart data={chart}><CartesianGrid stroke="#26313d" /><XAxis dataKey="progress" unit="%" tick={{ fontSize: 10 }} /><YAxis width={48} unit="" tick={{ fontSize: 10 }} /><Tooltip contentStyle={{ background: "#111820", borderColor: "#334155" }} />{patterns.groups.map((g, i) => <Line key={g.id} name={`L${g.representative_lap} ${channel === "speed" ? "km/h" : "rpm"}`} dataKey={`lap_${g.representative_lap}`} stroke={colors[i]} dot={false} isAnimationActive={false} />)}</LineChart></ResponsiveContainer></div>}
       <p className="text-xs text-slate-400">{zh ? "曲线为每组一条真实代表圈，横轴为区段内行驶距离比例；不是合成曲线或精确逐位置配准。" : "Curves show one real representative lap per group over within-section distance percentage, not synthetic curves or exact pointwise registration."}</p>
       {patterns.status === "exploratory_groups" && common && fastest && common.id !== fastest.id && <p className="text-sm text-slate-200">{zh
         ? `优先并排复盘 L${common.representative_lap} 与 L${fastest.representative_lap}：较快组的最低速度相差 ${num(fastest.metrics.minimum_speed_kmh - common.metrics.minimum_speed_kmh, 1)} km/h，出弯速度相差 ${num(fastest.metrics.exit_speed_kmh - common.metrics.exit_speed_kmh, 1)} km/h。结合参照物观察减速结束和速度恢复的位置；这不是已确认的刹车或油门原因。`

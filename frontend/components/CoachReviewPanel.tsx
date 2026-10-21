@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { guidedReviewKey, type ReviewReceipt } from "../lib/guidedReview";
+import type { SelectedCornerResult } from "../lib/selectedCorner";
 import { Check, MapPin, Send, Video } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useI18n } from "../lib/i18n";
@@ -67,14 +69,19 @@ const COLORS = ["#f6c945", "#35d6d0", "#ff5964"];
 const button = "inline-flex items-center justify-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400 disabled:opacity-40";
 const fmt = (n: unknown) => typeof n === "number" && Number.isFinite(n) ? n.toFixed(3) : "—";
 
-export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS, calibration, onSync, onCursor, onAnalyze, analyzing = false, readOnly = false }: {
+export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS, calibration, onSync, onCursor, onAnalyze, analyzing = false, readOnly = false, guidedPage, onDecision, onCornerResult, active = true }: {
   analysis: XrkAnalysis; videoUrl: string; videoFile: File | null; videoDurationS: number;
   calibration: VideoSyncCalibration | null; onSync: () => void; onCursor: (distance: number) => void;
   onAnalyze?: (options: Partial<XrkAnalyzeOptions>) => Promise<void>; analyzing?: boolean; readOnly?: boolean;
+  guidedPage?: "recommended" | "selected";
+  onDecision?: (receipt: ReviewReceipt) => void;
+  onCornerResult?: (result: SelectedCornerResult | null) => void;
+  active?: boolean;
 }) {
   const { locale } = useI18n(), c = COPY[locale];
   const [chosenReference, setChosenReference] = useState<number | null>(null), [lapError, setLapError] = useState(false);
   const [changing, setChanging] = useState(false);
+  const [reviewIndex, setReviewIndex] = useState(0);
   const [segmentChoice, setSegmentChoice] = useState<{ fingerprint: string; id: string; lap: number } | null>(null);
   const segmentReview = useMemo(() => segmentChoice?.fingerprint === analysis.file_fingerprint
     ? selectSegmentReview(analysis, segmentChoice.id, segmentChoice.lap) : null, [analysis, segmentChoice]);
@@ -112,11 +119,12 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
   const sessionCalibrations = useMemo(() => Object.values(mappings), [mappings]);
   if (readOnly && analysis.video_review) return <div className="min-w-0 space-y-6" data-testid="coach-review-panel">
     <PublishedVideoReview review={analysis.video_review} />
-    <TopThreeCharts analysis={analysis} c={c} />
+    {active && <TopThreeCharts analysis={analysis} c={c} />}
   </div>;
   return <div className="min-w-0 space-y-6" data-testid="coach-review-panel">
-    {!readOnly && <SelectedCornerPanel analysis={analysis} file={videoFile} url={videoUrl} duration={videoDurationS}
-      anchors={sessionCalibrations} onSync={onSync} />}
+    <div hidden={guidedPage === "recommended"}>{!readOnly && <SelectedCornerPanel analysis={analysis} file={videoFile} url={videoUrl} duration={videoDurationS}
+      anchors={sessionCalibrations} onSync={onSync} expanded={!!guidedPage} onResult={onCornerResult} active={active && guidedPage !== "recommended"} />}</div>
+    <div hidden={!!guidedPage}>
     <TopLapSegments analysis={analysis} selected={segmentReview && segmentChoice ? `${segmentChoice.id}:${segmentChoice.lap}` : null}
       onSelect={(id, lap) => {
         setSegmentChoice({ fingerprint: analysis.file_fingerprint, id, lap });
@@ -127,12 +135,12 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
         review={segmentReview} analysis={analysis} videoUrl={videoUrl} file={videoFile} duration={videoDurationS}
         targetCalibration={mappings[segmentReview.targetLap] ?? null} referenceCalibration={mappings[segmentReview.referenceLap] ?? null}
         sessionCalibrations={sessionCalibrations}
-        onCursor={onCursor} c={c} readOnly={readOnly} />}
+        onCursor={onCursor} c={c} readOnly={readOnly} active={active && !guidedPage} />}
       {segmentChoice?.fingerprint === analysis.file_fingerprint && !segmentReview && <p className="text-sm text-amber-200">
         {locale === "zh" ? "该段连续 GPS / 计时覆盖不足，不能自动定位视频；分段用时仍保留。" : "Continuous GPS/timing coverage is insufficient to locate this clip; split times remain available."}
       </p>}
     </div>
-    <TopThreeCharts analysis={analysis} c={c} />
+    {active && !guidedPage && <TopThreeCharts analysis={analysis} c={c} />}
     <div className="grid gap-3 sm:grid-cols-2">
       <label className="min-w-0 text-xs text-slate-400">{c.reference}<select className="mt-1 w-full rounded border border-slate-700 bg-slate-950 p-2 text-sm" aria-label={c.reference} value={chosenReference ?? "auto"} disabled={!onAnalyze || analyzing || changing || readOnly} onChange={e => void changeLap("reference", e.target.value)}>
         <option value="auto">{c.automaticReference}</option>
@@ -144,17 +152,22 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
     </div>
     <p className="text-xs text-slate-400">{c.changeNote}</p>
     {lapError && <p role="alert" className="text-sm text-red-300">{c.lapChangeError}</p>}
+    </div>
+    <div hidden={guidedPage === "selected"}>
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h3 className="text-lg font-semibold text-white">{c.title}</h3>
       <button className={button} onClick={onSync}><Video size={16} />{c.sync}</button>
     </div>
     <p className="text-xs text-slate-400">{c.measured}</p>
     {!reviews.length && <p className="text-sm text-slate-400">{c.empty}</p>}
-    {reviews.map(review => <ReviewCard key={`${analysis.file_fingerprint}:${review.id}`}
+    {guidedPage && reviews.length > 0 && <div className="my-4 flex flex-wrap gap-2" role="group" aria-label={locale === "zh" ? "推荐片段" : "Recommended clips"}>{reviews.map((review, i) => <button key={review.id} className={`${button} ${i === Math.min(reviewIndex, reviews.length - 1) ? "border-cyan-400 bg-cyan-400/10 text-cyan-100" : ""}`} aria-pressed={i === Math.min(reviewIndex, reviews.length - 1)} onClick={event => { event.currentTarget.closest('[data-testid="coach-review-panel"]')?.querySelectorAll("video").forEach(v => v.pause()); setReviewIndex(i); }}>{locale === "zh" ? `片段 ${i + 1}` : `Clip ${i + 1}`} · {locale === "zh" ? review.name.replace(/^Suggested Zone\s+/i, "区间 ").replace(/^Zone\s+/i, "区间 ") : review.name}</button>)}</div>}
+    {reviews.map((review, i) => <div key={`${analysis.file_fingerprint}:${review.id}:${review.targetLap}:${review.referenceLap}`} hidden={!!guidedPage && i !== Math.min(reviewIndex, reviews.length - 1)}><ReviewCard
       review={review} analysis={analysis} videoUrl={videoUrl} file={videoFile} duration={videoDurationS}
       targetCalibration={mappings[review.targetLap] ?? null} referenceCalibration={mappings[review.referenceLap] ?? null}
       sessionCalibrations={sessionCalibrations}
-      onCursor={onCursor} c={c} readOnly={readOnly} />)}
+      onCursor={onCursor} c={c} readOnly={readOnly} onDecision={onDecision}
+      active={active && guidedPage !== "selected" && (!guidedPage || i === Math.min(reviewIndex, reviews.length - 1))} /></div>)}
+    </div>
   </div>;
 }
 
@@ -190,17 +203,20 @@ function TopThreeCharts({ analysis, c }: { analysis: XrkAnalysis; c: Copy }) {
   </div>;
 }
 
-function ReviewCard({ review, analysis, videoUrl, file, duration, targetCalibration, referenceCalibration, sessionCalibrations, onCursor, c, readOnly }: {
+function ReviewCard({ review, analysis, videoUrl, file, duration, targetCalibration, referenceCalibration, sessionCalibrations, onCursor, c, readOnly, onDecision, active = true }: {
   review: ReviewSelection; analysis: XrkAnalysis; videoUrl: string; file: File | null; duration: number;
   targetCalibration: VideoSyncCalibration | null; referenceCalibration: VideoSyncCalibration | null;
   sessionCalibrations: VideoSyncCalibration[];
   onCursor: (distance: number) => void; c: Copy;
   readOnly: boolean;
+  onDecision?: (receipt: ReviewReceipt) => void;
+  active?: boolean;
 }) {
   const { locale } = useI18n();
   const sector = review.kind === "sector";
   const contextLabel = sector ? (locale === "zh" ? "完整分段与下一段" : "Full sector and next sector") : c.context;
   const [context, setContext] = useState(false), [cursor, setCursor] = useState(review.focus);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const name = locale === "zh" ? review.name.replace(/^Suggested Zone\s+/i, "建议区间 ").replace(/^Zone\s+/i, "区间 ") : review.name;
   const landmarkEvents = Object.fromEntries([review.referenceLap, review.targetLap].map(lap => {
     const zone = analysis.zones.comparisons.find(z => z.id === review.id);
@@ -233,12 +249,12 @@ function ReviewCard({ review, analysis, videoUrl, file, duration, targetCalibrat
       feedback={state => readOnly || !/^[0-9a-f]{32}$/.test(analysis.inspection_id)
         ? <p className="mt-3 text-xs text-slate-400">{locale === "zh" ? "演示模式不收集复核投票。" : "Review voting is disabled for demo data."}</p>
         : <ClipAccuracyFeedback key={state.clipId || state.side} clipId={state.clipId} analysis={analysis} review={review}
-        clip={state.clip} enabled={state.enabled} c={c} source={state.source} side={state.side} syncConfirmed={state.syncConfirmed} correction={state.correction} />} />
+        clip={state.clip} enabled={state.enabled} c={c} source={state.source} side={state.side} syncConfirmed={state.syncConfirmed} correction={state.correction} onDecision={onDecision} />} />
     <p className="mt-4 text-sm leading-6 text-slate-200">{c.review}</p>
     <p className="mt-2 text-sm leading-6 text-slate-300">{c.drill}</p>
     <p className="mt-2 text-xs text-slate-500">{!sector && <>{c.repeated}: {review.sourceLaps.map(l => `L${l}`).join(", ") || "—"}. </>}{c.notConfirmed}</p>
-    <details className="mt-5 border-t border-slate-800 pt-3"><summary className="cursor-pointer text-sm text-slate-300">{c.details}</summary>
-      <div className="mt-3 grid min-w-0 gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
+    <details className="mt-5 border-t border-slate-800 pt-3" onToggle={event => setDetailsOpen(event.currentTarget.open)}><summary className="cursor-pointer text-sm text-slate-300">{c.details}</summary>
+      {active && detailsOpen && <div className="mt-3 grid min-w-0 gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
         <ReviewMap trace={review.target} review={review} cursor={cursor} onCursor={d => { setCursor(d); onCursor(d); }} />
         <div className="grid min-w-0 gap-3">{["speed", "rpm"].map(channel => <div className="h-44 min-w-0" key={channel}><ResponsiveContainer width="100%" height="100%"><LineChart data={chart}>
           <CartesianGrid stroke="#26313d" /><XAxis dataKey="distance" type="number" domain={[review.entry, review.downstreamEnd]} tick={{ fontSize: 10 }} unit="m" minTickGap={30} />
@@ -246,7 +262,7 @@ function ReviewCard({ review, analysis, videoUrl, file, duration, targetCalibrat
           <ReferenceLine x={cursor} stroke="#f6c945" /><Line name={`L${review.targetLap} ${channel === "speed" ? "km/h" : "RPM"}`} dataKey={`target_${channel}`} stroke="#35d6d0" dot={false} isAnimationActive={false} />
           <Line name={`L${review.referenceLap} ${channel === "speed" ? "km/h" : "RPM"}`} dataKey={`reference_${channel}`} stroke="#f6c945" dot={false} isAnimationActive={false} />
         </LineChart></ResponsiveContainer></div>)}</div>
-      </div>
+      </div>}
     </details>
   </article>;
 }
@@ -267,9 +283,10 @@ function ReviewMap({ trace, review, cursor, onCursor }: { trace: ReviewPoint[]; 
 }
 
 
-function ClipAccuracyFeedback({ clipId, analysis, review, clip, enabled, c, source, side, syncConfirmed, correction }: {
+function ClipAccuracyFeedback({ clipId, analysis, review, clip, enabled, c, source, side, syncConfirmed, correction, onDecision }: {
   clipId: string; analysis: XrkAnalysis; review: ReviewSelection; clip: ReviewWindow | null; enabled: boolean; c: Copy;
   source: "automatic" | "manual"; side: "reference" | "target"; syncConfirmed: boolean; correction: ClipFeedbackInput["correction"];
+  onDecision?: (receipt: ReviewReceipt) => void;
 }) {
   const { locale } = useI18n();
   const key = `racing-clip-feedback:${clipId}`;
@@ -277,6 +294,10 @@ function ClipAccuracyFeedback({ clipId, analysis, review, clip, enabled, c, sour
   const [reason, setReason] = useState<ClipFeedbackInput["reason"]>(null);
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const id = useRef("");
+  const reviewKey = guidedReviewKey(review);
+  useEffect(() => {
+    onDecision?.({ reviewKey, side, clipId, verdict, syncConfirmed, current: enabled && status === "saved" });
+  }, [reviewKey, side, clipId, verdict, syncConfirmed, enabled, status, onDecision]);
   useEffect(() => {
     id.current = crypto.randomUUID().replaceAll("-", "");
     try {

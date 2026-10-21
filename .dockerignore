@@ -1,6 +1,7 @@
 .git
 .github
 .next
+.next-review
 .vinext
 .wrangler
 dist

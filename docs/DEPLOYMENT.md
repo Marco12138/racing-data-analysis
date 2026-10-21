@@ -485,6 +485,8 @@ python -m pytest backend/tests -q
 pnpm run test:frontend
 pnpm run test:coach-debrief
 pnpm run test:video-comparison
+pnpm run test:guided-review
+pnpm run test:selected-corner
 pnpm run test:gnss-sync
 pnpm run test:rpm-sync
 pnpm run lint
@@ -798,6 +800,16 @@ in a separate tab. See [Driver Video Comparison](DRIVER_VIDEO_COMPARISON.md).
 This frontend-only addition reuses the existing landmark and boundary algorithms;
 no Railway deployment or video upload is required. Run the new comparison tests
 and desktop/mobile browser acceptance before publishing Vercel and Sites.
+
+## Guided review and free workspace
+
+The homepage and top navigation expose `/review` for the six-step guided flow.
+`/workspace` stays the original free workspace; existing bookmarks are not
+redirected. Both reuse the same inspection, analysis and local video components.
+No backend migration, new analysis rule or video upload is required for this
+frontend release. See [Guided Review](GUIDED_REVIEW_PREVIEW.md) for scope and limits.
+After deployment check both routes, desktop/mobile navigation, runtime config,
+and the reviewed public demo. Private XRK/video acceptance remains local only.
 
 ## Provider references
 

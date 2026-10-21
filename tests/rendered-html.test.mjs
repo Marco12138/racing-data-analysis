@@ -29,13 +29,17 @@ test("server-renders a focused landing page without embedding the workspace", as
   assert.match(html, /AI 赛车遥测分析平台/);
   assert.match(html, /使用样例 XRK 体验 Demo/);
   assert.match(html, /遥测分析/);
+  assert.match(html, /开始引导复盘/);
+  assert.match(html, /自由工作台/);
+  assert.match(html, /href="\/review"/);
+  assert.match(html, /href="\/workspace"/);
   assert.match(html, /一张图，先看懂这次 Session/);
   assert.doesNotMatch(html, /Lap &amp; Sector Analysis/);
   assert.doesNotMatch(html, /新建 Session/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 
-test("server-renders the import workflow only on the workspace route", async () => {
+test("preserves the free workspace import workflow", async () => {
   const response = await render(undefined, "en-US,en;q=0.9", "", "/workspace");
   assert.equal(response.status, 200);
   const html = await response.text();
@@ -44,6 +48,17 @@ test("server-renders the import workflow only on the workspace route", async () 
   assert.match(html, /New Session/);
   assert.match(html, /Start analysis/);
   assert.doesNotMatch(html, /Understand a session at a glance/);
+});
+
+test("server-renders the guided workflow separately without replacing the free workspace", async () => {
+  const response = await render(undefined, "zh-CN", "", "/review");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  for (const label of ["导入素材", "数据概览", "单圈配对", "推荐复盘", "自选弯道", "本节总结"]) {
+    assert.ok(html.includes(label), `Guided review missing ${label}`);
+  }
+  assert.match(html, /href="\/workspace"/);
+  assert.doesNotMatch(html, /一张图，先看懂这次 Session/);
 });
 
 test("server-renders the reviewed sample on its own demo route", async () => {
@@ -56,12 +71,12 @@ test("server-renders the reviewed sample on its own demo route", async () => {
 });
 
 test("all primary routes share bilingual functional navigation and real destinations", async () => {
-  for (const path of ["/", "/workspace", "/video-coach", "/methods", "/about"]) {
+  for (const path of ["/", "/review", "/workspace", "/video-coach", "/methods", "/about"]) {
     const response = await render(undefined, "en-US", "", path);
     assert.equal(response.status, 200);
     const html = await response.text();
-    for (const label of ["遥测分析", "Telemetry", "视频分析", "Video", "模型介绍", "Methods", "项目介绍", "About"]) assert.ok(html.includes(label), `${path} missing ${label}`);
-    for (const href of ["/workspace", "/video-coach", "/methods", "/about"]) assert.ok(html.includes(`href="${href}"`));
+    for (const label of ["引导复盘", "Guided review", "遥测分析", "Telemetry", "视频分析", "Video", "模型介绍", "Methods", "项目介绍", "About"]) assert.ok(html.includes(label), `${path} missing ${label}`);
+    for (const href of ["/review", "/workspace", "/video-coach", "/methods", "/about"]) assert.ok(html.includes(`href="${href}"`));
     if (path === "/methods") {
       assert.match(html, /Measured/);
       assert.match(html, /Inferred/);

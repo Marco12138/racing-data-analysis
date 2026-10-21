@@ -7,6 +7,10 @@ import { RpmSyncReview, type SyncReviewPoint, type SyncReviewVerdict } from "./R
 import { GoproSyncPanel } from "./GoproSyncPanel";
 import { ManualLapBinding } from "./ManualLapBinding";
 import { CoachDebrief } from "./CoachDebrief";
+import { GuidedOverview, GuidedDebrief, ReviewSteps, ReviewFooter } from "./GuidedReview";
+import { REVIEW_STEPS, type ReviewStep, type ReviewReceipt } from "../lib/guidedReview";
+import type { SelectedCornerResult } from "../lib/selectedCorner";
+import { matchesReviewVideo, reviewVideoIdentity } from "../lib/manualReview";
 
 import {
   useCallback,
@@ -158,6 +162,10 @@ export function XrkAnalysisWorkspace({
   publishedDemo = false,
   initialVideoFile,
   llmNarrative = { available: false, model: null },
+  guided = false,
+  importPanel,
+  metadataPanel,
+  expiresAt,
 }: {
   analysis: XrkAnalysis;
   analyzing: boolean;
@@ -165,9 +173,21 @@ export function XrkAnalysisWorkspace({
   publishedDemo?: boolean;
   initialVideoFile?: File | null;
   llmNarrative?: { available: boolean; model: string | null };
+  guided?: boolean;
+  importPanel?: ReactNode;
+  metadataPanel?: ReactNode;
+  expiresAt?: string;
 }) {
   const { t, locale } = useI18n();
   const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [step, setStep] = useState<ReviewStep>(1);
+  const [expired, setExpired] = useState(false);
+  const root = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const check = () => setExpired(Boolean(expiresAt && Date.parse(expiresAt) <= Date.now()));
+    const timer = setInterval(check, 10000); queueMicrotask(check);
+    return () => clearInterval(timer);
+  }, [expiresAt]);
   const [trackView, setTrackView] = useState<"session" | "reference">("session");
   const [cursorDistance, setCursorDistance] = useState(0);
   const [seekRequest, setSeekRequest] = useState<SeekRequest | null>(null);
@@ -186,6 +206,29 @@ export function XrkAnalysisWorkspace({
     return parseVideoSyncCalibration(window.localStorage.getItem(videoStorageKey));
   });
   const [offsetMs, setOffsetMs] = useState(calibration?.offset_ms ?? 0);
+  const scope = `${analysis.file_fingerprint}:${analysis.target_lap}:${analysis.reference_lap}:${videoFile?.size}:${videoFile?.lastModified}:${calibration?.calibrated_at}`;
+  const [decisions, setDecisions] = useState<{ scope: string; rows: ReviewReceipt[] }>({ scope: "", rows: [] });
+  const [cornerSummary, setCornerSummary] = useState<{ scope: string; result: SelectedCornerResult | null }>({ scope: "", result: null });
+  const recordDecision = useCallback((row: ReviewReceipt) => {
+    setDecisions(old => {
+      const rows = old.scope === scope ? old.rows : [];
+      const previous = rows.find(r => r.reviewKey === row.reviewKey && r.side === row.side);
+      if (JSON.stringify(previous) === JSON.stringify(row)) return old;
+      return { scope, rows: [...rows.filter(r => r.reviewKey !== row.reviewKey || r.side !== row.side), row] };
+    });
+  }, [scope]);
+  const recordCorner = useCallback((result: SelectedCornerResult | null) => {
+    setCornerSummary(old => old.scope === scope && old.result === result ? old : { scope, result });
+  }, [scope]);
+  const view: TabId = guided ? (["overview", "overview", "video", "coach", "coach", "report"] as const)[step] : activeTab;
+  const paired = !!(videoFile && calibration && calibration.review?.verdict === "confirmed"
+    && matchesReviewVideo(calibration.video, reviewVideoIdentity(videoFile, videoDurationS)));
+  function goStep(next: ReviewStep) {
+    root.current?.querySelectorAll("video, audio").forEach(el => (el as HTMLMediaElement).pause());
+    setStep(next);
+    requestAnimationFrame(() => root.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
+  }
+  useEffect(() => { root.current?.querySelectorAll("video, audio").forEach(el => (el as HTMLMediaElement).pause()); }, [view, step, guided]);
 
   useEffect(() => {
     if (!videoFile) return;
@@ -288,8 +331,10 @@ export function XrkAnalysisWorkspace({
   }
 
   return (
-    <section className="flex min-w-0 flex-col gap-5">
-      <nav className="panel thin-scrollbar flex overflow-x-auto rounded-lg p-2" aria-label={t("xrk.navLabel")}>
+    <section ref={root} className="flex min-w-0 scroll-mt-24 flex-col gap-5">
+      {guided && <><ReviewSteps step={step} hasData onStep={goStep} /><header className="flex items-center justify-between gap-3"><h2 className="text-xl font-semibold">{REVIEW_STEPS[step][locale === "zh" ? 0 : 1]}</h2><span className={`text-xs ${paired ? "text-emerald-300" : "text-slate-400"}`}>{paired ? (locale === "zh" ? `L${calibration?.target_lap} 已人工配对` : `L${calibration?.target_lap} manually paired`) : (locale === "zh" ? "视频尚未配对" : "Video not paired")}</span></header></>}
+      {guided && expired && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-y border-amber-700 py-3 text-sm text-amber-200"><span>{locale === "zh" ? "临时遥测已到期。当前视频和已显示结果仍可查看，重新计算需要导入原文件。" : "Temporary telemetry expired. Loaded video/results remain viewable; re-import the file to recalculate."}</span><button className="underline" onClick={() => goStep(0)}>{locale === "zh" ? "重新导入" : "Re-import"}</button></div>}
+      <nav hidden={guided} className="panel thin-scrollbar flex overflow-x-auto rounded-lg p-2" aria-label={t("xrk.navLabel")}>
         {primaryTabs.map(([id, labelKey, Icon]) => (
           <button
             key={id}
@@ -325,7 +370,7 @@ export function XrkAnalysisWorkspace({
         </label>
       </nav>
 
-      {analysis.track ? <PersistentWeaknessHint trackId={analysis.track.track_id} /> : null}
+      {!guided && analysis.track ? <PersistentWeaknessHint trackId={analysis.track.track_id} /> : null}
 
       {analyzing && (
         <div className="rounded-md border border-[#35d6d0]/30 bg-[#35d6d0]/10 px-4 py-3 text-sm text-cyan-100">
@@ -339,7 +384,9 @@ export function XrkAnalysisWorkspace({
         </div>
       )}
 
-      {activeTab === "overview" && (
+      {guided && step === 0 && importPanel}
+      {guided && step === 1 && <>{metadataPanel}<GuidedOverview analysis={analysis} videoName={videoName} videoDuration={videoDurationS} /></>}
+      {!guided && view === "overview" && (
         <Overview
           analysis={analysis}
           selectedEvent={selectedEvent}
@@ -347,7 +394,7 @@ export function XrkAnalysisWorkspace({
         />
       )}
 
-      {activeTab === "quality" && (
+      {view === "quality" && (
         <LapQualityPanel
           analysis={analysis}
           analyzing={analyzing}
@@ -356,7 +403,7 @@ export function XrkAnalysisWorkspace({
         />
       )}
 
-      {activeTab === "track" && (
+      {view === "track" && (
         <div className="space-y-5">
           <div className="flex flex-wrap gap-2" role="group" aria-label={locale === "zh" ? "赛道视图" : "Track view"}>
             {(["session", "reference"] as const).map(view => <button key={view} aria-pressed={trackView === view}
@@ -375,7 +422,7 @@ export function XrkAnalysisWorkspace({
         </div>
       )}
 
-      {activeTab === "comparison" && (
+      {view === "comparison" && (
         analysis.comparison.length ? (
           <ComparisonPanel
             analysis={analysis}
@@ -390,7 +437,7 @@ export function XrkAnalysisWorkspace({
         )
       )}
 
-      {activeTab === "actions" && (
+      {view === "actions" && (
         analysis.capabilities.rpm || analysis.capabilities.direct_brake ? (
           <ActionsPanel
             analysis={analysis}
@@ -407,7 +454,7 @@ export function XrkAnalysisWorkspace({
         )
       )}
 
-      {activeTab === "sectors" && (
+      {view === "sectors" && (
         analysis.track && analysis.sectors ? (
           <SectorZonePanel
             analysis={analysis}
@@ -426,8 +473,10 @@ export function XrkAnalysisWorkspace({
         )
       )}
 
-      {activeTab === "video" && (
+      <div hidden={view !== "video"}>
         <SingleLapAnalysisPanel
+          guided={guided}
+          active={view === "video"}
           analysis={analysis}
           analyzing={analyzing}
           onAnalyze={onAnalyze}
@@ -448,9 +497,9 @@ export function XrkAnalysisWorkspace({
           setCalibration={setCalibration}
           setOffsetMs={setOffsetMs}
         />
-      )}
+      </div>
 
-      {activeTab === "storyboard" && (
+      {view === "storyboard" && (
         <StoryboardPanel
           analysis={analysis}
           videoFile={videoFile}
@@ -463,17 +512,20 @@ export function XrkAnalysisWorkspace({
         />
       )}
 
-      {activeTab === "coach" && (
-        <CoachSummaryPanel analysis={analysis} onCursor={selectDistance} llmNarrative={llmNarrative} readOnly={publishedDemo}
-          calibration={calibration} videoFile={videoFile} videoDurationS={videoDurationS}>
+      <div hidden={view !== "coach"}>
+        {!guided && <CoachSummaryPanel analysis={analysis} onCursor={selectDistance} llmNarrative={llmNarrative} readOnly={publishedDemo}
+          calibration={calibration} videoFile={videoFile} videoDurationS={videoDurationS} />}
           <CoachReviewPanel analysis={analysis} videoUrl={videoUrl} videoFile={videoFile}
+            active={view === "coach"}
             videoDurationS={videoDurationS} calibration={calibration}
-            onSync={() => setActiveTab("video")} onCursor={selectDistance}
+            guidedPage={guided ? (step === 4 ? "selected" : "recommended") : undefined}
+            onDecision={recordDecision} onCornerResult={recordCorner}
+            onSync={() => guided ? goStep(2) : setActiveTab("video")} onCursor={selectDistance}
             onAnalyze={onAnalyze} analyzing={analyzing} readOnly={publishedDemo} />
-        </CoachSummaryPanel>
-      )}
+      </div>
 
-      {activeTab === "report" && <ReportPanel analysis={analysis} />}
+      {view === "report" && (guided ? <GuidedDebrief analysis={analysis} receipts={decisions.scope === scope ? decisions.rows : []} corner={cornerSummary.scope === scope ? cornerSummary.result : null} onReview={() => goStep(3)} /> : <ReportPanel analysis={analysis} />)}
+      {guided && <ReviewFooter step={step} onStep={goStep} paired={paired} busy={analyzing} />}
     </section>
   );
 }
@@ -1277,6 +1329,8 @@ export function SingleLapAnalysisPanel({
   setVideoDurationS,
   setCalibration,
   setOffsetMs,
+  guided = false,
+  active = true,
 }: {
   analysis: XrkAnalysis;
   analyzing?: boolean;
@@ -1297,8 +1351,11 @@ export function SingleLapAnalysisPanel({
   setVideoDurationS: (value: number) => void;
   setCalibration: (value: VideoSyncCalibration | null) => void;
   setOffsetMs: (value: number) => void;
+  guided?: boolean;
+  active?: boolean;
 }) {
   const { t, locale } = useI18n();
+  const [advanced, setAdvanced] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const [syncMessage, setSyncMessage] = useState("");
@@ -1574,9 +1631,10 @@ export function SingleLapAnalysisPanel({
         video.currentTime = Math.min(video.duration, video.currentTime + (event.shiftKey ? 0.1 : 1 / 30));
       }
     };
+    if (!active) return;
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [videoUrl, videoDurationS, markNext]);
+  }, [videoUrl, videoDurationS, markNext, active]);
 
   useEffect(() => () => {
     autoSyncAbortRef.current?.abort();
@@ -2014,7 +2072,11 @@ export function SingleLapAnalysisPanel({
   }
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
+    <div className={`grid gap-5 ${guided && !advanced ? "mx-auto w-full max-w-5xl" : "xl:grid-cols-[1fr_420px]"}`}>
+      {guided && <header className="flex flex-wrap items-end justify-between gap-4 xl:col-span-full">
+        <label className="grid min-w-52 gap-2 text-sm text-slate-300">{locale === "zh" ? "视频中要配对的 AiM 圈" : "AiM lap to pair with the video"}<select aria-label="Guided telemetry lap" value={analysis.target_lap} disabled={analyzing || rpmSyncing || autoSyncing || readOnly} onChange={e => void onAnalyze?.({ target_lap: Number(e.target.value) })} className="min-h-11 rounded border border-slate-600 bg-[#111820] px-3 text-white">{syncLaps.map(row => <option key={row.lap} value={Number(row.lap)}>L{row.lap} · {Number(row.lap_time).toFixed(3)}s</option>)}</select></label>
+        <label className="flex min-h-11 items-center gap-2 text-sm text-slate-400"><input type="checkbox" checked={advanced} onChange={e => setAdvanced(e.target.checked)} />{locale === "zh" ? "自动校验与高级工具" : "Automatic checks and advanced tools"}</label>
+      </header>}
       <Panel title={t("xrk.lap.title")} subtitle={t("xrk.lap.subtitle")}>
         {videoUrl ? (
           <>
@@ -2100,7 +2162,7 @@ export function SingleLapAnalysisPanel({
           >
             {t("videoCoach.setEnd")} {lapEnd.toFixed(2)}s
           </button>
-          <select
+          <span hidden={guided && !advanced} className="contents"><select
             value={rpmStrokes}
             onChange={(event) => setRpmStrokes(event.target.value === "4" ? 4 : 2)}
             disabled={rpmAnalyzing || rpmSyncing}
@@ -2121,15 +2183,21 @@ export function SingleLapAnalysisPanel({
               ? `${t("videoCoach.audioAnalyzing")} ${Math.round(rpmProgress * 100)}%`
               : t("videoCoach.audioMark")}
           </button>
+          </span>
         </div>
         {rpmError ? <p role="alert" className="mt-2 text-xs leading-5 text-red-300">{rpmError}</p> : null}
         {rpmHint ? <p className="mt-2 text-xs leading-5 text-emerald-300">{rpmHint}</p> : null}
+        {guided && <div className="mt-4 grid grid-cols-2 gap-3">{(["start", "end"] as const).map(which => <label key={which} className="grid gap-2 text-xs text-slate-400">{which === "start" ? (locale === "zh" ? "圈起点 · 视频秒" : "Lap start · video seconds") : (locale === "zh" ? "圈终点 · 视频秒" : "Lap end · video seconds")}<input aria-label={`Guided lap ${which}`} type="number" min={0} max={videoDurationS} step={.05} value={Number((which === "start" ? lapStart : lapEnd).toFixed(3))} disabled={!videoFile || analyzing || rpmSyncing} onChange={e => {
+          const value = Number(e.target.value); if (which === "start") setLapStart(value); else setLapEnd(value);
+          setLapMarks(old => ({ start: which === "start" || (old.lap === analysis.target_lap && old.start), end: which === "end" || (old.lap === analysis.target_lap && old.end), lap: analysis.target_lap }));
+        }} className="min-h-11 w-full rounded border border-slate-600 bg-[#111820] px-3 text-white" /></label>)}</div>}
         <ManualLapBinding key={`${analysis.target_lap}:${lapStart}:${lapEnd}:${videoFile?.lastModified}`}
           lap={analysis.target_lap} bounds={manualBounds} marked={bothLapMarks}
           disabled={!!readOnly || analyzing || rpmSyncing || autoSyncing || !videoFile}
           saved={calibration?.review?.method === "manual_lap_bounds_v1" && calibration.target_lap === analysis.target_lap
             && calibration.lap_bounds?.video_start_s === lapStart && calibration.lap_bounds?.video_end_s === lapEnd}
           onBind={bindManualLap} />
+        <div hidden={guided && !advanced}>
         {rpmReplacePending ? (
           <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
             <span className="text-xs text-amber-200">{t("videoCoach.audioReplace", { count: corners.length })}</span>
@@ -2325,8 +2393,9 @@ export function SingleLapAnalysisPanel({
             <p className="mt-2 text-xs text-slate-500">{t("videoCoach.noCorners")}</p>
           )}
         </div>
+        </div>
       </Panel>
-      <div className="flex min-w-0 flex-col gap-5">
+      <div hidden={guided && !advanced} className="flex min-w-0 flex-col gap-5">
         <Panel title={t("xrk.video.gaugeTitle")} subtitle={t("xrk.video.gaugeHint")}>
           <div className="grid grid-cols-2 gap-3">
             <GaugeStat label={t("xrk.video.gaugeSpeed")} value={rpmPreviewing ? null : gauge.speed_kmh} unit="km/h" />
@@ -2514,7 +2583,7 @@ export function SingleLapAnalysisPanel({
             {t("xrk.boundary.singleCar")}
           </p>
         </Panel>
-        {rpmResult && rpmResult.times.length > 1 ? (
+        {active && (!guided || advanced) && rpmResult && rpmResult.times.length > 1 ? (
           <Panel title={t("videoCoach.rpmChart")} subtitle={t("videoCoach.privacy")}>
             <ResponsiveContainer width="100%" height={180}>
               <LineChart data={rpmChartData} margin={{ top: 8, right: 8, bottom: 0, left: -8 }}>
@@ -2554,7 +2623,7 @@ export function SingleLapAnalysisPanel({
             </ResponsiveContainer>
           </Panel>
         ) : null}
-        {deltaCurve.length > 1 ? (
+        {active && (!guided || advanced) && deltaCurve.length > 1 ? (
           <Panel title={t("xrk.video.deltaChart")} subtitle={t("xrk.video.deltaHint")}>
             <ResponsiveContainer width="100%" height={180}>
               <LineChart data={deltaCurve} margin={{ top: 8, right: 8, bottom: 0, left: -8 }}>

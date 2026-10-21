@@ -272,14 +272,14 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
       <button className={btn} onClick={openEditor}><Scissors size={15} />{c.add}</button>
     </div>
     <p className="mb-2 text-xs text-slate-400">{c.scope}: L{lap}</p>
-    {candidate && !editing && <ReviewCandidateNotice key={`candidate:${signature}`} candidate={candidate} trace={trace}
-      scope={`${fingerprint}:${review.entry}:${review.exit}`} cornerId={review.id} videoKey={JSON.stringify(identity)} videoUrl={url}
-      onReview={openEditor} onSeek={time => { video.current?.pause(); seek(time); }} />}
-    {!clip && proposal.reason === "anchors_disagree" && <p className="mb-2 text-xs text-amber-200">{c.conflict}</p>}
     {url && (editing || clip) ? <div className="relative min-w-0"><video ref={video} src={url} muted playsInline preload="metadata" className="aspect-video w-full bg-black object-contain" aria-label={`${c[side]} L${lap}`}
       onError={() => setError("error")} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
       onLoadedMetadata={event => { const el = event.currentTarget; if (ownFile && Number.isFinite(el.duration)) { setOwnDuration(el.duration); setEnd(p => Math.min(p, el.duration)); } el.playbackRate = rate; if (!editing && clip) el.currentTime = clip.start_s; }}
       /><GoproSpeedOverlay file={file} time={now} /></div> : <div className="flex aspect-video items-center justify-center bg-slate-950 p-4 text-center text-sm text-slate-400">{!url ? c.noVideo : c.missing}</div>}
+    {candidate && !editing && <ReviewCandidateNotice key={`candidate:${signature}`} candidate={candidate} trace={trace}
+      scope={`${fingerprint}:${review.entry}:${review.exit}`} cornerId={review.id} videoKey={JSON.stringify(identity)} videoUrl={url}
+      onReview={openEditor} onSeek={time => { video.current?.pause(); seek(time); }} />}
+    {!clip && proposal.reason === "anchors_disagree" && <p className="mt-2 text-xs text-amber-200">{c.conflict}</p>}
     {editing && <div className="mt-3 space-y-3 border-y border-slate-700 py-3">
       <label className={`${btn} cursor-pointer`}><Upload size={15} />{c.choose}<input type="file" className="hidden" accept="video/mp4,video/quicktime,.mp4,.mov" onChange={e => { const next = e.target.files?.[0]; if (next) loadFile(next); e.target.value = ""; }} /></label>
       {ownFile && defaultFile && <button className={`${btn} ml-2`} onClick={() => { setOwnFile(null); setManual(null); setDraftAnchor(null); setConfirmed(false); setStart(0); setEnd(5); }}>{c.current}</button>}

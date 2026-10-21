@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SiteNavigation } from "./SiteNavigation";
+import { ReviewSteps } from "./GuidedReview";
 import {
   Activity,
   AlertTriangle,
@@ -113,8 +114,9 @@ const chartColors = ["#f6c945", "#35d6d0", "#ff5964", "#66e38f"];
 const demoLapRows = normalizeLapRows(parseCsv(sampleLapCsv));
 const demoTelemetryRows = normalizeTelemetryRows(parseCsv(sampleTelemetryCsv));
 
-export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean }) {
+export function RacingDashboard({ initialDemo = false, guidedReview = false }: { initialDemo?: boolean; guidedReview?: boolean }) {
   const { locale, setLocale } = useI18n();
+  const [guided, setGuided] = useState(guidedReview);
   const [lapRows, setLapRows] = useState(() => initialDemo ? [...demoLapRows] : normalizeLapRows([]));
   const [telemetryRows, setTelemetryRows] = useState(() => initialDemo ? [...demoTelemetryRows] : normalizeTelemetryRows([]));
   const [driverName, setDriverName] = useState(initialDemo ? "Demo Driver" : "Driver");
@@ -356,6 +358,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
   }
 
   function applyXrkInspection(inspected: XrkInspection): void {
+      setActiveVideoFile(null);
       setLapRows(normalizeLapRows([]));
       setTelemetryRows(normalizeTelemetryRows([]));
       setAimImport(null);
@@ -397,6 +400,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
   ) {
     const inspection = inspectionOverride ?? xrkInspection;
     if (!inspection) return;
+    const previousAnalysis = xrkAnalysis?.inspection_id === inspection.inspection_id ? xrkAnalysis : null;
     const pendingVideo = pendingVideoOverride ?? pendingVideoFile;
     const controller = new AbortController();
     xrkAbortRef.current?.abort();
@@ -408,19 +412,19 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
         {
           inspection_id: inspection.inspection_id,
           language: options.language ?? (locale === "zh" ? "zh" : "en"),
-          reference_lap: options.reference_lap ?? xrkAnalysis?.reference_lap ?? null,
-          target_lap: options.target_lap ?? xrkAnalysis?.target_lap ?? null,
+          reference_lap: options.reference_lap ?? previousAnalysis?.reference_lap ?? null,
+          target_lap: options.target_lap ?? previousAnalysis?.target_lap ?? null,
           distance_step_m: options.distance_step_m ?? 1,
-          sector_count: options.sector_count ?? xrkAnalysis?.sectors?.count ?? 3,
+          sector_count: options.sector_count ?? previousAnalysis?.sectors?.count ?? 3,
           sector_boundaries_m: options.sector_boundaries_m,
           manual_zones: options.manual_zones,
           lap_quality_absolute_gap_s:
             options.lap_quality_absolute_gap_s
-            ?? xrkAnalysis?.lap_quality.config.absolute_gap_threshold_s
+            ?? previousAnalysis?.lap_quality.config.absolute_gap_threshold_s
             ?? 0.5,
           lap_quality_relative_gap_pct:
             options.lap_quality_relative_gap_pct
-            ?? xrkAnalysis?.lap_quality.config.relative_gap_threshold_pct
+            ?? previousAnalysis?.lap_quality.config.relative_gap_threshold_pct
             ?? 1,
         },
         controller.signal
@@ -609,25 +613,29 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
             <div className="mb-3 flex items-center gap-3 text-xs font-semibold uppercase text-[#35d6d0]">
               <Gauge size={18} /> {locale === "zh" ? "遥测分析 / TELEMETRY" : "TELEMETRY / 遥测分析"}
             </div>
-            <h1 className="text-2xl font-semibold text-white md:text-3xl">{locale === "zh" ? "Session 分析工作台" : "Session Workspace"}</h1>
+            <h1 className="text-2xl font-semibold text-white md:text-3xl">{guided ? (locale === "zh" ? "完成一次有证据的复盘" : "Review your session") : (locale === "zh" ? "Session 分析工作台" : "Session Workspace")}</h1>
           </div>
-          {workspaceHasData && <div className="grid gap-2 text-sm text-slate-300 sm:grid-cols-2 xl:min-w-[720px] xl:grid-cols-4">
+          {guidedReview && <div className="flex shrink-0 gap-1 rounded border border-slate-700 p-1" role="group" aria-label={locale === "zh" ? "工作方式" : "Workspace mode"}>{[true, false].map(value => <button key={String(value)} aria-pressed={guided === value} onClick={() => setGuided(value)} className={`min-h-10 rounded px-3 text-sm ${guided === value ? "bg-white/10 text-white" : "text-slate-400"}`}>{value ? (locale === "zh" ? "引导复盘" : "Guided review") : (locale === "zh" ? "自由工作台" : "Free workspace")}</button>)}</div>}
+          {workspaceHasData && !guided && <div className="grid gap-2 text-sm text-slate-300 sm:grid-cols-2 xl:min-w-[720px] xl:grid-cols-4">
           <SessionInput label="Driver" value={driverName} onChange={value => editSessionLabel("Driver", value)} />
           <SessionInput label="Vehicle" value={vehicleName} onChange={value => editSessionLabel("Vehicle", value)} />
           <SessionInput label="Track" value={trackName} onChange={value => editSessionLabel("Venue", value)} />
           <SessionInput label="Date" value={sessionDate} onChange={value => editSessionLabel("Log Date", value)} />
           </div>}
         </header>
+        {guided && dataError && <p role="alert" className="break-words rounded border border-red-800 bg-red-950/20 p-3 text-sm text-red-200">{dataError}</p>}
 
         {!workspaceHasData ? (
-          <section className="workspace-start" aria-labelledby="workspace-start-title">
-            <div className="workspace-start__intro">
+          <section className={guided ? "mx-auto grid w-full max-w-5xl min-w-0 grid-cols-1 gap-5 pb-10" : "workspace-start"} aria-labelledby="workspace-start-title">
+            {guided && <ReviewSteps step={0} hasData={false} />}
+            <div className={guided ? "mx-auto w-full max-w-3xl pt-3 [&>h2]:text-xl [&>h2]:font-semibold [&>p]:mt-2 [&>p]:text-sm [&>p]:text-slate-400" : "workspace-start__intro"}>
               <p className="hero-kicker">{locale === "zh" ? "导入数据" : "Start a session"}</p>
               <h2 id="workspace-start-title">{locale === "zh" ? "导入遥测，查看真实圈间差异" : "Import telemetry, then inspect the evidence"}</h2>
               <p>{locale === "zh" ? "支持 AiM XRK / XRZ 和 CSV。车载视频可选，仅在浏览器本地播放。" : "Upload an AiM logger file with optional onboard video, use CSV exports, or open the reviewed sample."}</p>
             </div>
-            <div className="workspace-start__grid">
+            <div className={guided ? "mx-auto grid w-full max-w-3xl min-w-0 grid-cols-1 gap-4" : "workspace-start__grid"}>
               <NewSessionCard
+                guided={guided}
                 maxUploadBytes={deploymentCapabilities?.xrk_server_import.max_upload_bytes}
                 onCancel={() => xrkAbortRef.current?.abort()}
                 status={aimImportStatus}
@@ -637,6 +645,8 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
                 onStartLocal={handleNewSessionFromLocalSource}
                 onVideoSelect={setPendingVideoFile}
               />
+              <details open={!guided} className={guided ? "workspace-disclosure" : "contents"}>
+              {guided && <summary>{locale === "zh" ? "CSV / 已发布样例" : "CSV / Published sample"}</summary>}
               <DataUploadPanel
                 showXrk={false}
                 lapLoaded={false}
@@ -656,6 +666,7 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
                 onTelemetryFile={(file) => handleCsvUpload(file, "telemetry")}
                 onLoadDemo={loadDemoData}
               />
+              </details>
             </div>
             <button
               type="button"
@@ -668,8 +679,8 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
               <Video size={17} /> {locale === "zh" ? "仅复盘视频，无需遥测" : "Review video without telemetry"}
             </button>
           </section>
-        ) : <section className="grid gap-5 xl:grid-cols-[320px_1fr]">
-          <aside className="flex flex-col gap-5 self-start xl:sticky xl:top-5">
+        ) : <section className={`grid gap-5 ${guided && xrkAnalysis ? "" : "xl:grid-cols-[320px_1fr]"}`}>
+          <aside hidden={guided && !!xrkAnalysis} className="flex flex-col gap-5 self-start xl:sticky xl:top-5">
             {xrkSessions.length > 0 && (
               <SessionRail
                 sessions={xrkSessions}
@@ -727,12 +738,12 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
             {xrkInspection && !xrkAnalysis ? (
               <XrkInspectionWorkspace
                 inspection={xrkInspection}
-                analyzing={aimImportStatus === "analyzing"}
+                analyzing={aimImportStatus === "analyzing" || aimImportStatus === "inspecting"}
                 onContinue={() => void runXrkAnalysis()}
               />
             ) : (
               <>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div hidden={guided && !!xrkAnalysis} className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {metrics.map(([icon, label, value, detail, accent]) => (
                 <MetricCard
                   key={String(label)}
@@ -754,7 +765,12 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
 
             {xrkAnalysis ? (
               <XrkAnalysisWorkspace
+                key={xrkAnalysis.inspection_id}
                 analysis={xrkAnalysis}
+                guided={guided && !publishedDemo}
+                expiresAt={xrkInspection?.expires_at}
+                metadataPanel={<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><SessionInput label={locale === "zh" ? "车手" : "Driver"} value={driverName} onChange={value => editSessionLabel("Driver", value)} /><SessionInput label={locale === "zh" ? "车辆" : "Vehicle"} value={vehicleName} onChange={value => editSessionLabel("Vehicle", value)} /><SessionInput label={locale === "zh" ? "赛道" : "Track"} value={trackName} onChange={value => editSessionLabel("Venue", value)} /><SessionInput label={locale === "zh" ? "日期" : "Date"} value={sessionDate} onChange={value => editSessionLabel("Log Date", value)} /></div>}
+                importPanel={<div className="mx-auto w-full max-w-3xl space-y-4"><p className="text-sm text-slate-300">{locale === "zh" ? `${driverName} · ${vehicleName} · ${trackName} · ${sessionDate}` : `${driverName} · ${vehicleName} · ${trackName} · ${sessionDate}`}</p><p className="text-xs text-amber-200">{locale === "zh" ? "导入另一份遥测会开启新复盘；当前人工锚点仍保存在本机。视频与片段确认不会自动沿用。" : "Another telemetry file starts a new review. Local anchors are retained; video and clip decisions are not carried across sessions."}</p><NewSessionCard guided status={aimImportStatus} hasPendingVideo={!!pendingVideoFile} onStart={handleNewSession} onVideoSelect={setPendingVideoFile} maxUploadBytes={deploymentCapabilities?.xrk_server_import.max_upload_bytes} onCancel={() => xrkAbortRef.current?.abort()} /></div>}
                 analyzing={aimImportStatus === "analyzing"}
                 onAnalyze={runXrkAnalysis}
                 publishedDemo={Boolean(publishedDemo)}
@@ -892,13 +908,13 @@ export function RacingDashboard({ initialDemo = false }: { initialDemo?: boolean
             )}
           </section>
         </section>}
-        <MultiSessionWorkspace
+        {!guided && <MultiSessionWorkspace
           sessions={xrkSessions}
           activeInspectionId={xrkInspection?.inspection_id ?? null}
           onSelect={selectTemporarySession}
           onRemove={removeTemporarySession}
           onExpire={expireTemporarySessions}
-        />
+        />}
       </section>
     </main></>
   );
