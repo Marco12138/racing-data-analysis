@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, BookOpen, Clapperboard, Gauge, Info, Languages, ListChecks, Play } from "lucide-react";
+import { Activity, BookOpen, Clapperboard, Gauge, GitCompareArrows, Info, Languages, ListChecks, Play } from "lucide-react";
 import { useI18n } from "../lib/i18n";
 
 const destinations = [
   { href: "/review", zh: "引导复盘", en: "Guided review", icon: ListChecks },
+  { href: "/compare", zh: "双车手复盘", en: "Driver comparison", icon: GitCompareArrows },
   { href: "/workspace", zh: "遥测分析", en: "Telemetry", icon: Activity },
   { href: "/video-coach", zh: "视频分析", en: "Video", icon: Clapperboard },
   { href: "/methods", zh: "模型介绍", en: "Methods", icon: BookOpen },

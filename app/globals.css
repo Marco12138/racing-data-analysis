@@ -1,4 +1,6 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+@source ".";
+@source "../frontend";
 
 :root {
   --font-inter: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -95,8 +97,8 @@ body {
   .site-header__actions { gap: 10px; }
   .site-header .language-switch { min-height: 34px; padding: 0 3px; }
   .site-header .language-switch > svg { display: none; }
-  .site-navigation { gap: 0; }
-  .site-navigation a { padding: 7px 3px; font-size: 12px; gap: 5px; }
+  .site-navigation { gap: 0; min-width: 0; width: 100%; overflow-x: auto; }
+  .site-navigation a { flex: 0 0 auto; padding: 7px 8px; font-size: 12px; gap: 5px; white-space: nowrap; }
   .site-navigation a > svg { display: none; }
   .site-navigation small { font-size: 10px; }
   .reference-page { padding: 24px 16px 40px; }

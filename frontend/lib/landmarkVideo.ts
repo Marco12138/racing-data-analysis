@@ -25,6 +25,31 @@ async function seekFrame(video: HTMLVideoElement, time: number, signal: AbortSig
   signal.throwIfAborted();
 }
 
+/** One disposable decoder for a bounded whole-video search; visible players never move. */
+export async function withLandmarkDecoder<T>(url: string, signal: AbortSignal,
+  run: (read: (time: number) => Promise<LandmarkFrame>) => Promise<T>): Promise<T> {
+  if (!url.startsWith("blob:")) throw Error("invalid_local_search");
+  signal.throwIfAborted();
+  const video = document.createElement("video"); video.muted = true; video.preload = "auto";
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(fail, 10000);
+      function clean() { clearTimeout(timer); video.removeEventListener("loadeddata", done); video.removeEventListener("error", fail); signal.removeEventListener("abort", fail); }
+      function done() { clean(); resolve(); }
+      function fail() { clean(); reject(Error("frame_unavailable")); }
+      video.addEventListener("loadeddata", done, { once: true }); video.addEventListener("error", fail, { once: true });
+      signal.addEventListener("abort", fail, { once: true }); video.src = url;
+    });
+    return await run(async time => {
+      if (!Number.isFinite(time) || time < 0 || time >= video.duration) throw Error("outside_video");
+      await seekFrame(video, time, signal);
+      const frame = captureLandmarkFrame(video);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      return frame;
+    });
+  } finally { video.pause(); video.removeAttribute("src"); video.load(); }
+}
+
 /** Small local-only frame batch for explicit boundary review. The visible player is untouched. */
 export async function readLandmarkFrames(url: string, times: number[], signal: AbortSignal): Promise<LandmarkFrame[]> {
   signal.throwIfAborted();

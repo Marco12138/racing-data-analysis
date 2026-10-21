@@ -9,11 +9,12 @@ import { comparisonStart, comparisonVideoKey, parseVideoComparisons, seekCompari
 import { ReviewBoundaryCheck } from "./ReviewBoundaryCheck";
 import { TrackLandmarkEditor } from "./TrackLandmarkEditor";
 import { GoproSpeedOverlay } from "./GoproSpeedOverlay";
+import { RepeatedPassSearch } from "./RepeatedPassSearch";
 
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded border border-slate-600 px-3 py-2 text-sm text-slate-200 disabled:opacity-40";
 const input = "min-w-0 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white";
-type Side = { file: File | null; url: string; fileKey: string; name: string; driver: string; duration: number; start: ComparisonStart | null; error: string };
-const emptySide = (): Side => ({ file: null, url: "", fileKey: "", name: "", driver: "", duration: 0, start: null, error: "" });
+type Side = { file: File | null; url: string; fileKey: string; name: string; driver: string; duration: number; start: ComparisonStart | null; keyframe: number | null; error: string };
+const emptySide = (): Side => ({ file: null, url: "", fileKey: "", name: "", driver: "", duration: 0, start: null, keyframe: null, error: "" });
 const noDistance = () => null;
 const noEvents = { recovery: null, rpm_drop: null };
 
@@ -27,6 +28,8 @@ export function DriverVideoComparison() {
   const [busy, setBusy] = useState(false), [message, setMessage] = useState("");
   const [name, setName] = useState(""), [saved, setSaved] = useState<SavedVideoComparison[]>([]);
   const [reviewId, setReviewId] = useState("draft");
+  const [searchSource, setSearchSource] = useState<"own" | "a">("own");
+  const [previews, setPreviews] = useState<[number | null, number | null]>([null, null]);
   const urls = useRef(["", ""]), generations = useRef([0, 0]);
   const playback = useRef<AbortController | null>(null), running = useRef(false);
   const pairKey = sides.every(s => s.fileKey) ? sides.map(s => s.fileKey).join("|") : "";
@@ -74,15 +77,15 @@ export function DriverVideoComparison() {
     stop(); const video = index === 0 ? a.current : b.current;
     const start = video && comparisonStart(video.currentTime, sides[index].duration);
     if (!start) { setMessage(zh ? "此处后续不足 5 秒，请选择更早的起点。" : "Fewer than 5 seconds remain. Choose an earlier start."); return; }
-    patch(index, { start }); setSameLocation(false); setMessage("");
+    patch(index, { start, keyframe: start.start_s }); setSameLocation(false); setMessage("");
     if (reviewId === "draft") setReviewId(crypto.randomUUID());
   }
   function seek(index: number, time: number) {
-    stop(); const video = index === 0 ? a.current : b.current;
+    stop(); setPreviews([null, null]); const video = index === 0 ? a.current : b.current;
     if (video && Number.isFinite(time)) video.currentTime = Math.max(0, Math.min(sides[index].duration, time));
   }
   async function playBoth() {
-    stop(); if (!ready || !sameLocation || !a.current || !b.current) return;
+    stop(); setPreviews([null, null]); if (!ready || !sameLocation || !a.current || !b.current) return;
     const controller = new AbortController(); playback.current = controller;
     setBusy(true); setMessage("");
     try {
@@ -127,15 +130,25 @@ export function DriverVideoComparison() {
         <input className="sr-only" type="file" disabled={!interactive} accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" aria-label={zh ? `车手 ${index === 0 ? "A" : "B"} 视频` : `Driver ${index === 0 ? "A" : "B"} video`}
           onChange={e => { selectFile(index, e.target.files?.[0] ?? null); e.target.value = ""; }} /></label>
       {side.url ? <>
-        <VideoSidePlayer key={side.url} side={side} video={index === 0 ? a : b} label={labels[index]} onLoaded={duration => patch(index, { duration, error: "" })}
+        <VideoSidePlayer key={side.url} side={side} previewEnd={previews[index]} video={index === 0 ? a : b} label={labels[index]} onLoaded={duration => patch(index, { duration, error: "" })}
           onError={() => { stop(); patch(index, { error: zh ? "视频无法解码，请换用兼容浏览器或 H.264 MP4。起点不会自动迁移。" : "Video could not decode. Try a compatible browser or H.264 MP4; starts are never transferred automatically." }); }}
-          onSeek={time => seek(index, time)} onStop={() => { if (running.current) stop(); }} onEnd={() => { if (running.current) stop(); }} />
+          onSeek={time => seek(index, time)} onStop={() => { if (running.current) stop(); }} onEnd={() => { if (running.current || previews[index] !== null) { stop(); setPreviews([null, null]); } }} />
         {side.error && <p role="alert" className="text-sm text-amber-200">{side.error}</p>}
         <div className="flex flex-wrap items-center gap-3">
           <button className={button} disabled={!side.duration || !!side.error} onClick={() => confirmStart(index)}><Camera size={16} />{zh ? "确认当前帧为起点" : "Confirm current frame as start"}</button>
           {side.start && <button className={button} title={zh ? "回到已确认起点" : "Return to confirmed start"} onClick={() => seek(index, side.start!.start_s)}><RotateCcw size={16} /><span className="font-mono text-xs">{side.start.start_s.toFixed(2)}–{side.start.end_s.toFixed(2)}s</span></button>}
         </div>
         {side.start && <p className="text-xs text-slate-400">{zh ? "人工起点 ±0.5 秒 · 自动取后 5 秒" : "Manual start ±0.5s · Next 5 seconds"}</p>}
+        {index === 1 && sides[0].start && <label className="block text-xs text-slate-400">{zh ? "搜索参照帧" : "Search reference"}<select aria-label={zh ? "搜索参照帧" : "Search reference"} className={`${input} mt-1`} value={searchSource} onChange={e => setSearchSource(e.target.value as "own" | "a")}>
+          <option value="own">{zh ? "B 独立关键帧" : "B independent keyframe"}</option><option value="a">{zh ? "尝试 A 关键帧" : "Try A keyframe"}</option></select></label>}
+        {(index === 1 && searchSource === "a" ? sides[0].keyframe : side.keyframe) !== null && side.duration > 0 && <RepeatedPassSearch
+          key={`${side.fileKey}:${index === 1 && searchSource === "a" ? sides[0].fileKey : side.fileKey}:${index === 1 && searchSource === "a" ? sides[0].keyframe : side.keyframe}:${searchSource}`}
+          source={index === 1 && searchSource === "a" ? { url: sides[0].url, start: sides[0].keyframe!, file: sides[0].file! } : { url: side.url, start: side.keyframe!, file: side.file! }}
+          target={{ url: side.url, duration: side.duration, file: side.file! }} onPreview={time => {
+            seek(index, time); setPreviews(index === 0 ? [time + 5, null] : [null, time + 5]);
+            const player = index === 0 ? a.current : b.current; void player?.play().catch(() => {});
+          }}
+          onUse={time => { seek(index, time); patch(index, { start: comparisonStart(time, side.duration) }); setSameLocation(false); }} />}
         {pairKey && side.start && !side.error && <TrackLandmarkEditor key={`${pairKey}:${reviewId}:${index}:${side.start.start_s}`} video={index === 0 ? a : b} videoUrl={side.url}
           scope={`video-pair:${pairKey}`} cornerId={reviewId} lap={index + 1} videoKey={side.fileKey} syncKey={`video-only:${side.start.start_s}`} window={side.start}
           distanceAtTime={noDistance} events={noEvents} onSeek={time => seek(index, time)} videoOnly />}
@@ -157,7 +170,7 @@ export function DriverVideoComparison() {
       <div className="flex flex-wrap items-end gap-3 border-t border-slate-700 pt-4">
         <label className="min-w-0 flex-1 text-xs text-slate-400">{zh ? "弯道 / 参照物名称" : "Corner / landmark name"}<input className={`${input} mt-1`} maxLength={80} value={name} onChange={e => setName(e.target.value)} placeholder={zh ? "例如：红白路肩后的右弯" : "e.g. Right turn after red-white kerb"} /></label>
         <button className={button} disabled={!pairKey || !sameLocation || !name.trim()} onClick={save}><Save size={16} />{zh ? "保存这组对照" : "Save comparison"}</button>
-        <button className={button} onClick={() => { stop(); setSides(rows => rows.map(s => ({ ...s, start: null })) as [Side, Side]); setSameLocation(false); setName(""); setReviewId("draft"); setMessage(""); }}>{zh ? "标记另一处" : "Mark another location"}</button>
+        <button className={button} onClick={() => { stop(); setSides(rows => rows.map(s => ({ ...s, start: null, keyframe: null })) as [Side, Side]); setSameLocation(false); setName(""); setReviewId("draft"); setMessage(""); }}>{zh ? "标记另一处" : "Mark another location"}</button>
       </div>
     </>}
     {saved.length > 0 && <section className="border-t border-slate-700 pt-4"><h3 className="mb-2 text-sm font-semibold text-white">{zh ? "已保存的对照" : "Saved comparisons"}</h3>
@@ -169,21 +182,22 @@ export function DriverVideoComparison() {
   </section>;
 }
 
-function VideoSidePlayer({ side, video, label, onLoaded, onError, onSeek, onStop, onEnd }: {
+function VideoSidePlayer({ side, previewEnd, video, label, onLoaded, onError, onSeek, onStop, onEnd }: {
   side: Side; video: RefObject<HTMLVideoElement | null>; label: string;
+  previewEnd: number | null;
   onLoaded: (duration: number) => void; onError: () => void; onSeek: (time: number) => void; onStop: () => void; onEnd: () => void;
 }) {
   const { locale } = useI18n(), zh = locale === "zh";
   const [time, setTime] = useState(0), [draftTime, setDraftTime] = useState("");
-  const latest = useRef({ side, onEnd });
-  useEffect(() => { latest.current = { side, onEnd }; });
+  const latest = useRef({ side, onEnd, previewEnd });
+  useEffect(() => { latest.current = { side, onEnd, previewEnd }; });
   useEffect(() => {
     const element = video.current;
     if (!element) return;
     return observeVideoClock(element, sample => {
       setTime(sample.time_s);
-      const start = latest.current.side.start;
-      if (start && !element.paused && sample.time_s >= start.end_s - .015) latest.current.onEnd();
+      const end = latest.current.previewEnd ?? latest.current.side.start?.end_s;
+      if (end !== undefined && !element.paused && sample.time_s >= end - .015) latest.current.onEnd();
     });
   }, [video]);
   return <>
