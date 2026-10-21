@@ -3,8 +3,10 @@
 The October 2026 demo replaces the earlier telemetry-only publication with one
 anonymous, real session and nine approved five-second onboard excerpts.
 The user explicitly requested publication of this paired analysis. Original XRK
-files, the complete recording, absolute GPS coordinates, driver identity, dates,
-audio and container telemetry are not included in the public assets.
+files, the complete recording, absolute GPS coordinates, driver identity, dates
+and raw container telemetry are not included in the public assets. The approved
+five-second excerpts retain their original audio. Sanitized, clip-relative GPS5
+2D speeds are published separately in `public/demo/video/media.json`.
 
 ## Evidence and Limits
 
@@ -37,8 +39,27 @@ python scripts/publish_reviewed_video_demo.py \
 python scripts/generate_demo_session_resource.py
 ```
 
-Inspect start/middle/end frames, check for identifiable people/text, confirm each
-file contains only a five-second H.264 video stream, then run release checks.
+To restore audio and GPS speed on the existing approved excerpts, without
+changing their timing or anchors:
+
+```bash
+node --experimental-strip-types scripts/refresh_demo_media.mjs \
+  --video /private/path/original.mp4 --ffmpeg /path/to/ffmpeg \
+  --approved-for-publication
+python scripts/generate_demo_session_resource.py
+```
+
+Inspect start/middle/end frames and listen to the excerpts for private speech.
+Check for identifiable people/text and confirm each file contains only a
+five-second H.264 video stream plus AAC audio. No GPMF, UTC or location track is
+remuxed. The speed manifest contains only relative time, speed and GPS fix, bound
+to the exact approved URL/start/duration. It works with older cached backend
+summaries; a content revision bypasses old silent video caches. The player reads
+speed on presented frames/seeks using the existing 0.25-second maximum-gap rule.
+Within-packet timing remains estimated and sensor-to-frame latency uncalibrated.
+This overlay is not an independent confirmation of AiM/video synchronization.
+Only one player emits sound at a time; users can switch audio or mute both.
+Run release checks after rebuilding.
 Only `public/demo/video/` is allowed through the Vercel MP4 exclusion. The backend
 serves the compact summary; static excerpts are served by each frontend origin.
 Deploy the backend resource before the frontends and verify both `/demo` and

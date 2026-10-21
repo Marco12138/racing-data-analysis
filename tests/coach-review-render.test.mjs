@@ -22,7 +22,19 @@ test("demo reviews never offer a vote, including with a local video attached", (
   assert.match(html, /样例不收集教练投票/);
   assert.match(html, /data-testid="published-video-review"/);
   assert.equal((html.match(/<video/g) ?? []).length, 2);
+  assert.equal((html.match(/data-testid="gopro-speed-overlay"/g) ?? []).length, 2);
+  assert.match(html, /声音来源/);
+  assert.equal((html.match(/ muted=""/g) ?? []).length, 1, "only one side is muted by default");
   assert.doesNotMatch(html, /<fieldset/);
+});
+
+test("guided recommendations show pending status without promoting a single vote", () => {
+  const html = renderToStaticMarkup(createElement(CoachReviewTest, { analysis, locale: "zh", guidedPage: "recommended", receipts: [],
+    videoUrl: "", videoFile: null, videoDurationS: 0, calibration: null, onSync() {}, onCursor() {} }));
+  assert.match(html, /待核对/);
+  assert.doesNotMatch(html, /两侧已确认/);
+  assert.match(html, /data-testid="paired-video-controls"/);
+  assert.ok(html.indexOf('data-testid="paired-video-controls"') < html.indexOf('class="grid min-w-0 gap-5 xl:grid-cols-2"'));
 });
 
 test("Chinese coach review includes real Top 3 and all four selection choices, disabled without video", () => {

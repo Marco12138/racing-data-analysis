@@ -39,6 +39,8 @@ test("debrief does not promote unconfirmed model recommendations into confirmed 
     const html = renderToStaticMarkup(createElement(GuideTest, { locale, analysis, view: "summary" }));
     assert.ok(html.includes(locale === "zh" ? "尚无两侧均确认" : "No opportunity has both clips confirmed"));
     assert.ok(html.includes(locale === "zh" ? "返回核对片段" : "Review the clips"));
+    assert.ok(html.includes(locale === "zh" ? "真实有效快圈" : "Real eligible fast laps"));
+    assert.match(html, /L5 · 41.055s/);
     assert.doesNotMatch(html, /L\d+ is [\d.]+s|连同下游慢 [\d.]+ 秒/);
   }
 });

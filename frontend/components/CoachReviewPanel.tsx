@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { guidedReviewKey, type ReviewReceipt } from "../lib/guidedReview";
+import { guidedReviewKey, reviewDecision, type ReviewReceipt } from "../lib/guidedReview";
 import type { SelectedCornerResult } from "../lib/selectedCorner";
 import { Check, MapPin, Send, Video } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -69,12 +69,13 @@ const COLORS = ["#f6c945", "#35d6d0", "#ff5964"];
 const button = "inline-flex items-center justify-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400 disabled:opacity-40";
 const fmt = (n: unknown) => typeof n === "number" && Number.isFinite(n) ? n.toFixed(3) : "—";
 
-export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS, calibration, onSync, onCursor, onAnalyze, analyzing = false, readOnly = false, guidedPage, onDecision, onCornerResult, active = true }: {
+export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS, calibration, onSync, onCursor, onAnalyze, analyzing = false, readOnly = false, guidedPage, onDecision, receipts = [], onCornerResult, active = true }: {
   analysis: XrkAnalysis; videoUrl: string; videoFile: File | null; videoDurationS: number;
   calibration: VideoSyncCalibration | null; onSync: () => void; onCursor: (distance: number) => void;
   onAnalyze?: (options: Partial<XrkAnalyzeOptions>) => Promise<void>; analyzing?: boolean; readOnly?: boolean;
   guidedPage?: "recommended" | "selected";
   onDecision?: (receipt: ReviewReceipt) => void;
+  receipts?: ReviewReceipt[];
   onCornerResult?: (result: SelectedCornerResult | null) => void;
   active?: boolean;
 }) {
@@ -118,7 +119,7 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
     ...(calibration ? { [calibration.target_lap]: calibration } : {}) }), [history, historyKey, calibration]);
   const sessionCalibrations = useMemo(() => Object.values(mappings), [mappings]);
   if (readOnly && analysis.video_review) return <div className="min-w-0 space-y-6" data-testid="coach-review-panel">
-    <PublishedVideoReview review={analysis.video_review} />
+    <PublishedVideoReview review={analysis.video_review} active={active} />
     {active && <TopThreeCharts analysis={analysis} c={c} />}
   </div>;
   return <div className="min-w-0 space-y-6" data-testid="coach-review-panel">
@@ -160,7 +161,13 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
     </div>
     <p className="text-xs text-slate-400">{c.measured}</p>
     {!reviews.length && <p className="text-sm text-slate-400">{c.empty}</p>}
-    {guidedPage && reviews.length > 0 && <div className="my-4 flex flex-wrap gap-2" role="group" aria-label={locale === "zh" ? "推荐片段" : "Recommended clips"}>{reviews.map((review, i) => <button key={review.id} className={`${button} ${i === Math.min(reviewIndex, reviews.length - 1) ? "border-cyan-400 bg-cyan-400/10 text-cyan-100" : ""}`} aria-pressed={i === Math.min(reviewIndex, reviews.length - 1)} onClick={event => { event.currentTarget.closest('[data-testid="coach-review-panel"]')?.querySelectorAll("video").forEach(v => v.pause()); setReviewIndex(i); }}>{locale === "zh" ? `片段 ${i + 1}` : `Clip ${i + 1}`} · {locale === "zh" ? review.name.replace(/^Suggested Zone\s+/i, "区间 ").replace(/^Zone\s+/i, "区间 ") : review.name}</button>)}</div>}
+    {guidedPage && reviews.length > 0 && <div className="my-4 flex flex-wrap gap-2" role="group" aria-label={locale === "zh" ? "推荐片段" : "Recommended clips"}>{reviews.map((review, i) => {
+      const decision = reviewDecision(review, receipts);
+      const label = { confirmed: ["两侧已确认", "Both confirmed"], rejected: ["已否定", "Rejected"], pending: ["待核对", "Pending"] }[decision][locale === "zh" ? 0 : 1];
+      return <button key={review.id} className={`${button} ${i === Math.min(reviewIndex, reviews.length - 1) ? "border-cyan-400 bg-cyan-400/10 text-cyan-100" : ""}`} aria-pressed={i === Math.min(reviewIndex, reviews.length - 1)} onClick={event => { event.currentTarget.closest('[data-testid="coach-review-panel"]')?.querySelectorAll("video").forEach(v => v.pause()); setReviewIndex(i); }}>
+        {decision === "confirmed" && <Check size={14} />}{locale === "zh" ? `片段 ${i + 1}` : `Clip ${i + 1}`} · {locale === "zh" ? review.name.replace(/^Suggested Zone\s+/i, "区间 ").replace(/^Zone\s+/i, "区间 ") : review.name} · {label}
+      </button>;
+    })}</div>}
     {reviews.map((review, i) => <div key={`${analysis.file_fingerprint}:${review.id}:${review.targetLap}:${review.referenceLap}`} hidden={!!guidedPage && i !== Math.min(reviewIndex, reviews.length - 1)}><ReviewCard
       review={review} analysis={analysis} videoUrl={videoUrl} file={videoFile} duration={videoDurationS}
       targetCalibration={mappings[review.targetLap] ?? null} referenceCalibration={mappings[review.referenceLap] ?? null}

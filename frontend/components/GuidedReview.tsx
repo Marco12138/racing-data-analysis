@@ -60,6 +60,9 @@ export function GuidedDebrief({ analysis, receipts, corner, onReview }: { analys
   const { locale } = useI18n(), zh = locale === "zh";
   const result = buildGuidedDebrief(selectCoachReviews(analysis), receipts);
   const name = (s: string) => zh ? s.replace(/^Suggested Zone\s+/i, "建议区间 ").replace(/^Zone\s+/i, "区间 ") : s;
+  const topLaps = analysis.lap_quality.top_valid_laps.filter(l => l.analysis_eligible).slice(0, 3)
+    .map(l => `L${l.lap} · ${l.lap_time.toFixed(3)}s`).join(" / ");
+  const lapSummary = (zh ? "真实有效快圈：" : "Real eligible fast laps: ") + (topLaps || (zh ? "暂无" : "Unavailable"));
   const observation = (r: typeof result.strengths[number]) => zh
     ? `${name(r.name)}：目标圈 L${r.targetLap} 相比 L${r.referenceLap}，连同下游${r.netLoss > 0 ? "慢" : "快"} ${Math.abs(r.netLoss).toFixed(3)} 秒。`
     : `${r.name}: L${r.targetLap} is ${Math.abs(r.netLoss).toFixed(3)}s ${r.netLoss > 0 ? "slower" : "faster"} than L${r.referenceLap} including downstream.`;
@@ -73,17 +76,19 @@ export function GuidedDebrief({ analysis, receipts, corner, onReview }: { analys
     : corner.patterns.status === "no_clear_separation" ? (zh ? "已确认样本未发现清晰分开的开法，不强行分类。" : "Confirmed samples show no clear pattern separation.")
     : (zh ? "可用确认圈不足，暂不分类。" : "Too few confirmed laps to group.");
   const pending = zh ? `${result.pending.length} 个片段待确认；${result.rejected.length} 个已否定，不纳入建议。` : `${result.pending.length} pending; ${result.rejected.length} rejected and excluded from advice.`;
+  const pendingNames = result.pending.map(r => `${name(r.name)} · L${r.referenceLap} / L${r.targetLap}`).join("; ");
   function download() {
-    const text = [zh ? "本节复盘" : "Session debrief", ...sections.flatMap(s => [s.title, ...(s.rows.length ? s.rows : [s.empty])]), zh ? "下一次训练" : "Next session", ...next, custom, pending,
+    const text = [zh ? "本节复盘" : "Session debrief", lapSummary, ...sections.flatMap(s => [s.title, ...(s.rows.length ? s.rows : [s.empty])]), zh ? "下一次训练" : "Next session", ...next, custom, pending, pendingNames,
       zh ? "圈间差异不证明动作因果，不相加为目标圈速。视频未上传。" : "Observed differences are not causal and are not added into a target lap. Video was not uploaded."].join("\n\n");
     const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
     const a = document.createElement("a"); a.href = url; a.download = "session-debrief.md"; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   return <div className="space-y-6" data-testid="guided-debrief">
     <div className="flex flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2 text-sm text-cyan-200"><FileCheck2 size={18} />{zh ? "来自本次复盘的确认记录" : "Based on this review's confirmations"}</span><button className={guideButton} onClick={download}><Download size={16} />{zh ? "保存总结" : "Save debrief"}</button></div>
+    <p className="font-mono text-sm text-slate-300">{lapSummary}</p>
     {sections.map(s => <section key={s.title} className="border-t border-slate-700 pt-5"><h3 className="mb-3 text-lg font-semibold">{s.title}</h3>{s.rows.length ? <ul className="space-y-3">{s.rows.map(row => <li key={row} className="flex items-start gap-2 text-sm text-slate-200"><Check size={16} className="mt-1 shrink-0 text-cyan-300" />{row}</li>)}</ul> : <p className="text-sm text-slate-400">{s.empty}</p>}</section>)}
     <section className="border-t border-slate-700 pt-5"><h3 className="mb-3 text-lg font-semibold">{zh ? "下一次训练重点" : "Next training focus"}</h3>{next.length ? <ul className="space-y-3 text-sm text-slate-200">{next.map(row => <li key={row}>{row}</li>)}</ul> : <p className="text-sm text-slate-400">{zh ? "先确认一个片段，再与教练选择要测试的动作。" : "Confirm a clip first, then choose a test with your coach."}</p>}</section>
-    <section className="border-t border-slate-700 pt-5"><h3 className="mb-3 font-semibold">{zh ? "自选弯道与待确认事项" : "Your corner and open questions"}</h3><p className="text-sm text-slate-300">{custom}</p><p className="mt-2 text-sm text-amber-200">{pending}</p><button className={`${guideButton} mt-4`} onClick={onReview}>{zh ? "返回核对片段" : "Review the clips"}<ArrowRight size={16} /></button></section>
+    <section className="border-t border-slate-700 pt-5"><h3 className="mb-3 font-semibold">{zh ? "自选弯道与待确认事项" : "Your corner and open questions"}</h3><p className="text-sm text-slate-300">{custom}</p><p className="mt-2 text-sm text-amber-200">{pending}</p>{pendingNames && <p className="mt-2 text-sm text-slate-400">{pendingNames}</p>}<button className={`${guideButton} mt-4`} onClick={onReview}>{zh ? "返回核对片段" : "Review the clips"}<ArrowRight size={16} /></button></section>
     <p className="text-xs text-slate-500">{zh ? "人工确认只说明片段对应，不证明刹车或油门原因。差异不相加为目标圈速；AI 建议请与教练核实。" : "Clip confirmation does not establish pedal causes. Differences are not added into a target lap; validate advice with your coach."}</p>
   </div>;
 }

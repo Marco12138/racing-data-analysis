@@ -612,7 +612,7 @@
     "anchor_uncertainty_s": 0.5,
     "offset_s": 23.464,
     "whole_recording_verified": false,
-    "audio_removed": true,
+    "audio_removed": false,
     "metadata_removed": true,
     "segments": [
       {

@@ -112,7 +112,7 @@ class DemoVideoReview(DemoModel):
     anchor_uncertainty_s: Literal[0.5]
     offset_s: float
     whole_recording_verified: Literal[False]
-    audio_removed: Literal[True]
+    audio_removed: bool
     metadata_removed: Literal[True]
     segments: list[dict[str, Any]]
     clips: list[DemoReviewClip]

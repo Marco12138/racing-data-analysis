@@ -519,7 +519,7 @@ export function XrkAnalysisWorkspace({
             active={view === "coach"}
             videoDurationS={videoDurationS} calibration={calibration}
             guidedPage={guided ? (step === 4 ? "selected" : "recommended") : undefined}
-            onDecision={recordDecision} onCornerResult={recordCorner}
+            onDecision={recordDecision} receipts={decisions.scope === scope ? decisions.rows : []} onCornerResult={recordCorner}
             onSync={() => guided ? goStep(2) : setActiveTab("video")} onCursor={selectDistance}
             onAnalyze={onAnalyze} analyzing={analyzing} readOnly={publishedDemo} />
       </div>

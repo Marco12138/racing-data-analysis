@@ -73,13 +73,16 @@ export function ManualReviewVideo(props: Props) {
   const onBoundary = useCallback((side: ReviewSide, value: BoundaryVideo | null) => setBoundaries(p => JSON.stringify(p[side]) === JSON.stringify(value) ? p : { ...p, [side]: value }), []);
   const onReady = useCallback((side: ReviewSide, value: boolean) => setReady(p => p[side] === value ? p : { ...p, [side]: value }), []);
   const startDistance = useMemo(() => sharedReviewStart(props.review), [props.review]);
-  return <div>
+  return <div className="scroll-mt-24" data-testid="paired-video-review">
+    <div className="mb-4 flex flex-wrap gap-3" data-testid="paired-video-controls">
+      <button className={btn} disabled={!ready.reference || !ready.target} onClick={event => {
+        event.currentTarget.closest('[data-testid="paired-video-review"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+        setCommand(p => ({ type: "play", sequence: p.sequence + 1 }));
+      }}><Play size={15} />{c.pair}</button>
+      <button className={btn} onClick={() => setCommand(p => ({ type: "pause", sequence: p.sequence + 1 }))}><Pause size={15} />{c.stop}</button>
+    </div>
     <div className="grid min-w-0 gap-5 xl:grid-cols-2">
       {(["reference", "target"] as const).map(side => <ReviewVideoSide key={`${side}:${side === "reference" ? props.review.referenceLap : props.review.targetLap}`} {...props} side={side} command={command} onReady={onReady} onBoundary={onBoundary} startDistance={startDistance} />)}
-    </div>
-    <div className="mt-4 flex flex-wrap gap-3">
-      <button className={btn} disabled={!ready.reference || !ready.target} onClick={() => setCommand(p => ({ type: "play", sequence: p.sequence + 1 }))}><Play size={15} />{c.pair}</button>
-      <button className={btn} onClick={() => setCommand(p => ({ type: "pause", sequence: p.sequence + 1 }))}><Pause size={15} />{c.stop}</button>
     </div>
     <p className="mt-2 text-xs text-slate-400">{c.pairNote}</p>
     <p className="mt-2 text-xs text-slate-500">{c.localOnly}</p>

@@ -1,17 +1,28 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Play, RotateCcw } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Play, RotateCcw, Volume2, VolumeX } from "lucide-react";
 import { useI18n } from "../lib/i18n";
-import { isPublishedVideoReview, type PublishedVideoReview as Review } from "../lib/publishedVideoReview";
+import { isPublishedVideoReview, publishedClipMedia, type PublishedVideoReview as Review } from "../lib/publishedVideoReview";
+import { goproSpeedAt } from "../lib/goproVideoSpeed";
+import { observeVideoClock } from "../lib/videoFrameClock";
+import { GoproSpeedDisplay } from "./GoproSpeedOverlay";
+import media from "../../public/demo/video/media.json";
+
+async function replayPlayers(players: Array<HTMLVideoElement | null>) {
+  for (const video of players) { if (video) { video.pause(); video.currentTime = 0; } }
+  await Promise.all(players.map(video => video?.play()));
+}
 
 /** Read-only real footage. Playback does not confirm sync or submit coach feedback. */
-export function PublishedVideoReview({ review }: { review: Review }) {
+export function PublishedVideoReview({ review, active = true }: { review: Review; active?: boolean }) {
   const { locale } = useI18n(), zh = locale === "zh";
   const [sectorId, setSectorId] = useState(review.segments[0]?.id);
   const [target, setTarget] = useState<number | null>(null);
   const [error, setError] = useState(false);
+  const [audio, setAudio] = useState<number | null>(0);
   const videos = useRef<Array<HTMLVideoElement | null>>([]);
+  const registerVideo = useCallback((index: number, el: HTMLVideoElement | null) => { videos.current[index] = el; }, []);
   if (!isPublishedVideoReview(review)) return null;
   const sector = review.segments.find(s => s.id === sectorId) ?? review.segments[0];
   const reference = sector.winner_laps[0];
@@ -22,8 +33,7 @@ export function PublishedVideoReview({ review }: { review: Review }) {
   async function replay() {
     setError(false);
     try {
-      for (const video of videos.current) { if (video) { video.pause(); video.currentTime = 0; } }
-      await Promise.all(videos.current.map(video => video?.play()));
+      await replayPlayers(videos.current);
     } catch { setError(true); }
   }
   return <section className="min-w-0 space-y-4 border-y border-slate-700 py-5" data-testid="published-video-review">
@@ -40,6 +50,11 @@ export function PublishedVideoReview({ review }: { review: Review }) {
         className="ml-2 rounded border border-slate-600 bg-slate-950 p-2 text-sm text-white">
         {sector.rows.filter(r => r.lap !== reference).map(r => <option key={r.lap} value={r.lap}>L{r.lap}</option>)}
       </select></label>
+      <div className="flex flex-wrap gap-1" role="group" aria-label={zh ? "声音来源" : "Audio source"}>
+        {[0, 1, null].map((side, i) => <button key={i} aria-pressed={audio === side} onClick={() => setAudio(side)} className={`inline-flex items-center gap-2 rounded border px-3 py-2 text-sm ${audio === side ? "border-cyan-400 text-cyan-200" : "border-slate-600 text-slate-300"}`}>
+          {side === null ? <VolumeX size={16} /> : <Volume2 size={16} />}{side === null ? (zh ? "静音" : "Mute") : `${zh ? "声音" : "Audio"} L${side === 0 ? reference : targetLap}`}
+        </button>)}
+      </div>
     </div>
     <div className="flex flex-wrap gap-x-6 gap-y-2 font-mono text-sm">
       {sector.rows.map(row => <span key={row.lap} className={row.lap === reference ? "text-emerald-300" : "text-slate-300"}>L{row.lap} · {row.time_s.toFixed(3)}s</span>)}
@@ -53,8 +68,7 @@ export function PublishedVideoReview({ review }: { review: Review }) {
     </p>}
     <div className="grid min-w-0 gap-4 md:grid-cols-2">{clips.map((clip, i) => clip && <figure key={clip.url} className="min-w-0">
       <figcaption className="mb-2 text-sm text-white">L{clip.lap} · {i === 0 ? (zh ? "本段最快" : "Fastest split") : (zh ? "对照圈" : "Comparison")}</figcaption>
-      <video ref={el => { videos.current[i] = el; }} src={clip.url} poster={clip.poster} controls playsInline muted preload="none"
-        className="aspect-video w-full bg-black" onError={() => setError(true)} />
+      <PublishedClip clip={clip} index={i} onVideo={registerVideo} active={active} muted={audio !== i} onAudio={setAudio} onError={() => setError(true)} />
       {clip.gps_warning && <p className="mt-2 text-xs text-amber-200">{zh ? "此片段与 GPS 异常区间重叠，位置仍需人工复核。" : "This clip overlaps a GPS-inconsistent interval; position needs human review."}</p>}
     </figure>)}</div>
     {error && <p role="alert" className="text-sm text-amber-200">{zh ? "视频未能播放，请重试或使用播放器单独播放。" : "Playback failed. Retry or use the individual player controls."}<button className="ml-2 inline-flex items-center gap-1 underline" onClick={() => void replay()}><RotateCcw size={14} />{zh ? "重试" : "Retry"}</button></p>}
@@ -62,4 +76,27 @@ export function PublishedVideoReview({ review }: { review: Review }) {
       ? `以人工确认的 L${review.anchor_lap} 起点推算，保留 ±${review.anchor_uncertainty_s.toFixed(1)} 秒误差；每段取后 5 秒。并排播放按相对时间，不是逐帧空间对齐。视频用于观察，不证明全部同步通过。虚拟 Sector 非官方计时点，小差异不等于稳定提升；样例不收集教练投票。`
       : `Extrapolated from the manually anchored L${review.anchor_lap}, retaining ±${review.anchor_uncertainty_s.toFixed(1)}s uncertainty. Each excerpt lasts 5s. Playback uses elapsed time, not frame-by-frame spatial alignment. Video does not prove full synchronization. Virtual sectors are not official gates; small differences do not establish improvement. Demo votes are disabled.`}</p>
   </section>;
+}
+
+/** The excerpt clock starts at zero; its own GPS5 samples follow presented frames and seeks. */
+function PublishedClip({ clip, index, onVideo, active, muted, onAudio, onError }: {
+  clip: Review["clips"][number]; index: number; onVideo: (index: number, el: HTMLVideoElement | null) => void; active: boolean;
+  muted: boolean; onAudio: (index: number) => void; onError: () => void;
+}) {
+  const video = useRef<HTMLVideoElement>(null), [time, setTime] = useState(0);
+  const data = publishedClipMedia(clip, media);
+  const src = data ? `${clip.url}?v=${data.revision}` : clip.url;
+  useEffect(() => {
+    const el = video.current;
+    if (!el) return;
+    const stop = observeVideoClock(el, sample => setTime(sample.time_s));
+    return () => { stop(); el.pause(); };
+  }, []);
+  useEffect(() => { if (!active) video.current?.pause(); }, [active]);
+  const reading = goproSpeedAt(data?.points ?? [], time);
+  return <div className="relative">
+    <video ref={el => { video.current = el; onVideo(index, el); }} src={src} poster={clip.poster} controls playsInline muted={muted} preload="metadata"
+      className="aspect-video w-full bg-black" onError={onError} onVolumeChange={() => { if (video.current && !video.current.muted) onAudio(index); }} />
+    <GoproSpeedDisplay reading={reading} status={reading.reason} time={time} published />
+  </div>;
 }
