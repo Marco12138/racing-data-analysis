@@ -306,6 +306,13 @@ them with a `NEXT_PUBLIC_` prefix.
 
 ## Release checks
 
+### Paired clip telemetry
+
+Speed/RPM panels below each coach-review video and a common-distance time-delta
+chart use existing API fields. Run `pnpm run test:clip-telemetry` along with the
+checks below. See [Clip Telemetry Review](CLIP_TELEMETRY_REVIEW.md) for timing,
+missing-data and uncertainty boundaries. This release is independent of PR #44.
+
 ### User-selected corner reviews
 
 The additive `/api/v1/xrk/selected-corner` route supports arbitrary five-second
