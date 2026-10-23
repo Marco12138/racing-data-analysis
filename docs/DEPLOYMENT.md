@@ -493,6 +493,7 @@ pnpm run test:frontend
 pnpm run test:coach-debrief
 pnpm run test:video-comparison
 pnpm run test:guided-review
+pnpm run test:dual-driver
 pnpm run test:selected-corner
 pnpm run test:gnss-sync
 pnpm run test:rpm-sync
@@ -504,6 +505,12 @@ pnpm run build:api-proxy
 docker compose config
 python scripts/verify_pilot_deployment.py --require-llm
 ```
+
+Two-driver guided review adds `/api/v1/comparisons/review` and `/compare`.
+Deploy the backward-compatible Railway route before publishing that frontend.
+See [Dual Driver Review](DUAL_DRIVER_REVIEW.md) for shared-gate timing,
+fastest-five variance, independent manual anchors, local repeated-pass search,
+and the boundaries of driver-behavior interpretation.
 
 Check CORS with the real frontend domain and confirm cloud mode returns
 `local_video_library: false` and `xrk_server_import.available: true` before

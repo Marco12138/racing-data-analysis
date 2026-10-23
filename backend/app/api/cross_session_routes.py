@@ -36,6 +36,37 @@ class DriverComparisonRequest(BaseModel):
     manual_zones: list[ManualZoneRequest] = Field(default_factory=list, max_length=30)
 
 
+class DriverReviewRequest(BaseModel):
+    """Two real laps and an optional five-second A-side selection."""
+
+    session_a: SessionLapReference
+    session_b: SessionLapReference
+    source_start_s: float | None = Field(default=None, ge=0, le=86400, allow_inf_nan=False)
+
+
+@router.post("/comparisons/review")
+async def driver_review(request: Request, payload: DriverReviewRequest) -> dict[str, Any]:
+    """Resolve shared spatial gates without changing either session's video calibration."""
+    from ..analysis.driver_review import build_driver_review
+
+    if payload.session_a.inspection_id == payload.session_b.inspection_id:
+        raise PublicApiError(status_code=400, error_code="COMPARISON_SESSIONS_REQUIRED",
+                             message="Select two different temporary sessions.")
+    a, b = load_records(request, payload.session_a.inspection_id, payload.session_b.inspection_id)
+    try:
+        ta, tb = await read_telemetry(a, b)
+        return await asyncio.to_thread(build_driver_review, ta, a.manifest, tb, b.manifest,
+                                       lap_a=payload.session_a.lap, lap_b=payload.session_b.lap,
+                                       source_start_s=payload.source_start_s)
+    except ValueError as exc:
+        raise PublicApiError(status_code=422, error_code="CROSS_SESSION_DATA_INCOMPATIBLE",
+                             message=str(exc), error_type="comparison_data") from exc
+    except Exception as exc:
+        raise PublicApiError(status_code=400, error_code="CROSS_SESSION_ANALYSIS_FAILED",
+                             message="The shared-corner review could not be calculated.",
+                             error_type=type(exc).__name__) from exc
+
+
 class SetupChange(BaseModel):
     """One declared kart setup change."""
 
