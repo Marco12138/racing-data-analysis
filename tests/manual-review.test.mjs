@@ -10,7 +10,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 mkdirSync(`${root}/tmp`, { recursive: true });
 const dir = mkdtempSync(`${root}/tmp/manual-review-test-`);
 execFileSync(`${root}/node_modules/.bin/esbuild`, [`${root}/tests/fixtures/manual-review-entry.tsx`, "--bundle", "--format=esm", "--platform=node", "--jsx=automatic",
-  "--external:react", "--external:react-dom", "--external:lucide-react", `--outfile=${dir}/entry.mjs`], { stdio: "pipe" });
+  "--external:react", "--external:react-dom", "--external:recharts", "--external:lucide-react", `--outfile=${dir}/entry.mjs`], { stdio: "pipe" });
 const { ManualReviewTest, validateManualReview, restoreManualReview, reviewDistanceAtTime, manualReviewWindow, selectCoachReviews,
   inferReviewCandidate, candidateLandmarkCheck, searchLandmarkVideo, sharedReviewStart, manualStartBounds, reviewWindowAtOffset,
   reviewGpsEvidence, parseReviewGpsEvidence, reviewGpsOverlaps, rankBoundaryFrames } = await import(pathToFileURL(`${dir}/entry.mjs`).href);

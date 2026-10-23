@@ -16,6 +16,8 @@ import { ReviewBoundaryCheck, type BoundaryVideo } from "./ReviewBoundaryCheck";
 import { ReviewGpsNotice } from "./ReviewGpsNotice";
 import { observeVideoClock } from "../lib/videoFrameClock";
 import { GoproSpeedOverlay } from "./GoproSpeedOverlay";
+import { compareClipTelemetry, type ClipComparison, type ClipTiming } from "../lib/clipTelemetry";
+import { ClipTelemetrySide, ClipTelemetryDelta } from "./ClipTelemetry";
 
 const TEXT = {
   zh: {
@@ -29,7 +31,7 @@ const TEXT = {
     apply: "应用人工片段", cancel: "取消调整", reset: "恢复自动片段", saved: "人工片段已保存到本浏览器；原自动片段保留。",
     windowError: "请选择视频范围内的有效起点、终点，时长须为 0.1–120 秒。", linkError: "此片段无法完整对应本圈连续遥测，请调整范围或重新核对锚点。",
     anchorMissing: "请先绑定一个可确认的位置，再勾选同步。", localOnly: "视频不上传。时间差来自相同赛道区间的遥测，不是剪辑时长之差。",
-    cropNote: "裁剪不会自动完成同步；没有可靠锚点时可以先保存预览。", boundaryNote: "人工片段仅覆盖该弯的一部分；上方时间差仍对应完整公共区间。",
+    cropNote: "裁剪不会自动完成同步；没有可靠锚点时可以先保存预览。", boundaryNote: "人工片段仅覆盖该弯的一部分。顶部弯道成绩与片段遥测的统计区间不同。",
     scope: "对应遥测圈", history: "已恢复该视频的人工片段", anchorAt: "锚点（需核对）", revision: "修正时间", speed: "AiM GPS 速度", rpm: "RPM",
     candidate: "计时推算候选", conflict: "已有锚点彼此冲突，暂不跨圈推算。请核对人工标记。",
   },
@@ -44,7 +46,7 @@ const TEXT = {
     apply: "Apply manual clip", cancel: "Cancel edit", reset: "Restore automatic clip", saved: "Manual clip saved in this browser; the automatic clip is retained.",
     windowError: "Select valid start/end times within the video, spanning 0.1–120 seconds.", linkError: "This clip does not map to continuous telemetry in this lap. Adjust its range or anchor.",
     anchorMissing: "Bind an identifiable location before confirming synchronization.", localOnly: "Video stays local. Deltas use the same track interval, not the difference between crop durations.",
-    cropNote: "Cropping does not establish synchronization. Save a preview first if no reliable anchor is available.", boundaryNote: "This manual clip covers only part of the corner; the deltas above still use the complete shared interval.",
+    cropNote: "Cropping does not establish synchronization. Save a preview first if no reliable anchor is available.", boundaryNote: "This clip covers only part of the corner. The corner totals above and clip telemetry cover different intervals.",
     scope: "Bound telemetry lap", history: "Restored the manual clip for this video", anchorAt: "Anchor (check before confirming)", revision: "Revision", speed: "AiM GPS speed", rpm: "RPM",
     candidate: "Timing-based candidate", conflict: "Existing anchors disagree. Check the manual marks before estimating other laps.",
   },
@@ -73,6 +75,17 @@ export function ManualReviewVideo(props: Props) {
   const onBoundary = useCallback((side: ReviewSide, value: BoundaryVideo | null) => setBoundaries(p => JSON.stringify(p[side]) === JSON.stringify(value) ? p : { ...p, [side]: value }), []);
   const onReady = useCallback((side: ReviewSide, value: boolean) => setReady(p => p[side] === value ? p : { ...p, [side]: value }), []);
   const startDistance = useMemo(() => sharedReviewStart(props.review), [props.review]);
+  const scope = JSON.stringify([props.fingerprint, props.review.id, props.review.referenceLap, props.review.targetLap, props.context]);
+  const [timings, setTimings] = useState<Record<ReviewSide, { scope: string; timing: ClipTiming | null } | null>>({ reference: null, target: null });
+  const [cursors, setCursors] = useState<Record<ReviewSide, number | null>>({ reference: null, target: null });
+  const onTiming = useCallback((side: ReviewSide, value: { scope: string; timing: ClipTiming | null }) => {
+    setTimings(p => JSON.stringify(p[side]) === JSON.stringify(value) ? p : { ...p, [side]: value });
+    setCursors(p => p[side] === null ? p : { ...p, [side]: null });
+  }, []);
+  const onPlayhead = useCallback((side: ReviewSide, distance: number | null) => setCursors(p => p[side] === distance ? p : { ...p, [side]: distance }), []);
+  const comparison = useMemo(() => compareClipTelemetry(props.review.reference, props.review.target,
+    timings.reference?.scope === scope ? timings.reference.timing : null,
+    timings.target?.scope === scope ? timings.target.timing : null), [props.review.reference, props.review.target, timings, scope]);
   return <div className="scroll-mt-24" data-testid="paired-video-review">
     <div className="mb-4 flex flex-wrap gap-3" data-testid="paired-video-controls">
       <button className={btn} disabled={!ready.reference || !ready.target} onClick={event => {
@@ -82,8 +95,10 @@ export function ManualReviewVideo(props: Props) {
       <button className={btn} onClick={() => setCommand(p => ({ type: "pause", sequence: p.sequence + 1 }))}><Pause size={15} />{c.stop}</button>
     </div>
     <div className="grid min-w-0 gap-5 xl:grid-cols-2">
-      {(["reference", "target"] as const).map(side => <ReviewVideoSide key={`${side}:${side === "reference" ? props.review.referenceLap : props.review.targetLap}`} {...props} side={side} command={command} onReady={onReady} onBoundary={onBoundary} startDistance={startDistance} />)}
+      {(["reference", "target"] as const).map(side => <ReviewVideoSide key={`${side}:${side === "reference" ? props.review.referenceLap : props.review.targetLap}`} {...props} side={side} command={command} onReady={onReady} onBoundary={onBoundary} startDistance={startDistance}
+        scope={scope} comparison={comparison} onTiming={onTiming} onPlayhead={onPlayhead} />)}
     </div>
+    <ClipTelemetryDelta comparison={comparison} cursors={cursors} />
     <p className="mt-2 text-xs text-slate-400">{c.pairNote}</p>
     <p className="mt-2 text-xs text-slate-500">{c.localOnly}</p>
     {boundaries.reference && boundaries.target && <ReviewBoundaryCheck key={JSON.stringify(boundaries)} reference={boundaries.reference} target={boundaries.target}
@@ -92,13 +107,16 @@ export function ManualReviewVideo(props: Props) {
 }
 
 function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, defaultDuration, targetCalibration, referenceCalibration, sessionCalibrations, lapRanges,
-  context, onCursor, feedback, side, command, onReady, onBoundary, startDistance, landmarkEvents, readOnly = false }: Props & { side: ReviewSide; command: PairCommand;
-    onReady: (side: ReviewSide, ready: boolean) => void; onBoundary: (side: ReviewSide, value: BoundaryVideo | null) => void; startDistance: number | null }) {
+  context, onCursor, feedback, side, command, onReady, onBoundary, startDistance, landmarkEvents, readOnly = false,
+  scope, comparison, onTiming, onPlayhead }: Props & { side: ReviewSide; command: PairCommand;
+    onReady: (side: ReviewSide, ready: boolean) => void; onBoundary: (side: ReviewSide, value: BoundaryVideo | null) => void; startDistance: number | null;
+    scope: string; comparison: ClipComparison; onTiming: (side: ReviewSide, value: { scope: string; timing: ClipTiming | null }) => void;
+    onPlayhead: (side: ReviewSide, distance: number | null) => void }) {
   const { locale } = useI18n();
   const c = review.kind === "sector" ? { ...TEXT[locale],
     entry: locale === "zh" ? "分段入口" : "Sector entry",
     exit: locale === "zh" ? "分段出口" : "Sector exit",
-    boundaryNote: locale === "zh" ? "人工片段仅覆盖分段的一部分；时间差仍对应完整分段。" : "This manual clip covers only part of the sector; the time delta still describes the full sector.",
+    boundaryNote: locale === "zh" ? "人工片段仅覆盖分段的一部分。顶部 Sector 成绩对应完整分段，片段遥测仅统计两视频共同覆盖的距离。" : "This clip covers only part of the sector. Sector totals above cover the full sector; clip telemetry times only distance shared by both videos.",
   } : TEXT[locale];
   const lap = side === "reference" ? review.referenceLap : review.targetLap;
   const trace = side === "reference" ? review.reference : review.target;
@@ -136,6 +154,12 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
   const clipStart = clip?.start_s;
   const clipEnd = clip?.end_s;
   const checkedOffset = activeAnchor?.offset_ms ?? candidate?.source.offset_ms ?? null;
+  const linkedOffset = activeAnchor?.offset_ms;
+  useEffect(() => {
+    onTiming(side, { scope, timing: !editing && url && clipStart !== undefined && clipEnd !== undefined && linkedOffset !== undefined
+      ? { clip: { start_s: clipStart, end_s: clipEnd, focus_s: clipStart }, offsetS: linkedOffset / 1000, confirmed: true } : null });
+    return () => onTiming(side, { scope, timing: null });
+  }, [side, scope, editing, url, clipStart, clipEnd, linkedOffset, onTiming]);
   useEffect(() => {
     onBoundary(side, url && clipStart !== undefined && clipEnd !== undefined && Math.abs(clipEnd - clipStart - 5) < .001 && !editing
       ? { url, start: clipStart, duration, lap, confirmed: Boolean(activeAnchor) } : null);
@@ -191,9 +215,12 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
         setWatched(signature);
         if (time >= clipEnd) { element.pause(); element.currentTime = loop ? clipStart : clipEnd; if (loop) void element.play().catch(() => setError("error")); }
       }
-      if (!editing && activeAnchor) { const d = reviewDistanceAtTime(trace, time - activeAnchor.offset_ms / 1000); if (d !== null) onCursor(d); }
+      const d = !editing && activeAnchor && clipStart !== undefined && clipEnd !== undefined && time >= clipStart && time <= clipEnd
+        ? reviewDistanceAtTime(trace, time - activeAnchor.offset_ms / 1000) : null;
+      onPlayhead(side, d);
+      if (d !== null) onCursor(d);
     });
-  }, [url, editing, clipStart, clipEnd, loop, signature, activeAnchor, trace, onCursor]);
+  }, [url, editing, clipStart, clipEnd, loop, signature, activeAnchor, trace, onCursor, onPlayhead, side]);
 
   function seek(time: number) {
     if (!video.current || !Number.isFinite(time)) return;
@@ -324,6 +351,7 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
       <div><dt>{c.speed}</dt><dd className="mt-1 font-mono text-sm text-white">{speed === null ? "—" : speed.toFixed(1)} km/h</dd></div>
       <div><dt>{c.rpm}</dt><dd className="mt-1 font-mono text-sm text-white">{rpm === null ? "—" : Math.round(rpm)} rpm</dd></div>
     </dl>}
+    {!editing && <ClipTelemetrySide comparison={comparison} side={side} distance={currentDistance} />}
     {!manualCoversZone && mode === "manual" && <p className="mt-2 text-xs text-amber-300">{c.boundaryNote}</p>}
     {error && <p role="alert" className="mt-2 text-sm text-red-300">{c[error as keyof typeof c]}</p>}
     {notice && <p role="status" className="mt-2 text-xs text-slate-400">{c[notice as keyof typeof c]}</p>}
