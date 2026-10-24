@@ -41,6 +41,8 @@ test("debrief does not promote unconfirmed model recommendations into confirmed 
     assert.ok(html.includes(locale === "zh" ? "返回核对片段" : "Review the clips"));
     assert.ok(html.includes(locale === "zh" ? "真实有效快圈" : "Real eligible fast laps"));
     assert.match(html, /L5 · 41.055s/);
+    assert.ok(html.includes(locale === "zh" ? "GPS 异常提示不会因片段确认而解除" : "clip confirmation never clears GPS warnings"));
+    assert.match(html, /±0.5/);
     assert.doesNotMatch(html, /L\d+ is [\d.]+s|连同下游慢 [\d.]+ 秒/);
   }
 });

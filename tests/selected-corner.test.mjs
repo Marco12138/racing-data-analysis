@@ -25,3 +25,12 @@ test("candidates use real gate times, not fabricated five-second lap times", () 
   assert.equal(cornerVideoWindow({ ...row, status: "excluded" }, anchor, 400), null);
   assert.equal(cornerVideoWindow(row, anchor, 228), null);
 });
+test("an explicitly confirmed peer-lap anchor takes precedence over propagation", () => {
+  const own={...anchor,target_lap:5,offset_ms:23000};
+  const row={lap:5,status:"candidate",start_session_s:200,end_session_s:209};
+  const saved=JSON.stringify([anchor,own]);
+  assert.equal(cornerVideoWindow(row,anchor,400,[own]).start,223);
+  assert.equal(cornerVideoWindow(row,anchor,400,[own]).end,232);
+  assert.equal(cornerVideoWindow(row,anchor,400,[{...own,video:{...video,size_bytes:500}}]).start,223.45);
+  assert.equal(JSON.stringify([anchor,own]),saved);
+});

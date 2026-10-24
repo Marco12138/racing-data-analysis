@@ -6,6 +6,9 @@ import numpy as np
 import pytest
 
 from backend.app.analysis.driver_review import build_driver_review, fastest_five_summary
+from backend.app.analysis.review_context import review_context, verify_section_path
+from backend.app.analysis.selected_corner import _profile
+import pandas as pd
 from backend.tests.test_cross_session_analysis import manifest_fixture
 from backend.tests.test_xrk_track_analysis import telemetry_fixture
 from backend.tests.test_cross_session_api import build_client, upload
@@ -27,6 +30,15 @@ def test_fastest_five_exact_population_variance():
     assert [r["lap"] for r in summary["laps"]] == [1, 2, 3, 4, 5]
     assert summary["variance_s2"] == pytest.approx(np.var([40, 40.1, 40.2, 40.3, 40.4], ddof=0))
     assert fastest_five_summary({"laps": rows[:4]})["variance_s2"] is None
+
+
+def test_clip_minima_use_observed_samples_not_sparse_plot_grid():
+    frame = pd.DataFrame({"distance_m": np.arange(201), "speed": 70., "rpm": 10000.})
+    frame.loc[103, ["speed", "rpm"]] = [30., 6000.]
+    result = _profile(frame)
+    assert result["metrics"]["minimum_speed_kmh"] == 30
+    assert result["metrics"]["minimum_rpm"] == 6000
+    assert min(result["speed"]) > 30
 
 
 def test_shared_gates_and_different_sampling_rates(tmp_path):
@@ -100,3 +112,39 @@ def test_review_api_contract_and_deleted_token(monkeypatch, tmp_path):
         response = client.post("/api/v1/comparisons/review", json=payload)
         assert response.status_code == 410
         assert response.json()["error_code"] == "XRK_INSPECTION_EXPIRED"
+
+
+def test_context_includes_approach_and_recovery_without_pedal_claims():
+    t = np.arange(0, 16, .04)
+    speed = np.interp(t, [0, 4, 7, 11, 16], [65, 70, 30, 70, 70])
+    frame = pd.DataFrame({"session_time_s": t, "speed": speed})
+    context = review_context(frame, 6, 11)
+    assert context["start_session_s"] < 4
+    assert context["end_session_s"] >= 11
+    assert context["seed_start_s"] == 6
+    assert context["driver_input_confirmed"] is False
+    assert review_context(frame[~frame.session_time_s.between(4, 5)], 6, 11)["status"] == "partial"
+    assert review_context(frame.assign(speed=65), 6, 11)["status"] == "partial"
+
+
+def test_matching_gates_do_not_accept_a_different_route_between_them():
+    x = np.linspace(0, 100, 101)
+    a = np.c_[x, np.zeros_like(x)]
+    b = np.c_[x, 15 * np.sin(x * np.pi / 100)]
+    assert np.allclose(a[[0, -1]], b[[0, -1]])
+    with pytest.raises(ValueError, match="gps_inconsistent"):
+        verify_section_path(a, b)
+    assert verify_section_path(a, a + [0, .3])["p95_m"] < 1
+
+
+def test_context_is_opt_in_and_uses_same_gate_endpoints(tmp_path):
+    a, b = manifests(tmp_path)
+    data = telemetry_fixture()
+    seed = build_driver_review(data, a, data, b, source_start_s=2)
+    result = build_driver_review(data, a, data, b, source_start_s=2, include_context=True)
+    assert "context" not in seed["corners"][0]
+    row = result["corners"][0]
+    assert row["context"]["seed_end_s"] == 7
+    if row["status"] == "candidate":
+        assert row["a"]["elapsed_s"] == pytest.approx(row["b"]["elapsed_s"], abs=.03)
+        assert row["path_check"]["visual_confirmation_required"] is True

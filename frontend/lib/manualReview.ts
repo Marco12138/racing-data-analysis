@@ -7,7 +7,7 @@ export type ManualReviewClip = {
   version: 1; lap: number; start_s: number; end_s: number; video: VideoIdentity;
   calibration: VideoSyncCalibration | null; sync_confirmed: boolean; saved_at: string;
   start_confirmation?: {
-    method: "manual_start_plus_five_v1"; uncertainty_s: .5; distance_m: number;
+    method: "manual_start_plus_five_v1" | "manual_start_full_context_v1"; uncertainty_s: .5; distance_m: number;
     proposed_start_s: number | null; source_anchor: VideoSyncCalibration | null;
   };
 };
@@ -46,8 +46,8 @@ export function validateManualReview(clip: ManualReviewClip, trace: ReviewPoint[
   if (![clip.start_s, clip.end_s, video.duration_s].every(finite) || clip.start_s < 0
     || clip.end_s > video.duration_s || clip.end_s - clip.start_s < .1 || clip.end_s - clip.start_s > 120) return "invalid_window";
   const mark = clip.start_confirmation;
-  if (mark && (mark.method !== "manual_start_plus_five_v1" || mark.uncertainty_s !== .5
-    || !finite(mark.distance_m) || Math.abs(clip.end_s - clip.start_s - 5) > .001
+  if (mark && (!["manual_start_plus_five_v1", "manual_start_full_context_v1"].includes(mark.method) || mark.uncertainty_s !== .5
+    || !finite(mark.distance_m) || (mark.method === "manual_start_plus_five_v1" && Math.abs(clip.end_s - clip.start_s - 5) > .001)
     || (mark.proposed_start_s !== null && !finite(mark.proposed_start_s)))) return "invalid_window";
   if (!clip.sync_confirmed) return null;
   const anchor = clip.calibration;

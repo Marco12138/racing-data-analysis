@@ -8,9 +8,9 @@ import { useI18n } from "../lib/i18n";
 import { inspectXrkFile, deleteXrkInspection, type XrkInspection } from "../lib/xrkAnalysisApi";
 import { comparisonVideoKey } from "../lib/videoComparison";
 import { createTrackProjection } from "../lib/driverComparison";
-import { driverClipStart, requestDriverReview, type DriverBinding, type DriverCorner, type DriverSession, type DualDriverResult } from "../lib/dualDriverReview";
+import { driverClipWindow, requestDriverReview, type DriverBinding, type DriverCorner, type DriverSession, type DualDriverResult } from "../lib/dualDriverReview";
 import { SiteNavigation } from "./SiteNavigation";
-import { DriverLapPairing, DualCornerVideo, dualButton, dualInput, type LocalDriverVideo } from "./DualDriverVideo";
+import { DriverGpsNotice, DriverLapPairing, DualCornerVideo, dualButton, dualInput, type LocalDriverVideo } from "./DualDriverVideo";
 
 type Side = { inspection: XrkInspection | null; video: LocalDriverVideo | null; busy: boolean; error: string };
 const emptySide = (): Side => ({ inspection: null, video: null, busy: false, error: "" });
@@ -37,6 +37,7 @@ export function DualDriverReview() {
   const [laps, setLaps] = useState<[number | null, number | null]>([null, null]);
   const [bindings, setBindings] = useState<[DriverBinding | null, DriverBinding | null]>([null, null]);
   const [confirmed, setConfirmed] = useState<Record<string, boolean>>({});
+  const [clipStarts, setClipStarts] = useState<Record<string, [number, number]>>({});
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [customStart, setCustomStart] = useState("");
   const [activeCorner, setActiveCorner] = useState("");
@@ -49,7 +50,7 @@ export function DualDriverReview() {
   }; }, []);
   function patch(i: number, data: Partial<Side>) { setSides(s => s.map((r, j) => i === j ? { ...r, ...data } : r) as [Side, Side]); }
   function moveStep(value: number) { document.querySelectorAll("video").forEach(v => v.pause()); setStep(value); window.scrollTo({ top: 0, behavior: "instant" }); }
-  function invalidate() { request.current?.abort(); setBusy(false); setResult(null); setCustom(null); setConfirmed({}); setStep(0); }
+  function invalidate() { request.current?.abort(); setBusy(false); setResult(null); setCustom(null); setConfirmed({}); setClipStarts({}); setStep(0); }
   async function upload(i: number, file: File) {
     uploads.current[i]?.abort(); const c = new AbortController(); uploads.current[i] = c;
     invalidate(); patch(i, { busy: true, error: "" });
@@ -62,7 +63,7 @@ export function DualDriverReview() {
     finally { if (uploads.current[i] === c) patch(i, { busy: false }); }
   }
   async function video(i: number, file: File) {
-    const g = ++generation.current[i]; request.current?.abort(); setBusy(false); setConfirmed({});
+    const g = ++generation.current[i]; request.current?.abort(); setBusy(false); setConfirmed({}); setClipStarts({});
     if (urls.current[i]) URL.revokeObjectURL(urls.current[i]);
     const url = URL.createObjectURL(file); urls.current[i] = url;
     patch(i, { video: null, error: "" }); setBindings(b => i === 0 ? [null, b[1]] : [b[0], null]);
@@ -79,9 +80,9 @@ export function DualDriverReview() {
       const response = await requestDriverReview([sides[0].inspection.inspection_id, sides[1].inspection.inspection_id], laps, c.signal, customTime);
       if (c.signal.aborted) return;
       if (customTime === undefined) {
-        setResult(response); setCustom(null); setConfirmed({});
+        setResult(response); setCustom(null); setConfirmed({}); setClipStarts({});
         setLaps([response.sessions.a.selected_lap, response.sessions.b.selected_lap]); setActiveCorner(response.corners[0]?.id ?? ""); moveStep(1);
-      } else { setCustom(response); setConfirmed(r => ({ ...r, custom: false })); }
+      } else { setCustom(response); setConfirmed(r => ({ ...r, custom: false })); setClipStarts(r => { const next = { ...r }; delete next.custom; return next; }); }
     } catch (e) { if (!c.signal.aborted) setError((e as Error).message); }
     finally { if (request.current === c) setBusy(false); }
   }
@@ -94,13 +95,17 @@ export function DualDriverReview() {
   const corners = [...(result?.corners ?? []), ...(custom?.corners ?? [])];
   function renderCorner(corner: DriverCorner) {
     if (!sessions || !paired) return null;
-    const starts = corner.a && corner.b ? [driverClipStart(corner.a, bindings[0]!, sides[0].video!.duration), driverClipStart(corner.b, bindings[1]!, sides[1].video!.duration)] : [];
+    const starts = clipStarts[corner.id] ?? (corner.a && corner.b ? [driverClipWindow(corner.a, bindings[0]!, sides[0].video!.duration)?.start ?? null, driverClipWindow(corner.b, bindings[1]!, sides[1].video!.duration)?.start ?? null] : []);
     return <section key={corner.id} className="space-y-4 border-b border-slate-700 py-6">
       <h2 className="text-lg font-semibold">{corner.id === "custom" ? (zh ? "自选弯道" : "Your corner") : `${zh ? "候选弯道" : "Suggested corner"} · ${corner.id}`}</h2>
-      {corner.status !== "candidate" || starts.length !== 2 || starts.some(s => s === null) ? <p className="text-amber-200">{zh ? "此区间暂不能联动播放：" : "Linked playback unavailable: "}{corner.reason || (zh ? "五秒片段超出已配对单圈，请核对配对范围或选择另一区间。" : "Five seconds extend beyond a paired lap. Check pairing or choose another interval.")}</p> : <>
-        <DualCornerVideo key={`${corner.id}:${starts.join(":")}:${bindings.map(b => b?.offset_s).join(":")}`}
+      {corner.context && <p className="text-xs text-amber-200">{corner.context.status === "expanded"
+        ? (zh ? "已补入减速前和速度恢复段；是否覆盖完整刹车与出弯仍需视频确认。" : "Approach and speed recovery included; confirm complete braking and exit coverage in video.")
+        : (zh ? "完整入弯 / 出弯证据不足，当前仅为局部区段。" : "Full approach / exit unresolved; this remains a partial interval.")}</p>}
+      {corner.status !== "candidate" || starts.length !== 2 || starts.some(s => s === null) ? <p className="text-amber-200">{zh ? "此区间暂不能联动播放：" : "Linked playback unavailable: "}{corner.reason || (zh ? "完整片段超出已配对单圈，请核对配对范围或选择另一区间。" : "The interval extends beyond a paired lap. Check pairing or choose another interval.")}</p> : <>
+        <DualCornerVideo key={`${corner.id}:${corner.a?.start_session_s}:${corner.a?.end_session_s}:${bindings.map(b => b?.offset_s).join(":")}`}
           videos={[sides[0].video!, sides[1].video!]} sessions={sessions} bindings={bindings as [DriverBinding, DriverBinding]}
-          starts={starts as [number, number]} confirmed={!!confirmed[corner.id]} onConfirm={value => setConfirmed(r => ({ ...r, [corner.id]: value }))} />
+          starts={starts as [number, number]} observations={[corner.a!, corner.b!]} confirmed={!!confirmed[corner.id]} onConfirm={value => setConfirmed(r => ({ ...r, [corner.id]: value }))}
+          onStartsChange={value => { setClipStarts(r => ({ ...r, [corner.id]: value })); setConfirmed(r => ({ ...r, [corner.id]: false })); }} />
         <CornerEvidence corner={corner} />
       </>}
     </section>;
@@ -143,14 +148,18 @@ export function DualDriverReview() {
     </>}
     {sessions && step === 2 && <div className="grid min-w-0 gap-6 lg:grid-cols-2">{sessions.map((s, i) => sides[i].video && <DriverLapPairing
       key={`${sides[i].inspection!.inspection_id}:${sides[i].video!.fileKey}:${s.selected_lap}`} label={i === 0 ? "A" : "B"} video={sides[i].video!} session={s}
-      inspectionId={sides[i].inspection!.inspection_id} binding={bindings[i]} onBind={value => { setBindings(b => i === 0 ? [value, b[1]] : [b[0], value]); setConfirmed({}); }} />)}</div>}
+      inspectionId={sides[i].inspection!.inspection_id} binding={bindings[i]} onBind={value => {
+        if (JSON.stringify(bindings[i]) === JSON.stringify(value)) return;
+        setBindings(b => i === 0 ? [value, b[1]] : [b[0], value]); setConfirmed({}); setClipStarts({});
+      }} />)}</div>}
     {step === 3 && paired && <>{!result!.corners.length && <p>{zh ? "没有可靠的推荐区间；可继续自选弯道。" : "No reliable suggested intervals. Continue to choose your corner."}</p>}
       <div className="flex flex-wrap gap-2" role="group" aria-label={zh ? "推荐弯道" : "Suggested corners"}>{result!.corners.map((c, i) => <button key={c.id} className={`${dualButton} ${activeCorner === c.id ? "border-cyan-300 text-cyan-200" : ""}`} onClick={() => setActiveCorner(c.id)} aria-pressed={activeCorner === c.id}>
         {zh ? "候选" : "Candidate"} {i + 1} · {confirmed[c.id] ? (zh ? "已核对" : "Reviewed") : (zh ? "待核对" : "Pending")}</button>)}</div>
       {result!.corners.filter(c => c.id === activeCorner).map(renderCorner)}</>}
     {step === 4 && paired && <section className="space-y-4">
       <h2 className="font-semibold">{zh ? "在 A 视频选一个起点，联动查找 B 的同一弯道" : "Choose a start in A; find the same physical corner in B"}</h2>
-      <video ref={sourcePlayer} src={sides[0].video!.url} controls muted playsInline className="aspect-video w-full max-w-2xl bg-black" />
+      <video ref={sourcePlayer} src={sides[0].video!.url} controls playsInline className="aspect-video w-full max-w-2xl bg-black"
+        onLoadedMetadata={e => { e.currentTarget.currentTime = bindings[0]!.video_start_s; }} />
       <div className="flex flex-wrap gap-3"><label className="text-xs">{zh ? "A 视频起点（秒）" : "A video start (seconds)"}<input type="number" min={0} step={.01} className={`${dualInput} mt-1`} value={customStart} onChange={e => setCustomStart(e.target.value)} /></label>
         <button className={dualButton} onClick={() => setCustomStart(String(sourcePlayer.current?.currentTime ?? 0))}>{zh ? "使用当前帧" : "Use current frame"}</button>
         <button className={dualButton} disabled={busy || customStart === "" || !Number.isFinite(Number(customStart)) || Number(customStart) < bindings[0]!.video_start_s || Number(customStart) + 5 > bindings[0]!.video_end_s}
@@ -160,7 +169,9 @@ export function DualDriverReview() {
     </section>}
     {step === 5 && sessions && <section className="space-y-6"><h2 className="text-xl font-semibold">{zh ? "本次双车手复盘" : "Two-driver debrief"}</h2>
       <p>{zh ? "真实最快圈" : "Real fastest laps"}: A L{sessions[0].fastest_five.fastest?.lap} {sessions[0].fastest_five.fastest?.lap_time.toFixed(3)}s · B L{sessions[1].fastest_five.fastest?.lap} {sessions[1].fastest_five.fastest?.lap_time.toFixed(3)}s</p>
-      {corners.filter(c => confirmed[c.id]).map(c => <section key={c.id} className="border-t border-slate-700 pt-4"><h3>{c.id} · {zh ? "已核对视频位置" : "Video location reviewed"}</h3><CornerEvidence corner={c} compact /></section>)}
+      {corners.filter(c => confirmed[c.id]).map(c => <section key={c.id} className="border-t border-slate-700 pt-4"><h3>{c.id} · {zh ? "已核对视频位置" : "Video location reviewed"}</h3><CornerEvidence corner={c} compact />
+        {[c.a, c.b].map((observation, i) => observation && sides[i].video && <div key={i}><span className="text-xs">{i === 0 ? "A" : "B"}</span><DriverGpsNotice video={sides[i].video!} fingerprint={sessions[i].file_fingerprint} observation={observation} /></div>)}
+      </section>)}
       {!corners.some(c => confirmed[c.id]) && <p className="text-amber-200">{zh ? "还没有人工核对通过的双视频区间。先回到推荐复盘或自选弯道确认同一位置。" : "No paired clip has been reviewed yet. Confirm a shared location in Review or Your corner."}</p>}
       <p className="text-sm text-slate-400">{zh ? "下一次练习：优先复看已确认区间的入口和出口，保持其他条件不变，单独测试一种动作，再看同一空间区间的用时与出口速度。转速下降不等于已确认刹车；未标定 GoPro 横向 G 不能证明转向时刻。" : "Next test: review the confirmed entry and exit, hold other conditions steady and test one action at a time. Recheck shared-gate time and exit speed. RPM decline does not confirm braking; uncalibrated GoPro lateral G does not establish steering onset."}</p>
     </section>}

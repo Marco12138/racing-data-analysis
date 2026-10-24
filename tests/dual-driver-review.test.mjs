@@ -53,6 +53,22 @@ test("live telemetry cannot extrapolate or bridge missing values", () => {
   assert.equal(m.channelAt(rows,2,"rpm"),null);
   assert.equal(m.channelAt(rows,0,"speed"),null);
 });
+test("full gate duration and explicit clip corrections share one telemetry clock", () => {
+  const obs={start_session_s:140,end_session_s:150.2,elapsed_s:10.2};
+  const binding={video_start_s:159.55,video_end_s:200.614,offset_s:23.464};
+  const window=m.driverClipWindow(obs,binding,406);
+  assert.equal(window.start,163.464);assert.equal(window.end,173.664);
+  assert.equal(m.clipTelemetryTime(164.964,163.964,obs),141);
+  assert.equal(m.clipTelemetryTime(160,163.964,obs),null);
+  assert.equal(m.clipTelemetryTime(175,163.964,obs),null);
+  assert.equal(m.driverClipWindow({...obs,end_session_s:200},binding,406),null);
+  assert.equal(binding.offset_s,23.464);
+});
+test("paired review offers one audible side and an explicit mute option", () => {
+  const html=renderToStaticMarkup(h(m.I18nProvider,{initialLocale:"zh"},h(m.ReviewAudioControl,{value:0,onChange(){}})));
+  assert.equal((html.match(/aria-pressed="true"/g)||[]).length,1);
+  assert.match(html,/A 声音/);assert.match(html,/B 声音/);assert.match(html,/静音/);
+});
 test("search gallery declares candidate status and does not claim complete coverage", () => {
   const html = renderToStaticMarkup(h(m.I18nProvider,{initialLocale:"zh"},h(m.RepeatedPassSearch,{
     source:{url:"blob:a",start:10},target:{url:"blob:b",duration:100},onPreview(){},onUse(){}

@@ -33,6 +33,18 @@ test("linked crops preserve session time and accept only the matching real lap a
   assert.deepEqual(manualReviewWindow(clip, trace, 50), { start_s: 5, end_s: 15, focus_s: 10 });
 });
 
+test("full-context start confirmation restores without rewriting the lap anchor or five-second history", () => {
+  const original = JSON.stringify(anchor);
+  const full = { ...clip, start_confirmation: { method: "manual_start_full_context_v1", uncertainty_s: .5,
+    distance_m: 25, proposed_start_s: 5, source_anchor: anchor } };
+  assert.equal(validateManualReview(full, trace, 2, video), null);
+  assert.deepEqual(restoreManualReview(JSON.stringify([full]), trace, 2, video), full);
+  assert.equal(JSON.stringify(anchor), original);
+  assert.equal(validateManualReview({ ...full, start_confirmation: { ...full.start_confirmation,
+    method: "manual_start_plus_five_v1" } }, trace, 2, video), "invalid_window");
+  assert.equal(validateManualReview({ ...full, end_s: 25 }, trace, 2, video), "outside_telemetry");
+});
+
 test("invalid crop bounds, wrong anchors and long gaps are rejected", () => {
   for (const changes of [{ start_s: -1 }, { end_s: 40 }, { start_s: 15 }, { end_s: 5.01 }]) {
     assert.equal(validateManualReview({ ...clip, ...changes }, trace, 2, video), "invalid_window");

@@ -222,7 +222,7 @@ function ReviewCard({ review, analysis, videoUrl, file, duration, targetCalibrat
   const { locale } = useI18n();
   const sector = review.kind === "sector";
   const contextLabel = sector ? (locale === "zh" ? "完整分段与下一段" : "Full sector and next sector") : c.context;
-  const [context, setContext] = useState(false), [cursor, setCursor] = useState(review.focus);
+  const [context, setContext] = useState(true), [cursor, setCursor] = useState(review.focus);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const name = locale === "zh" ? review.name.replace(/^Suggested Zone\s+/i, "建议区间 ").replace(/^Zone\s+/i, "区间 ") : review.name;
   const landmarkEvents = Object.fromEntries([review.referenceLap, review.targetLap].map(lap => {
@@ -248,6 +248,9 @@ function ReviewCard({ review, analysis, videoUrl, file, duration, targetCalibrat
     <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label={contextLabel}>
       {[false, true].map(v => <button key={String(v)} className={button} aria-pressed={context === v} onClick={() => setContext(v)}>{context === v && <Check size={14} />}{v ? contextLabel : c.preview}</button>)}
     </div>
+    {context && !sector && <p className="mb-3 text-xs text-amber-200">{locale === "zh"
+      ? "包含可见的减速前段与出弯恢复；刹车、转向和开油动作仍需视频或直接传感器确认，数据边界处可能不完整。"
+      : "Includes observed approach and speed recovery. Braking, steering and throttle still need video or direct sensors; data edges may truncate the sequence."}</p>}
     <ManualReviewVideo review={review} fingerprint={analysis.file_fingerprint} defaultFile={file} defaultUrl={videoUrl}
       defaultDuration={duration} targetCalibration={targetCalibration} referenceCalibration={referenceCalibration} context={context}
       sessionCalibrations={sessionCalibrations} lapRanges={analysis.video_sync.lap_video_ranges}

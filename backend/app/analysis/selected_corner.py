@@ -71,11 +71,12 @@ def _profile(section: pd.DataFrame) -> dict:
     grid = np.linspace(0, 1, 41)
     speed = np.interp(grid, progress, section.speed)
     rpm = np.interp(grid, progress, section.rpm) if "rpm" in section and np.isfinite(section.rpm).all() else None
-    minimum = int(np.argmin(speed))
+    # Display extrema from observed samples, not the sparse clustering grid.
+    minimum = int(np.argmin(section.speed.to_numpy(float)))
     return {"progress": grid.tolist(), "speed": speed.tolist(), "rpm": rpm.tolist() if rpm is not None else None,
-            "metrics": {"entry_speed_kmh": float(speed[0]), "minimum_speed_kmh": float(speed[minimum]),
-                        "exit_speed_kmh": float(speed[-1]), "minimum_position_fraction": float(grid[minimum]),
-                        "minimum_rpm": float(np.min(rpm)) if rpm is not None else None}}
+            "metrics": {"entry_speed_kmh": float(speed[0]), "minimum_speed_kmh": float(section.speed.iloc[minimum]),
+                        "exit_speed_kmh": float(speed[-1]), "minimum_position_fraction": float(progress[minimum]),
+                        "minimum_rpm": float(section.rpm.min()) if rpm is not None else None}}
 
 
 def group_corner_patterns(rows: list[dict], confirmed_laps: list[int]) -> dict:
@@ -140,7 +141,8 @@ def group_corner_patterns(rows: list[dict], confirmed_laps: list[int]) -> dict:
 
 
 def analyze_selected_corner(telemetry: pd.DataFrame, manifest: dict, *, source_lap: int,
-                            start_session_s: float, end_session_s: float, confirmed_laps: list[int]) -> dict:
+                            start_session_s: float, end_session_s: float, confirmed_laps: list[int],
+                            include_context: bool = False) -> dict:
     """Find directed spatial gate crossings across quality-gated real laps."""
     if not 4.9 <= end_session_s - start_session_s <= 5.1:
         raise ValueError("corner_selection_must_be_five_seconds")
@@ -156,6 +158,11 @@ def analyze_selected_corner(telemetry: pd.DataFrame, manifest: dict, *, source_l
     if source_lap not in eligible:
         raise ValueError("corner_source_lap_not_eligible")
     source = cleaned[cleaned.lap == source_lap].reset_index(drop=True)
+    context = None
+    if include_context:
+        from .review_context import review_context
+        context = review_context(source, start_session_s, end_session_s)
+        start_session_s, end_session_s = context["start_session_s"], context["end_session_s"]
     _section(source, start_session_s, end_session_s)
     entry, exit_gate = _gate(source, start_session_s), _gate(source, end_session_s)
     reference = source[["local_x_m", "local_y_m"]].to_numpy(float)
@@ -193,6 +200,9 @@ def analyze_selected_corner(telemetry: pd.DataFrame, manifest: dict, *, source_l
             rows.append({**result, "reason": "gate_order_or_duration"})
             continue
         try:
+            from .review_context import verify_section_path
+            path_check = verify_section_path(reference[source.session_time_s.between(start_session_s, end_session_s)],
+                                              aligned[frame.session_time_s.between(start, end)])
             section = _section(frame, start, end)
             profile = _profile(section)
         except ValueError as exc:
@@ -210,9 +220,10 @@ def analyze_selected_corner(telemetry: pd.DataFrame, manifest: dict, *, source_l
         rows.append({**result, "status": "candidate", "reason": None, "start_session_s": start, "end_session_s": end,
                      "elapsed_s": end - start, "downstream_s": downstream_s, "profile": profile,
                      "start_distance_m": float(section.distance_m.iloc[0]), "end_distance_m": float(section.distance_m.iloc[-1]),
-                     "sample_count": len(section), "boundary_brackets_s": [h[0]["sample_bracket_s"] for h in hits],
+                     "sample_count": len(section), "path_check": path_check, "boundary_brackets_s": [h[0]["sample_bracket_s"] for h in hits],
                      "visual_confirmation_required": True})
     return {"version": 1, "source_lap": source_lap, "start_session_s": start_session_s, "end_session_s": end_session_s,
+            "context": context,
             "gates": {"entry": entry.model_dump(), "exit": exit_gate.model_dump()}, "laps": rows, "gps_quality": gps_quality,
             "patterns": group_corner_patterns(rows, confirmed_laps), "synthetic_curve_generated": False,
             "evidence": {"measured": ["GPS position", "GPS speed", "RPM when available"],

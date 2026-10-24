@@ -13,13 +13,14 @@ export type CornerLap = {
 export type CornerGroup = { id: number; laps: number[]; count: number; representative_lap: number; median_time_s: number; time_range_s: number[]; median_downstream_s: number | null; median_combined_s: number | null; metrics: CornerMetrics };
 export type SelectedCornerResult = {
   version: 1; source_lap: number; start_session_s: number; end_session_s: number;
+  context?: { status: string; reason: string } | null;
   laps: CornerLap[]; synthetic_curve_generated: false;
   patterns: { status: "insufficient_confirmed_laps" | "no_clear_separation" | "exploratory_groups";
     groups: CornerGroup[]; confirmed_laps: number[]; most_common_group_ids: number[];
     fastest_observed_group_ids: number[]; common_is_fastest: boolean | null;
     confidence: "low"; silhouette: number | null; channels?: string[] };
 };
-export type CornerRequest = { inspection_id: string; source_lap: number; start_session_s: number; end_session_s: number; confirmed_laps: number[] };
+export type CornerRequest = { inspection_id: string; source_lap: number; start_session_s: number; end_session_s: number; confirmed_laps: number[]; include_context?: boolean };
 
 /** Keep the human anchor immutable; a five-second crop cannot span logger laps. */
 export function selectCornerWindow(start: number, anchor: VideoSyncCalibration, video: VideoIdentity,
@@ -32,10 +33,11 @@ export function selectCornerWindow(start: number, anchor: VideoSyncCalibration, 
 }
 
 /** Same-session elapsed timing only proposes a clip, never confirms another lap. */
-export function cornerVideoWindow(row: CornerLap, anchor: VideoSyncCalibration, duration: number) {
+export function cornerVideoWindow(row: CornerLap, anchor: VideoSyncCalibration, duration: number, anchors: VideoSyncCalibration[] = []) {
   if (row.status !== "candidate" || !Number.isFinite(row.start_session_s) || !Number.isFinite(row.end_session_s)) return null;
-  const start = row.start_session_s! + anchor.offset_ms / 1000, end = row.end_session_s! + anchor.offset_ms / 1000;
-  return start >= 0 && end > start && Math.max(end, start + 5) <= duration ? { start, end } : null;
+  const own = anchors.find(a => a.target_lap === row.lap && matchesReviewVideo(a.video, anchor.video)) ?? anchor;
+  const start = row.start_session_s! + own.offset_ms / 1000, end = row.end_session_s! + own.offset_ms / 1000;
+  return start >= 0 && end > start && Math.max(end, start + 5) <= duration ? { start, end, offset: own.offset_ms / 1000 } : null;
 }
 
 export async function analyzeSelectedCorner(request: CornerRequest, signal?: AbortSignal): Promise<SelectedCornerResult> {

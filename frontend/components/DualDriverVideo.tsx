@@ -1,15 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Camera, Pause, Play } from "lucide-react";
 import { useI18n } from "../lib/i18n";
 import { observeVideoClock } from "../lib/videoFrameClock";
 import { seekComparisonVideo } from "../lib/videoComparison";
 import { inspectManualLapBounds } from "../lib/videoTelemetrySync";
-import { bindingKey, channelAt, parseDriverBinding, type DriverBinding, type DriverSession } from "../lib/dualDriverReview";
+import { bindingKey, channelAt, clipTelemetryTime, parseDriverBinding, type CornerObservation, type DriverBinding, type DriverSession } from "../lib/dualDriverReview";
 import { ManualLapBinding } from "./ManualLapBinding";
 import { GoproSpeedOverlay } from "./GoproSpeedOverlay";
 import { ReviewBoundaryCheck } from "./ReviewBoundaryCheck";
+import { ReviewAudioControl } from "./ReviewAudioControl";
+import { reviewVideoIdentity } from "../lib/manualReview";
+import { parseReviewGpsEvidence, REVIEW_GPS_EVENT, reviewGpsKey, type ReviewGpsEvidence } from "../lib/reviewGpsEvidence";
+import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, XAxis, YAxis } from "recharts";
 
 export const dualButton = "inline-flex min-h-10 items-center justify-center gap-2 rounded border border-slate-600 px-3 py-2 text-sm disabled:opacity-40";
 export const dualInput = "min-w-0 w-full rounded border border-slate-600 bg-slate-950 px-3 py-2 text-sm";
@@ -58,26 +62,49 @@ export function DriverLapPairing({ label, video, session, inspectionId, binding,
 }
 
 /** Both sides keep real playback speed; video confirmation is separate from telemetry calculations. */
-export function DualCornerVideo({ videos, sessions, bindings, starts, confirmed, onConfirm }: {
+export function DualCornerVideo({ videos, sessions, bindings, starts, observations, confirmed, onConfirm, onStartsChange }: {
   videos: [LocalDriverVideo, LocalDriverVideo]; sessions: [DriverSession, DriverSession];
   bindings: [DriverBinding, DriverBinding]; starts: [number, number]; confirmed: boolean; onConfirm: (confirmed: boolean) => void;
+  observations: [CornerObservation, CornerObservation];
+  onStartsChange: (starts: [number, number]) => void;
 }) {
   const { locale } = useI18n(), zh = locale === "zh";
   const a = useRef<HTMLVideoElement>(null), b = useRef<HTMLVideoElement>(null);
   const [times, setTimes] = useState<[number, number]>(starts), [playing, setPlaying] = useState(false), [error, setError] = useState("");
+  const [audio, setAudio] = useState<number | null>(0);
+  const [draftStarts, setDraftStarts] = useState(() => starts.map(String));
+  const startA = starts[0], startB = starts[1], lengthA = observations[0].elapsed_s, lengthB = observations[1].elapsed_s;
+  const ends = starts.map((s, i) => s + observations[i].elapsed_s);
+  const domains = useMemo(() => {
+    const points = sessions.flatMap((s, i) => s.track.filter(p => p.session_time_s >= observations[i].start_session_s && p.session_time_s <= observations[i].end_session_s));
+    return Object.fromEntries((["speed", "rpm"] as const).map(channel => {
+      const values = points.map(p => p[channel]).filter((v): v is number => v !== null && Number.isFinite(v));
+      const min = Math.min(...values), max = Math.max(...values), pad = Math.max(1, (max - min) * .05);
+      return [channel, values.length ? [Math.max(0, min - pad), max + pad] : [0, 1]];
+    })) as Record<"speed" | "rpm", [number, number]>;
+  }, [sessions, observations]);
   const abort = useRef<AbortController | null>(null), running = useRef(false);
   function stop() { running.current = false; abort.current?.abort(); a.current?.pause(); b.current?.pause(); setPlaying(false); }
   useEffect(() => {
+    const starts = [startA, startB], lengths = [lengthA, lengthB];
     const elements = [a.current, b.current];
     const clean = elements.map((v, i) => v ? observeVideoClock(v, sample => {
       setTimes(t => i === 0 ? [sample.time_s, t[1]] : [t[0], sample.time_s]);
-      if (running.current && sample.time_s >= starts[i] + 5 - .015) { running.current = false; elements.forEach(e => e?.pause()); setPlaying(false); }
+      if (running.current && sample.time_s >= starts[i] + lengths[i] - .015) {
+        v!.pause();
+        if (elements.every(e => !e || e.paused)) { running.current = false; setPlaying(false); }
+      }
     }) : () => {});
     elements.forEach((v, i) => { if (v) v.currentTime = starts[i]; });
-    return () => { abort.current?.abort(); clean.forEach(c => c()); elements.forEach(v => v?.pause()); };
-    // The parent remounts when the immutable corner/binding identity changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    return () => { running.current = false; abort.current?.abort(); clean.forEach(c => c()); elements.forEach(v => v?.pause()); };
+  }, [startA, startB, lengthA, lengthB]);
+  function commitStart(i: number) {
+    const n = Number(draftStarts[i]);
+    if (draftStarts[i] === "" || !Number.isFinite(n) || n < bindings[i].video_start_s || n + observations[i].elapsed_s > Math.min(videos[i].duration, bindings[i].video_end_s)) {
+      setDraftStarts(starts.map(String)); return;
+    }
+    stop(); onStartsChange(i === 0 ? [n, starts[1]] : [starts[0], n]);
+  }
   async function play() {
     stop(); setError(""); const c = new AbortController(); abort.current = c;
     try {
@@ -88,21 +115,68 @@ export function DualCornerVideo({ videos, sessions, bindings, starts, confirmed,
     } catch { const cancelled = c.signal.aborted; stop(); if (!cancelled) setError(zh ? "未能同时播放，请重试。" : "Paired playback failed. Please retry."); }
   }
   return <div className="space-y-3">
-    <button className={`${dualButton} border-yellow-400 text-yellow-300`} onClick={() => playing ? stop() : void play()}>{playing ? <Pause size={16} /> : <Play size={16} />}{zh ? "两侧播放 / 暂停 · 5秒" : "Play / pause both · 5s"}</button>
+    <button className={`${dualButton} border-yellow-400 text-yellow-300`} onClick={() => playing ? stop() : void play()}>{playing ? <Pause size={16} /> : <Play size={16} />}{zh ? "两侧播放 / 暂停 · 同一空间区间" : "Play / pause both · shared interval"}</button>
+    <ReviewAudioControl value={audio} onChange={setAudio} />
     <div className="grid min-w-0 gap-4 lg:grid-cols-2">{videos.map((v, i) => <div key={i} className="min-w-0">
       <h3 className="mb-2 font-semibold">{i === 0 ? "A" : "B"} · L{sessions[i].selected_lap}</h3>
-      <div className="relative"><video ref={i === 0 ? a : b} src={v.url} controls muted playsInline className="aspect-video w-full bg-black" onPause={() => { if (running.current) stop(); }} />
+      <div className="relative"><video ref={i === 0 ? a : b} src={v.url} controls muted={audio !== i} playsInline className="aspect-video w-full bg-black"
+        onLoadedMetadata={e => { e.currentTarget.currentTime = starts[i]; }} />
         <GoproSpeedOverlay file={v.file} time={times[i]} /></div>
-      <div className="flex flex-wrap gap-4 py-2 font-mono text-xs"><span>{starts[i].toFixed(2)}–{(starts[i] + 5).toFixed(2)}s</span>
-        <span>AiM RPM: {channelAt(sessions[i].track, times[i] - bindings[i].offset_s, "rpm")?.toFixed(0) ?? "—"}</span>
-        <span>AiM GPS: {channelAt(sessions[i].track, times[i] - bindings[i].offset_s, "speed")?.toFixed(1) ?? "—"} km/h</span></div>
+      <div className="flex flex-wrap gap-4 py-2 font-mono text-xs"><span>{starts[i].toFixed(2)}–{ends[i].toFixed(2)}s</span></div>
+      <label className="block text-xs">{i === 0 ? "A" : "B"} · {zh ? "本片段起点（不改整圈锚点）" : "Clip start (lap anchor unchanged)"}
+        <input className={dualInput} type="number" step={.01} min={bindings[i].video_start_s} max={bindings[i].video_end_s - observations[i].elapsed_s}
+          value={draftStarts[i]} onChange={e => setDraftStarts(d => d.map((s, j) => i === j ? e.target.value : s))}
+          onBlur={() => commitStart(i)} onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} /></label>
+      {Math.abs(starts[i] - observations[i].start_session_s - bindings[i].offset_s) > .5 && <p className="text-xs text-amber-200">{zh ? "调整已超出人工 ±0.5 秒范围，请重新核对圈号与参照物。GPS 警告未解除。" : "Adjustment exceeds ±0.5s. Recheck lap and landmarks; GPS warnings remain."}</p>}
+      <DriverGpsNotice video={v} fingerprint={sessions[i].file_fingerprint} observation={observations[i]} />
+      <DriverClipTelemetry session={sessions[i]} observation={observations[i]} videoTime={times[i]} videoStart={starts[i]} confirmed={confirmed} domains={domains} />
     </div>)}</div>
-    <ReviewBoundaryCheck reference={{ url: videos[0].url, start: starts[0], duration: videos[0].duration, lap: sessions[0].selected_lap, label: "A", confirmed: true }}
-      target={{ url: videos[1].url, start: starts[1], duration: videos[1].duration, lap: sessions[1].selected_lap, label: "B", confirmed: true }}
+    <ReviewBoundaryCheck key={starts.join(":")} reference={{ url: videos[0].url, start: starts[0], end: ends[0], duration: videos[0].duration, lap: sessions[0].selected_lap, label: "A", confirmed }}
+      target={{ url: videos[1].url, start: starts[1], end: ends[1], duration: videos[1].duration, lap: sessions[1].selected_lap, label: "B", confirmed }}
       onSeek={time => { stop(); if (b.current) b.current.currentTime = time; }} />
     <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={confirmed} onChange={e => onConfirm(e.target.checked)} />
       {zh ? "已核对两侧起点是同一位置、同一行驶方向；将此对照加入总结" : "Both starts are the same location and direction; include this comparison in the debrief"}</label>
-    <p className="text-xs text-slate-400">{zh ? "人工起点保留 ±0.5 秒不确定性；GPS 配准通过不等于视频帧已同步。5秒末端可能处于不同位置。" : "Manual starts retain ±0.5s uncertainty. GPS registration does not verify video-frame timing. Five-second endpoints may differ."}</p>
+    <p className="text-xs text-slate-400">{zh ? "人工起点保留 ±0.5 秒不确定性；两侧各播到同一出口，不拉伸时间。GPS 配准不等于视频同步。未确认位置时，不显示与画面绑定的 AiM 读数。" : "Manual starts retain ±0.5s uncertainty. Both clips reach the same exit at real playback speed. GPS registration is not video synchronization; frame-linked AiM readings require location confirmation."}</p>
     {error && <p role="alert">{error}</p>}
   </div>;
+}
+
+function DriverClipTelemetry({ session, observation, videoTime, videoStart, confirmed, domains }: {
+  session: DriverSession; observation: CornerObservation; videoTime: number; videoStart: number; confirmed: boolean;
+  domains: Record<"speed" | "rpm", [number, number]>;
+}) {
+  const { locale } = useI18n(), zh = locale === "zh";
+  const time = confirmed ? clipTelemetryTime(videoTime, videoStart, observation) : null;
+  const data = useMemo(() => session.track.filter(p => p.session_time_s >= observation.start_session_s && p.session_time_s <= observation.end_session_s)
+    .map(p => ({ ...p, elapsed: p.session_time_s - observation.start_session_s })), [session.track, observation.start_session_s, observation.end_session_s]);
+  return <section className="mt-3 min-w-0" data-testid="driver-clip-telemetry">
+    <p className="text-xs text-amber-200">{confirmed ? (zh ? "AiM · 按本片段已确认起点同步 · ±0.5s" : "AiM · confirmed clip start · ±0.5s") : (zh ? "AiM 候选区间，尚未确认与画面对应" : "Candidate AiM interval; video location unconfirmed")}</p>
+    <output className="block py-2 font-mono text-sm" data-session-time={time ?? ""}>AiM GPS: {time === null ? "—" : channelAt(session.track, time, "speed")?.toFixed(1) ?? "—"} km/h · RPM: {time === null ? "—" : channelAt(session.track, time, "rpm")?.toFixed(0) ?? "—"}</output>
+    {(["speed", "rpm"] as const).map(channel => <div className="h-32 min-w-0" key={channel} aria-label={`AiM ${channel}`}>
+      <ResponsiveContainer width="100%" height="100%"><LineChart data={data}><CartesianGrid stroke="#263341" />
+        <XAxis type="number" dataKey="elapsed" domain={[0, observation.elapsed_s]} tickFormatter={v => Number(v).toFixed(1)} unit="s" /><YAxis width={55} domain={domains[channel]} tickFormatter={v => Number(v).toFixed(0)} />
+        <Line dataKey={channel} stroke={channel === "speed" ? "#2dd4bf" : "#facc15"} dot={false} connectNulls={false} isAnimationActive={false} />
+        {time !== null && <ReferenceLine x={time - observation.start_session_s} stroke="#fff" />}</LineChart></ResponsiveContainer>
+    </div>)}
+  </section>;
+}
+
+export function DriverGpsNotice({ video, fingerprint, observation }: {
+  video: LocalDriverVideo; fingerprint?: string; observation: CornerObservation;
+}) {
+  const { locale } = useI18n(), zh = locale === "zh";
+  const [evidence, setEvidence] = useState<ReviewGpsEvidence | null>(null);
+  useEffect(() => {
+    const read = () => {
+      try { setEvidence(fingerprint ? parseReviewGpsEvidence(localStorage.getItem(reviewGpsKey(fingerprint)), reviewVideoIdentity(video.file, video.duration)) : null); }
+      catch { setEvidence(null); }
+    };
+    queueMicrotask(read); window.addEventListener(REVIEW_GPS_EVENT, read);
+    return () => window.removeEventListener(REVIEW_GPS_EVENT, read);
+  }, [video.file, video.duration, fingerprint]);
+  const bad = evidence?.segments.filter(s => s.status === "gps_inconsistent" && s.session_range_s[0] < observation.end_session_s && s.session_range_s[1] > observation.start_session_s) ?? [];
+  return <p className="mt-2 text-xs text-amber-200" data-testid="driver-gps-warning">{bad.length
+    ? (zh ? "GPS 异常区间：两路信号不一致。人工确认和参照物相似不会解除该警告。" : "GPS anomaly: the two signals disagree. Manual confirmation and similar scenery do not clear this warning.")
+    : (zh ? "GPS 与画面延迟仍有不确定性，人工位置确认不代表自动同步通过。" : "GPS-to-video latency remains uncertain; manual location confirmation is not an automatic synchronization pass.")}
+    {bad.map((s, i) => <span key={i} className="block">AiM {s.session_range_s.map(t => t.toFixed(2)).join("–")}s</span>)}</p>;
 }
