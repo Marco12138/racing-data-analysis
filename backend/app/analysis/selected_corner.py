@@ -79,6 +79,15 @@ def _profile(section: pd.DataFrame) -> dict:
                         "minimum_rpm": float(section.rpm.min()) if rpm is not None else None}}
 
 
+def _clip_telemetry(section: pd.DataFrame) -> list[dict]:
+    """Keep observed time samples separate from distance-domain clustering profiles."""
+    start = float(section.session_time_s.iloc[0])
+    return [{"session_time_s": float(row.session_time_s), "elapsed_s": float(row.session_time_s) - start,
+             "speed": float(row.speed),
+             "rpm": float(row.rpm) if hasattr(row, "rpm") and np.isfinite(row.rpm) else None}
+            for row in section.itertuples(index=False)]
+
+
 def group_corner_patterns(rows: list[dict], confirmed_laps: list[int]) -> dict:
     """Ward clustering of observed profiles, with no timing labels or synthetic reference curves."""
     accepted = [row for row in rows if row["status"] == "candidate" and row["lap"] in confirmed_laps]
@@ -219,6 +228,7 @@ def analyze_selected_corner(telemetry: pd.DataFrame, manifest: dict, *, source_l
                     pass
         rows.append({**result, "status": "candidate", "reason": None, "start_session_s": start, "end_session_s": end,
                      "elapsed_s": end - start, "downstream_s": downstream_s, "profile": profile,
+                     "telemetry": _clip_telemetry(section),
                      "start_distance_m": float(section.distance_m.iloc[0]), "end_distance_m": float(section.distance_m.iloc[-1]),
                      "sample_count": len(section), "path_check": path_check, "boundary_brackets_s": [h[0]["sample_bracket_s"] for h in hits],
                      "visual_confirmation_required": True})

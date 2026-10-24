@@ -7,13 +7,14 @@ import { useI18n } from "../lib/i18n";
 import type { XrkAnalysis } from "../lib/xrkAnalysisApi";
 import type { VideoSyncCalibration } from "../lib/videoTelemetrySync";
 import { matchesReviewVideo, reviewVideoIdentity } from "../lib/manualReview";
-import { analyzeSelectedCorner, cornerVideoWindow, selectCornerWindow, type CornerLap, type CornerRequest, type SelectedCornerResult } from "../lib/selectedCorner";
+import { analyzeSelectedCorner, browsableCornerLaps, cornerTelemetryDomains, cornerVideoWindow, selectCornerWindow, type CornerLap, type CornerRequest, type SelectedCornerResult } from "../lib/selectedCorner";
 import { checkSelectedCornerFrames } from "../lib/selectedCornerVisual";
 import { parseReviewGpsEvidence, reviewGpsKey, reviewGpsOverlaps, REVIEW_GPS_EVENT } from "../lib/reviewGpsEvidence";
 import { observeVideoClock } from "../lib/videoFrameClock";
 import { GoproSpeedOverlay } from "./GoproSpeedOverlay";
 import { ReviewGpsNotice } from "./ReviewGpsNotice";
 import { ReviewAudioControl } from "./ReviewAudioControl";
+import { CornerCandidateNavigation, SelectedCornerTelemetry } from "./SelectedCornerTelemetry";
 
 type Visual = Awaited<ReturnType<typeof checkSelectedCornerFrames>>;
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded border border-slate-600 px-3 py-2 text-sm hover:border-cyan-400 disabled:opacity-40";
@@ -75,6 +76,10 @@ function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, act
   const gps = useMemo(() => parseReviewGpsEvidence(gpsRaw, identity), [gpsRaw, identity]);
   const window = selectCornerWindow(start, anchor, identity, analysis.video_sync.lap_video_ranges);
   const active = result?.laps.find(l => l.lap === selectedLap);
+  const sourceRow = result?.laps.find(l => l.lap === sourceLap);
+  const candidates = result ? browsableCornerLaps(result.laps, anchor, duration, anchors) : [];
+  const domains = useMemo(() => cornerTelemetryDomains([sourceRow, active]), [sourceRow, active]);
+  const elapsedLimit = Math.max(sourceRow?.elapsed_s ?? 0, active?.elapsed_s ?? 0, 1);
   const activeWindow = active ? cornerVideoWindow(active, anchor, duration, anchors) : null;
   const sourceWindow = useMemo(() => result ? { start: result.start_session_s + anchor.offset_ms / 1000, end: result.end_session_s + anchor.offset_ms / 1000 } : null, [result, anchor.offset_ms]);
   const flagged = (row: CornerLap) => {
@@ -99,6 +104,12 @@ function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, act
     setResult(null); setRequest(null); setConfirmed([]); setVerdicts({}); setVisuals({}); setVisualErrors([]); setGroupCurrent(false); setError(""); setProgress(""); setBusy(false);
     sourcePlayer.current?.pause(); targetPlayer.current?.pause();
   }
+  function selectCandidate(lap: number) {
+    if (!candidates.some(row => row.lap === lap)) return;
+    sourcePlayer.current?.pause(); targetPlayer.current?.pause();
+    if (sourcePlayer.current && sourceWindow) sourcePlayer.current.currentTime = sourceWindow.start;
+    setSelectedLap(lap);
+  }
   async function calculate(group = false) {
     const payload = group && request ? { ...request, confirmed_laps: confirmed.filter(lap => {
       const row = result?.laps.find(r => r.lap === lap); return row && !flagged(row);
@@ -112,7 +123,8 @@ function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, act
       const next = await analyzeSelectedCorner(payload, controller.signal);
       controller.signal.throwIfAborted(); setResult(next); setRequest(payload); setGroupCurrent(group);
       if (!group) {
-        setSelectedLap(next.laps.find(r => r.status === "candidate" && r.lap !== sourceLap)?.lap ?? sourceLap);
+        const playable = browsableCornerLaps(next.laps, anchor, duration, anchors);
+        setSelectedLap(playable.find(r => r.lap !== sourceLap)?.lap ?? playable[0]?.lap ?? null);
         if (sourcePlayer.current) sourcePlayer.current.currentTime = next.start_session_s + anchor.offset_ms / 1000;
       }
     } catch (e) { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "CORNER_SERVICE_UNAVAILABLE"); }
@@ -165,22 +177,30 @@ function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, act
       : (zh ? "减速或出弯阶段证据不足，当前片段不能视为完整弯道。" : "Approach or exit unresolved; this clip cannot be treated as a complete corner.")}</p>}
     {!window && <p className="text-sm text-amber-200">{zh ? "请在这个已确认圈的内部选择完整五秒，避开圈起终点各半秒。" : "Select five complete seconds inside the confirmed lap, allowing half a second at both lap boundaries."}</p>}
     {error && <p role="alert" className="text-sm text-amber-200">{zh ? "无法完成此次操作。检查视频和连续遥测覆盖，或重新导入 Session。" : "Could not complete this operation. Check video and continuous telemetry coverage, or re-import the session."} [{error}]</p>}
+    {result && <CornerCandidateNavigation laps={candidates} selectedLap={selectedLap} sourceLap={sourceLap} onSelect={selectCandidate} />}
     <div className="grid min-w-0 gap-4 lg:grid-cols-2">
-      <div className="min-w-0"><h4 className="mb-2 text-sm text-cyan-200">L{sourceLap} · {zh ? "你选择的弯" : "Your selected corner"}</h4><div className="relative"><video ref={sourcePlayer} src={url} muted={audio !== 0} controls playsInline preload="metadata" className="aspect-video w-full bg-black" onLoadedMetadata={e => { e.currentTarget.currentTime = start; }} /><GoproSpeedOverlay file={file} time={now} /></div></div>
-      {activeWindow && <CornerPlayer key={`${selectedLap}:${activeWindow.start}:${fullInterval}`} audible={audio === 1} file={file} url={url} start={activeWindow.start} end={fullInterval ? activeWindow.end : activeWindow.start + 5} playerRef={targetPlayer} label={`L${selectedLap} · ${zh ? "同一区段候选" : "Same-section candidate"}`} />}
+      <div className="min-w-0"><h4 className="mb-2 text-sm text-cyan-200">L{sourceLap} · {zh ? "你选择的弯" : "Your selected corner"}</h4><div className="relative"><video ref={sourcePlayer} src={url} muted={audio !== 0} controls playsInline preload="metadata" className="aspect-video w-full bg-black" onLoadedMetadata={e => { e.currentTarget.currentTime = start; }} /><GoproSpeedOverlay file={file} time={now} /></div>
+        {sourceRow && sourceWindow && <>
+          <ReviewGpsNotice fingerprint={analysis.file_fingerprint} video={identity} start={sourceWindow.start} end={sourceWindow.end} offset={anchor.offset_ms / 1000} />
+          <SelectedCornerTelemetry row={sourceRow} videoTime={now} videoStart={sourceWindow.start} confirmed domains={domains} elapsedLimit={elapsedLimit} active={visible} />
+        </>}
+      </div>
+      {activeWindow && active && <CornerPlayer key={`${selectedLap}:${activeWindow.start}:${fullInterval}`} audible={audio === 1} file={file} url={url} start={activeWindow.start} end={fullInterval ? activeWindow.end : activeWindow.start + 5} playerRef={targetPlayer} label={`L${selectedLap} · ${zh ? "同一区段候选" : "Same-section candidate"}`}
+        row={active} confirmed={active.lap === sourceLap || verdicts[active.lap] === "yes"} domains={domains} elapsedLimit={elapsedLimit} visible={visible}>
+        <ReviewGpsNotice fingerprint={analysis.file_fingerprint} video={identity} start={activeWindow.start} end={activeWindow.end} offset={activeWindow.offset} />
+      </CornerPlayer>}
     </div>
     {activeWindow && <>
       <ReviewAudioControl value={audio} onChange={setAudio} labels={[`L${sourceLap}`, `L${selectedLap}`]} />
       <div className="flex flex-wrap items-center gap-3"><button className={button} onClick={() => void playPair()}><Play size={16} />{zh ? "并排重播" : "Replay pair"}</button><button className={button} onClick={() => { sourcePlayer.current?.pause(); targetPlayer.current?.pause(); }}><Pause size={16} />{zh ? "暂停" : "Pause"}</button>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={fullInterval} onChange={e => { sourcePlayer.current?.pause(); targetPlayer.current?.pause(); setFullInterval(e.target.checked); }} />{zh ? "播放完整相同空间区段" : "Play full common spatial interval"}</label></div>
       <p className="text-xs text-slate-400">{zh ? "默认播放完整相同空间区段。计时按同一对 GPS 空间门；两侧同时起播，不拉伸视频，也不保证逐帧处于同一位置。" : "Defaults to the full common spatial interval. Timing uses the same GPS gates; playback is simultaneous, not time-warped or position-locked."}</p>
-      <ReviewGpsNotice fingerprint={analysis.file_fingerprint} video={identity} start={activeWindow.start} end={activeWindow.end} offset={activeWindow.offset} />
     </>}
     {result && <>
       <div className="flex flex-wrap items-center gap-3"><button className={button} disabled={!!progress || busy} onClick={() => void scan()}><ScanEye size={16} />{zh ? "首尾参照物二次核对（全部）" : "Check boundary landmarks (all)"}</button>{progress && <><span role="status" className="text-sm text-cyan-200">{progress}</span><button className={button} onClick={() => visualAbort.current?.abort()}><X size={16} />{zh ? "取消" : "Cancel"}</button></>}</div>
       <div className="overflow-x-auto"><table className="w-full min-w-[600px] text-left text-sm"><thead className="text-xs text-slate-400"><tr><th className="p-2">Lap</th><th>{zh ? "同区段用时" : "Section time"}</th><th>{zh ? "最低 / 出弯速度" : "Min / Exit speed"}</th><th>{zh ? "首尾画面" : "Boundary frames"}</th><th>{zh ? "是否对应同一弯？" : "Same corner?"}</th></tr></thead><tbody>{result.laps.map(row => {
         const clip = cornerVideoWindow(row, anchor, duration, anchors), visual = visuals[row.lap];
-        return <tr key={row.lap} className={`border-t border-slate-800 ${selectedLap === row.lap ? "bg-cyan-400/5" : ""}`}><td className="p-2"><button disabled={!clip} className={`${button} text-cyan-200`} onClick={() => { targetPlayer.current?.pause(); sourcePlayer.current?.pause(); setSelectedLap(row.lap); }}><Play size={12} />L{row.lap}</button></td>
+        return <tr key={row.lap} className={`border-t border-slate-800 ${selectedLap === row.lap ? "bg-cyan-400/5" : ""}`}><td className="p-2"><button disabled={!clip} className={`${button} text-cyan-200`} onClick={() => selectCandidate(row.lap)}><Play size={12} />L{row.lap}</button></td>
           <td className="font-mono">{num(row.elapsed_s)}s</td><td className="font-mono">{num(row.profile?.metrics.minimum_speed_kmh, 1)} / {num(row.profile?.metrics.exit_speed_kmh, 1)} km/h</td>
           <td className="max-w-52 p-2 text-xs text-slate-400" title={row.reason ?? undefined}>{row.status === "excluded" ? reasonText(row.reason, zh) : !clip ? (zh ? "视频未覆盖" : "Outside video") : flagged(row) ? (zh ? "GPS 异常，保留复盘 / 不进分组" : "GPS warning; review only") : visualErrors.includes(row.lap) ? (zh ? "读帧失败" : "Frame read failed") : visual ? visual.boundaries.map(b => b.status === "candidate" ? (zh ? "候选" : "Candidate") : b.status === "weak" ? (zh ? "证据弱" : "Weak") : (zh ? "不唯一" : "Ambiguous")).join(" / ") : (zh ? "待核对" : "Pending")}</td>
           <td><select aria-label={`Confirm corner L${row.lap}`} className={input} disabled={!clip || busy} value={verdicts[row.lap] ?? "uncertain"} onChange={e => {
@@ -197,15 +217,20 @@ function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, act
       </section>)}</div>}
       <p className="text-xs text-slate-400">{zh ? "比较左右背景，不识别物体身份。画面相似度不是准确率；仍需核对圈号与首尾位置。确认仅对当前选区有效，不修改全局同步。" : "Compares background appearance, not object identity. Similarity is not accuracy. Check the lap and both locations; confirmation applies only to this selection, never global sync."}</p>
       <button className={`${button} text-cyan-200`} disabled={busy} onClick={() => void calculate(true)}><Check size={16} />{zh ? "比较已确认圈的开法" : "Compare confirmed driving patterns"} ({confirmed.filter(l => { const row = result.laps.find(r => r.lap === l); return row && !flagged(row); }).length})</button>
-      {groupCurrent && <CornerPatterns result={result} onLap={setSelectedLap} active={visible} />}
+      {groupCurrent && <CornerPatterns result={result} onLap={selectCandidate} active={visible} />}
     </>}
   </div>;
 }
 
-function CornerPlayer({ file, url, start, end, label, playerRef, audible }: { file: File; url: string; start: number; end: number; label: string; playerRef: React.RefObject<HTMLVideoElement | null>; audible: boolean }) {
+function CornerPlayer({ file, url, start, end, label, playerRef, audible, row, confirmed, domains, elapsedLimit, visible, children }: {
+  file: File; url: string; start: number; end: number; label: string; playerRef: React.RefObject<HTMLVideoElement | null>; audible: boolean;
+  row: CornerLap; confirmed: boolean; domains: Record<"speed" | "rpm", [number, number]>; elapsedLimit: number; visible: boolean; children: React.ReactNode;
+}) {
   const [time, setTime] = useState(start);
   useEffect(() => { const player = playerRef.current; if (!player) return; return observeVideoClock(player, s => { setTime(s.time_s); if (s.time_s >= end) player.pause(); }); }, [playerRef, end]);
-  return <div className="min-w-0"><h4 className="mb-2 text-sm text-amber-200">{label}</h4><div className="relative"><video ref={playerRef} src={url} muted={!audible} controls playsInline preload="metadata" className="aspect-video w-full bg-black" onLoadedMetadata={e => { e.currentTarget.currentTime = start; }} /><GoproSpeedOverlay file={file} time={time} /></div></div>;
+  return <div className="min-w-0"><h4 className="mb-2 text-sm text-amber-200">{label}</h4><div className="relative"><video ref={playerRef} src={url} muted={!audible} controls playsInline preload="metadata" className="aspect-video w-full bg-black" onLoadedMetadata={e => { e.currentTarget.currentTime = start; }} /><GoproSpeedOverlay file={file} time={time} /></div>
+    {children}<SelectedCornerTelemetry row={row} videoTime={time} videoStart={start} confirmed={confirmed} domains={domains} elapsedLimit={elapsedLimit} active={visible} />
+  </div>;
 }
 
 function CornerPatterns({ result, onLap, active }: { result: SelectedCornerResult; onLap: (lap: number) => void; active: boolean }) {

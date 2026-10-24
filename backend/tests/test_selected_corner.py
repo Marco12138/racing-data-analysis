@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.analysis.selected_corner import analyze_selected_corner, group_corner_patterns
+from backend.app.analysis.selected_corner import analyze_selected_corner, group_corner_patterns, _clip_telemetry
 from backend.app.core.config import Settings
 from backend.app.main import create_app
 
@@ -41,6 +41,16 @@ def test_physical_gates_different_sample_rates_and_real_duration():
         assert row["elapsed_s"] == pytest.approx(expected, abs=.01)
         assert row["visual_confirmation_required"]
         assert row["registration"]["status"] == "accepted"
+        trace = row["telemetry"]
+        assert len(trace) == row["sample_count"]
+        assert trace[0]["elapsed_s"] == 0
+        assert trace[0]["session_time_s"] == row["start_session_s"]
+        assert trace[-1]["session_time_s"] == row["end_session_s"]
+        assert trace[-1]["elapsed_s"] == pytest.approx(row["elapsed_s"])
+        observed = frame[(frame.lap == row["lap"]) & frame.session_time_s.between(row["start_session_s"], row["end_session_s"], inclusive="neither")]
+        assert [p["session_time_s"] for p in trace[1:-1]] == observed.session_time_s.tolist()
+        assert [p["speed"] for p in trace[1:-1]] == pytest.approx(observed.speed.tolist())
+        assert [p["rpm"] for p in trace[1:-1]] == pytest.approx(observed.rpm.tolist())
     assert result["laps"][-1]["elapsed_s"] != 5
     pd.testing.assert_frame_equal(frame, original)
 
@@ -55,6 +65,8 @@ def test_gaps_missing_rpm_invalid_quality_and_boundary_degrade():
     assert rows[3]["reason"] == "corner_timing_gap"
     assert rows[4]["reason"] == "lap_quality_gate"
     assert rows[1]["profile"]["rpm"] is None
+    assert all(p["rpm"] is None for p in rows[1]["telemetry"])
+    assert "telemetry" not in rows[3]
     assert 3 not in result["patterns"]["confirmed_laps"]
     assert result["patterns"]["channels"] == ["speed"]
     with pytest.raises(ValueError):
@@ -93,6 +105,15 @@ def test_clustering_never_uses_time_and_does_not_force_small_or_identical_groups
     for row in rows:
         row["profile"]["speed"] = [60.] * 41
     assert group_corner_patterns(rows, list(range(1, 7)))["status"] == "no_clear_separation"
+
+
+def test_clip_telemetry_preserves_zero_and_serializes_missing_values():
+    section = pd.DataFrame({"session_time_s": [100., 100.1, 100.2], "speed": [0., 30., 40.], "rpm": [0., np.nan, 9000.]})
+    result = _clip_telemetry(section)
+    assert result[0]["speed"] == 0 and result[0]["rpm"] == 0
+    assert result[1]["rpm"] is None
+    assert result[-1]["rpm"] == 9000
+    json.dumps(result, allow_nan=False)
 
 
 def test_api_expiry_validation_no_paths_and_compatible_errors(tmp_path):

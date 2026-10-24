@@ -3,12 +3,14 @@ import { matchesReviewVideo, type VideoIdentity } from "./manualReview";
 import { resolveApiUrl } from "./config";
 
 export type CornerMetrics = { entry_speed_kmh: number; minimum_speed_kmh: number; exit_speed_kmh: number; minimum_position_fraction: number; minimum_rpm: number | null };
+export type CornerTelemetryPoint = { session_time_s: number; elapsed_s: number; speed: number | null; rpm: number | null };
 export type CornerLap = {
   lap: number; status: "candidate" | "excluded"; reason: string | null;
   quality: { analysis_eligible: boolean; reasons: string[] };
   start_session_s?: number; end_session_s?: number; elapsed_s?: number; downstream_s?: number | null;
   start_distance_m?: number; end_distance_m?: number;
   profile?: { progress: number[]; speed: number[]; rpm: number[] | null; metrics: CornerMetrics };
+  telemetry?: CornerTelemetryPoint[];
 };
 export type CornerGroup = { id: number; laps: number[]; count: number; representative_lap: number; median_time_s: number; time_range_s: number[]; median_downstream_s: number | null; median_combined_s: number | null; metrics: CornerMetrics };
 export type SelectedCornerResult = {
@@ -38,6 +40,40 @@ export function cornerVideoWindow(row: CornerLap, anchor: VideoSyncCalibration, 
   const own = anchors.find(a => a.target_lap === row.lap && matchesReviewVideo(a.video, anchor.video)) ?? anchor;
   const start = row.start_session_s! + own.offset_ms / 1000, end = row.end_session_s! + own.offset_ms / 1000;
   return start >= 0 && end > start && Math.max(end, start + 5) <= duration ? { start, end, offset: own.offset_ms / 1000 } : null;
+}
+
+export function browsableCornerLaps(rows: CornerLap[], anchor: VideoSyncCalibration, duration: number, anchors: VideoSyncCalibration[] = []) {
+  return rows.filter(row => cornerVideoWindow(row, anchor, duration, anchors) !== null);
+}
+
+/** A camera clock maps to its own lap only; candidate offsets are never saved as anchors. */
+export function cornerTelemetryTime(row: CornerLap, videoTime: number, videoStart: number): number | null {
+  const elapsed = videoTime - videoStart;
+  if (row.status !== "candidate" || !Number.isFinite(row.start_session_s) || !Number.isFinite(row.end_session_s)
+    || !Number.isFinite(elapsed) || elapsed < -1e-6 || elapsed > row.end_session_s! - row.start_session_s! + 1e-6) return null;
+  return Math.max(row.start_session_s!, Math.min(row.end_session_s!, row.start_session_s! + elapsed));
+}
+
+export function cornerChannelAt(points: CornerTelemetryPoint[], time: number, channel: "speed" | "rpm"): number | null {
+  if (!Number.isFinite(time)) return null;
+  const i = points.findIndex(p => p.session_time_s >= time - 1e-8);
+  if (i < 0) return null;
+  const b = points[i], value = b[channel];
+  if (Math.abs(b.session_time_s - time) <= 1e-8) return typeof value === "number" && Number.isFinite(value) ? value : null;
+  if (!i) return null;
+  const a = points[i - 1], previous = a[channel], dt = b.session_time_s - a.session_time_s;
+  return dt > 0 && dt <= .5 && typeof value === "number" && typeof previous === "number" && Number.isFinite(value) && Number.isFinite(previous)
+    ? previous + (value - previous) * (time - a.session_time_s) / dt : null;
+}
+
+export function cornerTelemetryDomains(rows: Array<CornerLap | undefined>): Record<"speed" | "rpm", [number, number]> {
+  const domain = (channel: "speed" | "rpm"): [number, number] => {
+    const values = rows.flatMap(r => r?.telemetry ?? []).map(p => p[channel]).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+    if (!values.length) return [0, 1];
+    const min = Math.min(...values), max = Math.max(...values), pad = Math.max(1, (max - min) * .05);
+    return [Math.max(0, min - pad), max + pad];
+  };
+  return { speed: domain("speed"), rpm: domain("rpm") };
 }
 
 export async function analyzeSelectedCorner(request: CornerRequest, signal?: AbortSignal): Promise<SelectedCornerResult> {
