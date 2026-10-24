@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Pause, Play, ScanEye, Scissors, X } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useI18n } from "../lib/i18n";
@@ -15,6 +15,8 @@ import { GoproSpeedOverlay } from "./GoproSpeedOverlay";
 import { ReviewGpsNotice } from "./ReviewGpsNotice";
 import { ReviewAudioControl } from "./ReviewAudioControl";
 import { CornerCandidateNavigation, SelectedCornerTelemetry } from "./SelectedCornerTelemetry";
+import { CornerCoachComparison } from "./CornerCoachComparison";
+import { compareCornerBest } from "../lib/cornerCoach";
 
 type Visual = Awaited<ReturnType<typeof checkSelectedCornerFrames>>;
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded border border-slate-600 px-3 py-2 text-sm hover:border-cyan-400 disabled:opacity-40";
@@ -64,6 +66,7 @@ function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, act
   const [result, setResult] = useState<SelectedCornerResult | null>(null), [request, setRequest] = useState<CornerRequest | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [selectedLap, setSelectedLap] = useState<number | null>(null), [confirmed, setConfirmed] = useState<number[]>([]);
+  const [reviewPair, setReviewPair] = useState<{ left: number; right: number } | null>(null);
   const [verdicts, setVerdicts] = useState<Record<number, "yes" | "no" | "uncertain">>({});
   const [visuals, setVisuals] = useState<Record<number, Visual>>({}), [progress, setProgress] = useState("");
   const [visualErrors, setVisualErrors] = useState<number[]>([]), [groupCurrent, setGroupCurrent] = useState(false);
@@ -76,16 +79,24 @@ function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, act
   const gps = useMemo(() => parseReviewGpsEvidence(gpsRaw, identity), [gpsRaw, identity]);
   const window = selectCornerWindow(start, anchor, identity, analysis.video_sync.lap_video_ranges);
   const active = result?.laps.find(l => l.lap === selectedLap);
-  const sourceRow = result?.laps.find(l => l.lap === sourceLap);
+  const leftLap = reviewPair?.left ?? sourceLap;
+  const sourceRow = result?.laps.find(l => l.lap === leftLap);
   const candidates = result ? browsableCornerLaps(result.laps, anchor, duration, anchors) : [];
   const domains = useMemo(() => cornerTelemetryDomains([sourceRow, active]), [sourceRow, active]);
   const elapsedLimit = Math.max(sourceRow?.elapsed_s ?? 0, active?.elapsed_s ?? 0, 1);
   const activeWindow = active ? cornerVideoWindow(active, anchor, duration, anchors) : null;
-  const sourceWindow = useMemo(() => result ? { start: result.start_session_s + anchor.offset_ms / 1000, end: result.end_session_s + anchor.offset_ms / 1000 } : null, [result, anchor.offset_ms]);
-  const flagged = (row: CornerLap) => {
+  const selectionWindow = useMemo(() => result ? { start: result.start_session_s + anchor.offset_ms / 1000, end: result.end_session_s + anchor.offset_ms / 1000 } : null, [result, anchor.offset_ms]);
+  const sourceWindow = useMemo(() => sourceRow ? cornerVideoWindow(sourceRow, anchor, duration, anchors) : null, [sourceRow, anchor, duration, anchors]);
+  const flagged = useCallback((row: CornerLap) => {
     const clip = cornerVideoWindow(row, anchor, duration, anchors);
     return clip && reviewGpsOverlaps(gps, clip.start - .5, clip.end + .5, clip.offset).some(s => s.status === "gps_inconsistent");
-  };
+  }, [anchor, duration, anchors, gps]);
+  const coach = useMemo(() => result ? compareCornerBest(result.laps, result.laps.filter(flagged).map(r => r.lap),
+    result.laps.filter(r => verdicts[r.lap] === "no").map(r => r.lap), result.laps.filter(row => {
+      const clip = cornerVideoWindow(row, anchor, duration, anchors);
+      return clip && typeof row.downstream_s === "number" && reviewGpsOverlaps(gps, clip.end - .5, clip.end + row.downstream_s + .5, clip.offset)
+        .some(s => s.status === "gps_inconsistent");
+    }).map(r => r.lap)) : null, [result, flagged, verdicts, anchor, duration, anchors, gps]);
   useEffect(() => {
     const read = () => { setGroupCurrent(false); try { setGpsRaw(localStorage.getItem(reviewGpsKey(analysis.file_fingerprint))); } catch { setGpsRaw(null); } };
     queueMicrotask(read); globalThis.addEventListener(REVIEW_GPS_EVENT, read);
@@ -97,19 +108,31 @@ function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, act
       setNow(s.time_s);
       if (sourceWindow && s.time_s >= (fullInterval ? sourceWindow.end : sourceWindow.start + 5)) sourcePlayer.current?.pause();
     });
-  }, [sourceWindow, fullInterval]);
+  }, [sourceWindow, fullInterval, leftLap]);
 
   function resetSelection() {
     abort.current?.abort(); visualAbort.current?.abort();
-    setResult(null); setRequest(null); setConfirmed([]); setVerdicts({}); setVisuals({}); setVisualErrors([]); setGroupCurrent(false); setError(""); setProgress(""); setBusy(false);
+    setResult(null); setRequest(null); setConfirmed([]); setVerdicts({}); setVisuals({}); setVisualErrors([]); setGroupCurrent(false); setError(""); setProgress(""); setBusy(false); setReviewPair(null);
     sourcePlayer.current?.pause(); targetPlayer.current?.pause();
   }
   function selectCandidate(lap: number) {
     if (!candidates.some(row => row.lap === lap)) return;
     sourcePlayer.current?.pause(); targetPlayer.current?.pause();
-    if (sourcePlayer.current && sourceWindow) sourcePlayer.current.currentTime = sourceWindow.start;
+    if (sourcePlayer.current && selectionWindow) sourcePlayer.current.currentTime = selectionWindow.start;
+    setReviewPair(null);
     setSelectedLap(lap);
   }
+  const reviewCoachPair = useCallback((left: number, right: number) => {
+    sourcePlayer.current?.pause(); targetPlayer.current?.pause();
+    const row = result?.laps.find(r => r.lap === left);
+    const clip = row ? cornerVideoWindow(row, anchor, duration, anchors) : null;
+    const peer = result?.laps.find(r => r.lap === right);
+    const peerClip = peer ? cornerVideoWindow(peer, anchor, duration, anchors) : null;
+    if (sourcePlayer.current && clip) sourcePlayer.current.currentTime = clip.start;
+    if (targetPlayer.current && peerClip) targetPlayer.current.currentTime = peerClip.start;
+    sourcePlayer.current?.scrollIntoView({ behavior: "instant", block: "center" });
+    setReviewPair({ left, right }); setSelectedLap(right);
+  }, [result, anchor, duration, anchors, setReviewPair, setSelectedLap]);
   async function calculate(group = false) {
     const payload = group && request ? { ...request, confirmed_laps: confirmed.filter(lap => {
       const row = result?.laps.find(r => r.lap === lap); return row && !flagged(row);
@@ -131,7 +154,7 @@ function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, act
     finally { if (abort.current === controller) setBusy(false); }
   }
   async function scan() {
-    if (!result || !sourceWindow) return;
+    if (!result || !selectionWindow) return;
     const controller = new AbortController(); visualAbort.current?.abort(); visualAbort.current = controller;
     const candidates = result.laps.filter(r => r.status === "candidate" && r.lap !== sourceLap && cornerVideoWindow(r, anchor, duration, anchors));
     setVisualErrors([]);
@@ -139,7 +162,7 @@ function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, act
       for (const [i, row] of candidates.entries()) {
         controller.signal.throwIfAborted(); setProgress(`${i + 1}/${candidates.length} · L${row.lap}`);
         try {
-          const check = await checkSelectedCornerFrames(url, sourceWindow, cornerVideoWindow(row, anchor, duration, anchors)!, duration, controller.signal);
+          const check = await checkSelectedCornerFrames(url, selectionWindow, cornerVideoWindow(row, anchor, duration, anchors)!, duration, controller.signal);
           controller.signal.throwIfAborted(); setVisuals(old => ({ ...old, [row.lap]: check }));
         } catch { controller.signal.throwIfAborted(); setVisualErrors(old => [...old, row.lap]); }
       }
@@ -167,7 +190,7 @@ function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, act
     <div className="flex flex-wrap items-end gap-3">
       <label className="grid gap-1 text-xs text-slate-400">{zh ? "已同步的选择圈" : "Confirmed source lap"}<select aria-label="Corner source lap" className={input} value={sourceLap} onChange={e => { resetSelection(); setSourceLap(Number(e.target.value)); const next = anchors.find(a => a.target_lap === Number(e.target.value))!; setStart(next.video_time_s + 1); }}>{anchors.map(a => <option key={a.target_lap} value={a.target_lap}>L{a.target_lap}</option>)}</select></label>
       <label className="grid gap-1 text-xs text-slate-400">{zh ? "起点（视频秒）" : "Start (video seconds)"}<input aria-label="Corner start" className={`${input} w-36`} type="number" min={0} max={duration - 5} step={.05} value={start} onChange={e => { resetSelection(); setStart(Number(e.target.value)); }} /></label>
-      <button className={button} onClick={() => { const time = sourcePlayer.current?.currentTime; if (time !== undefined) { resetSelection(); setStart(time); } }}><Scissors size={16} />{zh ? "用当前帧作为起点" : "Use current frame"}</button>
+      <button className={button} disabled={!!reviewPair} onClick={() => { const time = sourcePlayer.current?.currentTime; if (time !== undefined) { resetSelection(); setStart(time); } }}><Scissors size={16} />{zh ? "用当前帧作为起点" : "Use current frame"}</button>
       <button className={`${button} border-cyan-600 text-cyan-200`} disabled={!window || busy} onClick={() => void calculate()}>{zh ? "查找每圈的同一弯" : "Find this corner in every lap"}</button>
       {busy && <button className={button} onClick={() => abort.current?.abort()}><X size={16} />{zh ? "取消" : "Cancel"}</button>}
     </div>
@@ -178,24 +201,27 @@ function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, act
     {!window && <p className="text-sm text-amber-200">{zh ? "请在这个已确认圈的内部选择完整五秒，避开圈起终点各半秒。" : "Select five complete seconds inside the confirmed lap, allowing half a second at both lap boundaries."}</p>}
     {error && <p role="alert" className="text-sm text-amber-200">{zh ? "无法完成此次操作。检查视频和连续遥测覆盖，或重新导入 Session。" : "Could not complete this operation. Check video and continuous telemetry coverage, or re-import the session."} [{error}]</p>}
     {result && <CornerCandidateNavigation laps={candidates} selectedLap={selectedLap} sourceLap={sourceLap} onSelect={selectCandidate} />}
+    {reviewPair && <div className="flex flex-wrap items-center gap-3 text-sm"><span>{zh ? "教练对照" : "Coach pair"}: L{reviewPair.left} / L{reviewPair.right}</span><button className={button} onClick={() => selectCandidate(reviewPair.right)}>{zh ? "返回所选圈" : "Return to selected lap"} L{sourceLap}</button></div>}
     <div className="grid min-w-0 gap-4 lg:grid-cols-2">
-      <div className="min-w-0"><h4 className="mb-2 text-sm text-cyan-200">L{sourceLap} · {zh ? "你选择的弯" : "Your selected corner"}</h4><div className="relative"><video ref={sourcePlayer} src={url} muted={audio !== 0} controls playsInline preload="metadata" className="aspect-video w-full bg-black" onLoadedMetadata={e => { e.currentTarget.currentTime = start; }} /><GoproSpeedOverlay file={file} time={now} /></div>
+      <div className="min-w-0"><h4 className="mb-2 text-sm text-cyan-200">L{leftLap} · {reviewPair ? (zh ? "区段最快圈" : "Section-best lap") : (zh ? "你选择的弯" : "Your selected corner")}</h4><div className="relative"><video key={leftLap} ref={sourcePlayer} src={url} muted={audio !== 0} controls playsInline preload="metadata" className="aspect-video w-full bg-black" onLoadedMetadata={e => { e.currentTarget.currentTime = sourceWindow?.start ?? start; }} /><GoproSpeedOverlay file={file} time={now} /></div>
         {sourceRow && sourceWindow && <>
-          <ReviewGpsNotice fingerprint={analysis.file_fingerprint} video={identity} start={sourceWindow.start} end={sourceWindow.end} offset={anchor.offset_ms / 1000} />
-          <SelectedCornerTelemetry row={sourceRow} videoTime={now} videoStart={sourceWindow.start} confirmed domains={domains} elapsedLimit={elapsedLimit} active={visible} />
+          <ReviewGpsNotice fingerprint={analysis.file_fingerprint} video={identity} start={sourceWindow.start} end={sourceWindow.end} offset={sourceWindow.offset} />
+          <SelectedCornerTelemetry row={sourceRow} videoTime={now} videoStart={sourceWindow.start} confirmed={leftLap === sourceLap || verdicts[leftLap] === "yes"} domains={domains} elapsedLimit={elapsedLimit} active={visible} />
         </>}
       </div>
-      {activeWindow && active && <CornerPlayer key={`${selectedLap}:${activeWindow.start}:${fullInterval}`} audible={audio === 1} file={file} url={url} start={activeWindow.start} end={fullInterval ? activeWindow.end : activeWindow.start + 5} playerRef={targetPlayer} label={`L${selectedLap} · ${zh ? "同一区段候选" : "Same-section candidate"}`}
+      {activeWindow && active && <CornerPlayer key={`${selectedLap}:${activeWindow.start}:${fullInterval}`} audible={audio === 1} file={file} url={url} start={activeWindow.start} end={fullInterval ? activeWindow.end : activeWindow.start + 5} playerRef={targetPlayer} label={`L${selectedLap} · ${reviewPair ? (zh ? "整圈最快圈" : "Full-lap best") : (zh ? "同一区段候选" : "Same-section candidate")}`}
         row={active} confirmed={active.lap === sourceLap || verdicts[active.lap] === "yes"} domains={domains} elapsedLimit={elapsedLimit} visible={visible}>
         <ReviewGpsNotice fingerprint={analysis.file_fingerprint} video={identity} start={activeWindow.start} end={activeWindow.end} offset={activeWindow.offset} />
       </CornerPlayer>}
     </div>
     {activeWindow && <>
-      <ReviewAudioControl value={audio} onChange={setAudio} labels={[`L${sourceLap}`, `L${selectedLap}`]} />
+      <ReviewAudioControl value={audio} onChange={setAudio} labels={[`L${leftLap}`, `L${selectedLap}`]} />
       <div className="flex flex-wrap items-center gap-3"><button className={button} onClick={() => void playPair()}><Play size={16} />{zh ? "并排重播" : "Replay pair"}</button><button className={button} onClick={() => { sourcePlayer.current?.pause(); targetPlayer.current?.pause(); }}><Pause size={16} />{zh ? "暂停" : "Pause"}</button>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={fullInterval} onChange={e => { sourcePlayer.current?.pause(); targetPlayer.current?.pause(); setFullInterval(e.target.checked); }} />{zh ? "播放完整相同空间区段" : "Play full common spatial interval"}</label></div>
       <p className="text-xs text-slate-400">{zh ? "默认播放完整相同空间区段。计时按同一对 GPS 空间门；两侧同时起播，不拉伸视频，也不保证逐帧处于同一位置。" : "Defaults to the full common spatial interval. Timing uses the same GPS gates; playback is simultaneous, not time-warped or position-locked."}</p>
     </>}
+    {coach && <CornerCoachComparison comparison={coach} onReview={reviewCoachPair} active={visible}
+      playable={coach.status !== "unavailable" && [coach.section, coach.overall].every(row => cornerVideoWindow(row, anchor, duration, anchors))} />}
     {result && <>
       <div className="flex flex-wrap items-center gap-3"><button className={button} disabled={!!progress || busy} onClick={() => void scan()}><ScanEye size={16} />{zh ? "首尾参照物二次核对（全部）" : "Check boundary landmarks (all)"}</button>{progress && <><span role="status" className="text-sm text-cyan-200">{progress}</span><button className={button} onClick={() => visualAbort.current?.abort()}><X size={16} />{zh ? "取消" : "Cancel"}</button></>}</div>
       <div className="overflow-x-auto"><table className="w-full min-w-[600px] text-left text-sm"><thead className="text-xs text-slate-400"><tr><th className="p-2">Lap</th><th>{zh ? "同区段用时" : "Section time"}</th><th>{zh ? "最低 / 出弯速度" : "Min / Exit speed"}</th><th>{zh ? "首尾画面" : "Boundary frames"}</th><th>{zh ? "是否对应同一弯？" : "Same corner?"}</th></tr></thead><tbody>{result.laps.map(row => {

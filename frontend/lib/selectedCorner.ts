@@ -4,13 +4,15 @@ import { resolveApiUrl } from "./config";
 
 export type CornerMetrics = { entry_speed_kmh: number; minimum_speed_kmh: number; exit_speed_kmh: number; minimum_position_fraction: number; minimum_rpm: number | null };
 export type CornerTelemetryPoint = { session_time_s: number; elapsed_s: number; speed: number | null; rpm: number | null };
+export type CornerSpatialPoint = CornerTelemetryPoint & { distance_m: number };
 export type CornerLap = {
   lap: number; status: "candidate" | "excluded"; reason: string | null;
-  quality: { analysis_eligible: boolean; reasons: string[] };
+  quality: { analysis_eligible: boolean; reasons: string[]; lap_time?: number };
   start_session_s?: number; end_session_s?: number; elapsed_s?: number; downstream_s?: number | null;
   start_distance_m?: number; end_distance_m?: number;
   profile?: { progress: number[]; speed: number[]; rpm: number[] | null; metrics: CornerMetrics };
   telemetry?: CornerTelemetryPoint[];
+  spatial_profile?: { status: "available" | "unavailable"; reason: string | null; method: "shared_directed_spatial_gates"; points: CornerSpatialPoint[] };
 };
 export type CornerGroup = { id: number; laps: number[]; count: number; representative_lap: number; median_time_s: number; time_range_s: number[]; median_downstream_s: number | null; median_combined_s: number | null; metrics: CornerMetrics };
 export type SelectedCornerResult = {

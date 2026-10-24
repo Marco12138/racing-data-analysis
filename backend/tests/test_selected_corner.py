@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.analysis.selected_corner import analyze_selected_corner, group_corner_patterns, _clip_telemetry
+from backend.app.analysis.selected_corner import analyze_selected_corner, group_corner_patterns, _clip_telemetry, _coach_profile
 from backend.app.core.config import Settings
 from backend.app.main import create_app
 
@@ -51,6 +51,22 @@ def test_physical_gates_different_sample_rates_and_real_duration():
         assert [p["session_time_s"] for p in trace[1:-1]] == observed.session_time_s.tolist()
         assert [p["speed"] for p in trace[1:-1]] == pytest.approx(observed.speed.tolist())
         assert [p["rpm"] for p in trace[1:-1]] == pytest.approx(observed.rpm.tolist())
+        spatial = row["spatial_profile"]
+        assert spatial["status"] == "available", spatial
+        assert spatial["method"] == "shared_directed_spatial_gates"
+        assert spatial["independent_ground_truth"] is False
+        checkpoints = spatial["points"]
+        distances = np.array([p["distance_m"] for p in checkpoints])
+        assert np.all(np.diff(distances) > 0)
+        assert np.all(np.diff([p["session_time_s"] for p in checkpoints]) > 0)
+        assert distances == pytest.approx([p["distance_m"] for p in result["laps"][0]["spatial_profile"]["points"]])
+        # The fixture's circle has constant angular speed: elapsed fraction is known analytically.
+        assert [p["elapsed_s"] for p in checkpoints] == pytest.approx(distances / distances[-1] * expected, abs=.01)
+        assert checkpoints[-1]["elapsed_s"] == pytest.approx(row["elapsed_s"])
+        lap_frame = frame[frame.lap == row["lap"]]
+        for point in checkpoints:
+            assert point["speed"] == pytest.approx(np.interp(point["session_time_s"], lap_frame.session_time_s, lap_frame.speed))
+            assert point["rpm"] == pytest.approx(np.interp(point["session_time_s"], lap_frame.session_time_s, lap_frame.rpm))
     assert result["laps"][-1]["elapsed_s"] != 5
     pd.testing.assert_frame_equal(frame, original)
 
@@ -66,6 +82,7 @@ def test_gaps_missing_rpm_invalid_quality_and_boundary_degrade():
     assert rows[4]["reason"] == "lap_quality_gate"
     assert rows[1]["profile"]["rpm"] is None
     assert all(p["rpm"] is None for p in rows[1]["telemetry"])
+    assert all(p["rpm"] is None for p in rows[1]["spatial_profile"]["points"])
     assert "telemetry" not in rows[3]
     assert 3 not in result["patterns"]["confirmed_laps"]
     assert result["patterns"]["channels"] == ["speed"]
@@ -113,6 +130,28 @@ def test_clip_telemetry_preserves_zero_and_serializes_missing_values():
     assert result[0]["speed"] == 0 and result[0]["rpm"] == 0
     assert result[1]["rpm"] is None
     assert result[-1]["rpm"] == 9000
+    json.dumps(result, allow_nan=False)
+
+
+def test_shared_checkpoint_failures_do_not_invent_positions(monkeypatch):
+    from backend.app.analysis import selected_corner as module
+    from backend.app.models.track_reference import SpatialGate
+    gate = SpatialGate(a=(0., -10.), b=(0., 10.), forward=(1., 0.))
+    frame = pd.DataFrame({"session_time_s": np.arange(0., 5.1, .1), "speed": 50., "rpm": 0.})
+    xy = np.column_stack([frame.session_time_s, np.zeros(len(frame))])
+    checkpoints = [(float(i), gate) for i in range(4)]
+    assert _coach_profile(frame, xy, 1., 4., [])["reason"] == "corner_checkpoint_geometry_unavailable"
+    monkeypatch.setattr(module, "gate_crossings", lambda *args: [])
+    assert _coach_profile(frame, xy, 1., 4., checkpoints)["reason"] == "corner_checkpoint_not_unique"
+    monkeypatch.setattr(module, "gate_crossings", lambda *args: [{"session_time_s": 2.}, {"session_time_s": 3.}])
+    assert _coach_profile(frame, xy, 1., 4., checkpoints)["reason"] == "corner_checkpoint_not_unique"
+    monkeypatch.setattr(module, "gate_crossings", lambda *args: [{"session_time_s": 2.}])
+    assert _coach_profile(frame, xy, 1., 4., checkpoints)["reason"] == "corner_checkpoint_order"
+    hits = iter([2., 3.])
+    monkeypatch.setattr(module, "gate_crossings", lambda *args: [{"session_time_s": next(hits)}])
+    result = _coach_profile(frame, xy, 1., 4., checkpoints)
+    assert result["status"] == "available"
+    assert all(p["rpm"] == 0 for p in result["points"])
     json.dumps(result, allow_nan=False)
 
 

@@ -507,6 +507,11 @@ python scripts/verify_pilot_deployment.py --require-llm
 ```
 
 Two-driver guided review adds `/api/v1/comparisons/review` and `/compare`.
+Selected-corner coach comparison adds `spatial_profile` to the existing response;
+deploy the compatible backend first. Old responses degrade to an unavailable
+overlay rather than normalized-distance substitution. See
+[Corner Coach Comparison](CORNER_COACH_COMPARISON.md) for unchanged anchor/GPS
+boundaries and the section-best versus full-lap-best selection rules.
 Deploy the backward-compatible Railway route before publishing that frontend.
 See [Dual Driver Review](DUAL_DRIVER_REVIEW.md) for shared-gate timing,
 fastest-five variance, independent manual anchors, local repeated-pass search,
