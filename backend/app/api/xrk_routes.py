@@ -91,6 +91,7 @@ class SelectedCornerRequest(BaseModel):
     start_session_s: float = Field(ge=0, le=86400)
     end_session_s: float = Field(gt=0, le=86400)
     confirmed_laps: list[int] = Field(default_factory=list, max_length=60)
+    include_context: bool = False
 
 
 @router.post("/selected-corner")
@@ -107,7 +108,8 @@ async def selected_corner(request: Request, payload: SelectedCornerRequest) -> d
         telemetry = await asyncio.to_thread(pd.read_parquet, record.telemetry_path)
         result = await asyncio.to_thread(analyze_selected_corner, telemetry, record.manifest,
                                         source_lap=payload.source_lap, start_session_s=payload.start_session_s,
-                                        end_session_s=payload.end_session_s, confirmed_laps=payload.confirmed_laps)
+                                        end_session_s=payload.end_session_s, confirmed_laps=payload.confirmed_laps,
+                                        include_context=payload.include_context)
     except ValueError as exc:
         reason = str(exc)
         if not reason.startswith("corner_") or len(reason) > 80:

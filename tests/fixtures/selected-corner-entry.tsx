@@ -1,6 +1,16 @@
 import { I18nProvider } from "../../frontend/lib/i18n";
 import { SelectedCornerPanel } from "../../frontend/components/SelectedCornerPanel";
 import type { XrkAnalysis } from "../../frontend/lib/xrkAnalysisApi";
+import { CornerCandidateNavigation, SelectedCornerTelemetry } from "../../frontend/components/SelectedCornerTelemetry";
+import { cornerTelemetryDomains, type CornerLap } from "../../frontend/lib/selectedCorner";
+
+export function CornerTelemetryTest({ locale, confirmed = true, missing = false }: { locale: "zh" | "en"; confirmed?: boolean; missing?: boolean }) {
+  const rows: CornerLap[] = [3, 4, 5, 6].map(lap => ({ lap, status: "candidate", reason: null, quality: { analysis_eligible: true, reasons: [] }, start_session_s: lap * 40, end_session_s: lap * 40 + 5, elapsed_s: 5,
+    telemetry: missing ? undefined : [{ session_time_s: lap * 40, elapsed_s: 0, speed: 60 + lap, rpm: 9000 + lap }, { session_time_s: lap * 40 + .1, elapsed_s: .1, speed: 70, rpm: 10000 }] }));
+  return <I18nProvider initialLocale={locale}><CornerCandidateNavigation laps={rows} selectedLap={3} sourceLap={4} onSelect={() => {}} />
+    {[rows[1], rows[0]].map(row => <SelectedCornerTelemetry key={row.lap} row={row} videoTime={row.start_session_s! + 23} videoStart={row.start_session_s! + 23} confirmed={confirmed} domains={cornerTelemetryDomains(rows)} elapsedLimit={5} />)}
+  </I18nProvider>;
+}
 
 export function CornerTest({ locale, available = false }: { locale: "zh" | "en"; available?: boolean }) {
   const file = available ? new File(["test"], "fixture.mp4", { type: "video/mp4", lastModified: 1 }) : null;

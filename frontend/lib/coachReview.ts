@@ -154,7 +154,8 @@ export function reviewWindowAtOffset(trace: ReviewPoint[], focus: number, offset
   }
   if (context) {
     const a = reviewValue(trace, context.entry, "session_time_s"), b = reviewValue(trace, context.exit, "session_time_s");
-    if (a === null || b === null || a + offset < lower || b + offset > upper || b - a > 120) return null;
+    if (a === null || b === null || a + offset < lower || b + offset > upper || b <= a || b - a > 120
+      || elapsed(trace, context.entry, context.exit) === null) return null;
     start = a + offset; end = b + offset;
   }
   return end - start >= 3 ? { start_s: start, end_s: end, focus_s: focusTime } : null;

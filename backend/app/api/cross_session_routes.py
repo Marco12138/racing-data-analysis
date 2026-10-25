@@ -42,6 +42,7 @@ class DriverReviewRequest(BaseModel):
     session_a: SessionLapReference
     session_b: SessionLapReference
     source_start_s: float | None = Field(default=None, ge=0, le=86400, allow_inf_nan=False)
+    include_context: bool = False
 
 
 @router.post("/comparisons/review")
@@ -57,7 +58,7 @@ async def driver_review(request: Request, payload: DriverReviewRequest) -> dict[
         ta, tb = await read_telemetry(a, b)
         return await asyncio.to_thread(build_driver_review, ta, a.manifest, tb, b.manifest,
                                        lap_a=payload.session_a.lap, lap_b=payload.session_b.lap,
-                                       source_start_s=payload.source_start_s)
+                                       source_start_s=payload.source_start_s, include_context=payload.include_context)
     except ValueError as exc:
         raise PublicApiError(status_code=422, error_code="CROSS_SESSION_DATA_INCOMPATIBLE",
                              message=str(exc), error_type="comparison_data") from exc

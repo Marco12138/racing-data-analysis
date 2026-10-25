@@ -13,10 +13,21 @@ are listed but not used as patterns or references. Candidate clips use the
 source anchor plus actual logger session timestamps; this is not confirmation
 of the other laps. Video stays in the browser.
 
-Select a lap for side-by-side playback. Five-second previews are the default;
-the full-common-interval toggle plays to each lap's crossing of the same exit
-gate. These lengths can differ. Neither speed nor video playback is stretched.
+Select a lap with the comparison-lap menu or previous/next arrows above the
+videos. Every playable candidate remains available, not only a group's
+representative. Switching laps pauses playback and retains individual verdicts.
+Full-common-interval playback is the default and ends at each lap's crossing of
+the same exit gate; disable it for five-second previews. These lengths can differ.
+Neither speed nor video playback is stretched.
 The GoPro speed HUD uses each presented frame's local camera timestamps.
+
+Each video has its own AiM speed and RPM charts, entry/minimum/exit speed and
+minimum RPM below it. Both channels remain visible with shared axis scales.
+The x-axis is actual elapsed time, not the distance-normalized clustering
+profile. Frame-linked readings and cursors use that lap's video window only
+after confirmation; unconfirmed candidates still show their recorded curves
+and metrics. GPS warnings and manual-anchor +/-0.5s uncertainty remain visible.
+Old responses without time-series samples ask the user to find candidates again.
 
 Run **Check boundary landmarks (all)**. The existing two-background NCC matcher
 searches independently within +/-0.5s of each proposed entry and exit. Its .72
@@ -49,7 +60,12 @@ missing speed/position invalidates a candidate instead of fabricating values.
 RPM absence only removes RPM from grouping. Registration is not sensor calibration.
 
 Each candidate has its own real crossing times, speed/RPM profile, metrics,
-quality result and registration evidence. `elapsed_s` is time between the same
+quality result and registration evidence. Additive `telemetry` samples contain
+`session_time_s`, `elapsed_s`, `speed` (km/h) and nullable `rpm`. Interior samples
+retain normalized channel timestamps/values; only the two crossing boundaries
+are interpolated with the existing bounded method. Missing RPM stays null and
+zero remains a valid value. These samples are separate from the 41-point
+distance-domain profile used for grouping. `elapsed_s` is time between the same
 spatial gates, **not** the five-second video preview length. Optional downstream
 timing uses a further gate 50m along the source path and remains null without
 continuous coverage. At most 60 timed laps are processed; extra laps are listed

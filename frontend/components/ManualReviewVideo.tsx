@@ -11,13 +11,14 @@ import type { ClipFeedbackInput } from "../lib/feedbackApi";
 import { TrackLandmarkEditor } from "./TrackLandmarkEditor";
 import { inferReviewCandidate, type LoggerLapRange } from "../lib/reviewCandidate";
 import { ReviewCandidateNotice } from "./ReviewCandidateNotice";
-import { sharedReviewStart, MANUAL_PICK_UNCERTAINTY_S } from "../lib/reviewBoundaries";
+import { reviewStartDistance, reviewContextBounds, MANUAL_PICK_UNCERTAINTY_S } from "../lib/reviewBoundaries";
 import { ReviewBoundaryCheck, type BoundaryVideo } from "./ReviewBoundaryCheck";
 import { ReviewGpsNotice } from "./ReviewGpsNotice";
 import { observeVideoClock } from "../lib/videoFrameClock";
 import { GoproSpeedOverlay } from "./GoproSpeedOverlay";
 import { compareClipTelemetry, type ClipComparison, type ClipTiming } from "../lib/clipTelemetry";
 import { ClipTelemetrySide, ClipTelemetryDelta } from "./ClipTelemetry";
+import { ReviewAudioControl } from "./ReviewAudioControl";
 
 const TEXT = {
   zh: {
@@ -71,10 +72,11 @@ export function ManualReviewVideo(props: Props) {
   const { locale } = useI18n(), c = TEXT[locale];
   const [command, setCommand] = useState<PairCommand>({ type: "pause", sequence: 0 });
   const [ready, setReady] = useState({ reference: false, target: false });
+  const [audio, setAudio] = useState<number | null>(0);
   const [boundaries, setBoundaries] = useState<{ reference: BoundaryVideo | null; target: BoundaryVideo | null }>({ reference: null, target: null });
   const onBoundary = useCallback((side: ReviewSide, value: BoundaryVideo | null) => setBoundaries(p => JSON.stringify(p[side]) === JSON.stringify(value) ? p : { ...p, [side]: value }), []);
   const onReady = useCallback((side: ReviewSide, value: boolean) => setReady(p => p[side] === value ? p : { ...p, [side]: value }), []);
-  const startDistance = useMemo(() => sharedReviewStart(props.review), [props.review]);
+  const startDistance = useMemo(() => reviewStartDistance(props.review, props.context), [props.review, props.context]);
   const scope = JSON.stringify([props.fingerprint, props.review.id, props.review.referenceLap, props.review.targetLap, props.context]);
   const [timings, setTimings] = useState<Record<ReviewSide, { scope: string; timing: ClipTiming | null } | null>>({ reference: null, target: null });
   const [cursors, setCursors] = useState<Record<ReviewSide, number | null>>({ reference: null, target: null });
@@ -93,10 +95,11 @@ export function ManualReviewVideo(props: Props) {
         setCommand(p => ({ type: "play", sequence: p.sequence + 1 }));
       }}><Play size={15} />{c.pair}</button>
       <button className={btn} onClick={() => setCommand(p => ({ type: "pause", sequence: p.sequence + 1 }))}><Pause size={15} />{c.stop}</button>
+      <ReviewAudioControl value={audio} onChange={setAudio} labels={[c.reference, c.target]} />
     </div>
     <div className="grid min-w-0 gap-5 xl:grid-cols-2">
       {(["reference", "target"] as const).map(side => <ReviewVideoSide key={`${side}:${side === "reference" ? props.review.referenceLap : props.review.targetLap}`} {...props} side={side} command={command} onReady={onReady} onBoundary={onBoundary} startDistance={startDistance}
-        scope={scope} comparison={comparison} onTiming={onTiming} onPlayhead={onPlayhead} />)}
+        scope={scope} comparison={comparison} onTiming={onTiming} onPlayhead={onPlayhead} audible={audio === (side === "reference" ? 0 : 1)} />)}
     </div>
     <ClipTelemetryDelta comparison={comparison} cursors={cursors} />
     <p className="mt-2 text-xs text-slate-400">{c.pairNote}</p>
@@ -108,7 +111,7 @@ export function ManualReviewVideo(props: Props) {
 
 function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, defaultDuration, targetCalibration, referenceCalibration, sessionCalibrations, lapRanges,
   context, onCursor, feedback, side, command, onReady, onBoundary, startDistance, landmarkEvents, readOnly = false,
-  scope, comparison, onTiming, onPlayhead }: Props & { side: ReviewSide; command: PairCommand;
+  scope, comparison, onTiming, onPlayhead, audible }: Props & { side: ReviewSide; command: PairCommand; audible: boolean;
     onReady: (side: ReviewSide, ready: boolean) => void; onBoundary: (side: ReviewSide, value: BoundaryVideo | null) => void; startDistance: number | null;
     scope: string; comparison: ClipComparison; onTiming: (side: ReviewSide, value: { scope: string; timing: ClipTiming | null }) => void;
     onPlayhead: (side: ReviewSide, distance: number | null) => void }) {
@@ -137,11 +140,15 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
   const [playing, setPlaying] = useState(false), [loop, setLoop] = useState(false), [rate, setRate] = useState(1);
   const [error, setError] = useState(""), [notice, setNotice] = useState("");
   const previewStart = context ? undefined : startDistance ?? NaN;
-  const auto = calibratedReviewWindow(trace, lap, review.focus, calibration, file, duration, context ? { entry: review.entry, exit: review.downstreamEnd } : undefined, previewStart);
+  const contextBounds = useMemo(() => context ? reviewContextBounds(review) : undefined, [context, review]);
+  const contextStart = contextBounds ? reviewValue(trace, contextBounds.entry, "session_time_s") : null;
+  const contextEnd = contextBounds ? reviewValue(trace, contextBounds.exit, "session_time_s") : null;
+  const editSpan = contextStart !== null && contextEnd !== null && contextEnd > contextStart ? contextEnd - contextStart : 5;
+  const auto = calibratedReviewWindow(trace, lap, review.focus, calibration, file, duration, contextBounds, previewStart);
   const proposal = useMemo(() => inferReviewCandidate(trace, lap, review.focus, sessionCalibrations ?? [], lapRanges ?? [], identity,
-    context ? { entry: review.entry, exit: review.downstreamEnd } : undefined, previewStart), [trace, lap, review.focus, review.entry, review.downstreamEnd, sessionCalibrations, lapRanges, identity, context, previewStart]);
+    contextBounds, previewStart), [trace, lap, review.focus, sessionCalibrations, lapRanges, identity, contextBounds, previewStart]);
   const candidate = !auto && mode === "automatic" ? proposal.candidate : null;
-  const original = calibratedReviewWindow(trace, lap, review.focus, calibration, defaultFile, defaultDuration, context ? { entry: review.entry, exit: review.downstreamEnd } : undefined, previewStart);
+  const original = calibratedReviewWindow(trace, lap, review.focus, calibration, defaultFile, defaultDuration, contextBounds, previewStart);
   const validManual = manual && identity && !validateManualReview(manual, trace, lap, identity) ? manual : null;
   const clip = mode === "manual" ? validManual ? manualReviewWindow(validManual, trace, review.focus) : null : auto ?? candidate?.window ?? null;
   const activeAnchor = mode === "manual" ? validManual?.sync_confirmed ? validManual.calibration : null : auto ? calibration : null;
@@ -161,8 +168,8 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
     return () => onTiming(side, { scope, timing: null });
   }, [side, scope, editing, url, clipStart, clipEnd, linkedOffset, onTiming]);
   useEffect(() => {
-    onBoundary(side, url && clipStart !== undefined && clipEnd !== undefined && Math.abs(clipEnd - clipStart - 5) < .001 && !editing
-      ? { url, start: clipStart, duration, lap, confirmed: Boolean(activeAnchor) } : null);
+    onBoundary(side, url && clipStart !== undefined && clipEnd !== undefined && !editing
+      ? { url, start: clipStart, end: clipEnd, duration, lap, confirmed: Boolean(activeAnchor) } : null);
   }, [side, url, clipStart, clipEnd, duration, lap, activeAnchor, editing, onBoundary]);
 
   useEffect(() => {
@@ -230,7 +237,7 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
   function openEditor() {
     video.current?.pause(); setError(""); setNotice("");
     const nextStart = clip?.start_s ?? 0;
-    setStartOnly(true); setStart(nextStart); setEnd(nextStart + 5);
+    setStartOnly(true); setStart(nextStart); setEnd(nextStart + editSpan);
     const proposedAnchor = candidate && file ? createVideoSyncCalibration({ videoTimeS: candidate.window.focus_s,
       telemetryPoint: { distance_m: review.focus, session_time_s: candidate.focus_session_s }, targetLap: lap,
       videoDurationS: duration, fileSizeBytes: file.size, fileLastModifiedMs: file.lastModified, fileMimeType: file.type }) : null;
@@ -246,7 +253,7 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
   }
   function changeStart(time: number) {
     setStart(time); setConfirmed(false);
-    if (startOnly) { setEnd(time + 5); setDraftAnchor(startAnchor(time)); }
+    if (startOnly) { setEnd(time + editSpan); setDraftAnchor(startAnchor(time)); }
   }
   function loadFile(next: File) {
     video.current?.pause(); setOwnFile(next); setOwnDuration(0); setManual(null); setMode("automatic");
@@ -262,9 +269,9 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
   }
   function applyManual() {
     if (!identity) return;
-    const next: ManualReviewClip = { version: 1, lap, start_s: start, end_s: startOnly ? start + 5 : end, video: identity,
+    const next: ManualReviewClip = { version: 1, lap, start_s: start, end_s: startOnly ? start + editSpan : end, video: identity,
       calibration: confirmed ? startOnly ? startAnchor(start) : draftAnchor : null, sync_confirmed: confirmed, saved_at: new Date().toISOString(),
-      ...(startOnly && startDistance !== null ? { start_confirmation: { method: "manual_start_plus_five_v1" as const,
+      ...(startOnly && startDistance !== null ? { start_confirmation: { method: context ? "manual_start_full_context_v1" as const : "manual_start_plus_five_v1" as const,
         uncertainty_s: MANUAL_PICK_UNCERTAINTY_S, distance_m: startDistance, proposed_start_s: auto?.start_s ?? proposal.candidate?.window.start_s ?? null,
         source_anchor: validManual?.start_confirmation?.source_anchor ?? activeAnchor ?? proposal.candidate?.source ?? null } } : {}) };
     const problem = validateManualReview(next, trace, lap, identity);
@@ -302,7 +309,7 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
       <button className={btn} onClick={openEditor}><Scissors size={15} />{c.add}</button>
     </div>
     <p className="mb-2 text-xs text-slate-400">{c.scope}: L{lap}</p>
-    {url && (editing || clip) ? <div className="relative min-w-0"><video ref={video} src={url} muted playsInline preload="metadata" className="aspect-video w-full bg-black object-contain" aria-label={`${c[side]} L${lap}`}
+    {url && (editing || clip) ? <div className="relative min-w-0"><video ref={video} src={url} muted={!audible} playsInline preload="metadata" className="aspect-video w-full bg-black object-contain" aria-label={`${c[side]} L${lap}`}
       onError={() => setError("error")} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
       onLoadedMetadata={event => { const el = event.currentTarget; if (ownFile && Number.isFinite(el.duration)) { setOwnDuration(el.duration); setEnd(p => Math.min(p, el.duration)); } el.playbackRate = rate; if (!editing && clip) el.currentTime = clip.start_s; }}
       /><GoproSpeedOverlay file={file} time={now} /></div> : <div className="flex aspect-video items-center justify-center bg-slate-950 p-4 text-center text-sm text-slate-400">{!url ? c.noVideo : c.missing}</div>}
@@ -320,12 +327,12 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
       </div>
       <div className="grid grid-cols-2 gap-3">
         <label className="min-w-0 text-xs text-slate-400">{c.start}<input className={input} type="number" step={.01} min={0} max={duration} value={start} onChange={e => changeStart(Number(e.target.value))} /></label>
-        <label className="min-w-0 text-xs text-slate-400">{startOnly ? (locale === "zh" ? "自动终点：起点 +5 秒" : "Automatic end: start +5s") : c.end}<input className={input} type="number" step={.01} min={0} max={duration} readOnly={startOnly} value={startOnly ? start + 5 : end} onChange={e => { setEnd(Number(e.target.value)); setConfirmed(false); }} /></label>
+        <label className="min-w-0 text-xs text-slate-400">{startOnly ? (locale === "zh" ? `自动终点：起点 +${editSpan.toFixed(2)} 秒` : `Automatic end: start +${editSpan.toFixed(2)}s`) : c.end}<input className={input} type="number" step={.01} min={0} max={duration} readOnly={startOnly} value={startOnly ? start + editSpan : end} onChange={e => { setEnd(Number(e.target.value)); setConfirmed(false); }} /></label>
         <button className={btn} disabled={!duration} onClick={() => changeStart(Number(now.toFixed(3)))}>{c.markStart}</button>
         {!startOnly && <button className={btn} disabled={!duration} onClick={() => { setEnd(Number(now.toFixed(3))); setConfirmed(false); }}>{c.markEnd}</button>}
       </div>
       <p className="text-xs text-amber-200">{locale === "zh" ? "人工起点估计 ±0.5 秒（不是统计置信区间）。原圈锚点不会被覆盖。" : "Manual start estimate ±0.5s (not a statistical confidence interval). Original lap anchors stay unchanged."}</p>
-      <label className="flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={!startOnly} onChange={e => { setStartOnly(!e.target.checked); setEnd(start + 5); setConfirmed(false); setDraftAnchor(!e.target.checked ? startAnchor(start) : null); }} />{locale === "zh" ? "高级：自定义片段时长" : "Advanced: custom clip duration"}</label>
+      <label className="flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={!startOnly} onChange={e => { setStartOnly(!e.target.checked); setEnd(start + editSpan); setConfirmed(false); setDraftAnchor(!e.target.checked ? startAnchor(start) : null); }} />{locale === "zh" ? "高级：自定义片段时长" : "Advanced: custom clip duration"}</label>
       {!startOnly && <><label className="block text-xs text-slate-400">{c.sync}<select className={input} value={anchorDistance} onChange={e => { setAnchorDistance(Number(e.target.value)); setConfirmed(false); setDraftAnchor(null); }}>
         {([["entry", review.entry], ["minimum", review.focus], ["exit", review.exit], ["downstream", review.downstreamEnd]] as const).map(([label, d]) => <option key={label} value={d}>{c[label]} · {d.toFixed(1)}m</option>)}
       </select></label>
@@ -333,7 +340,7 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
       {draftAnchor && <p className="text-xs text-slate-400">{c.anchorAt}: {draftAnchor.video_time_s.toFixed(2)}s = {draftAnchor.telemetry_distance_m.toFixed(1)}m · L{lap}</p>}
       <label className="flex items-start gap-2 text-xs text-slate-300"><input type="checkbox" disabled={startOnly ? !startAnchor(start) : !draftAnchor} checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />{startOnly ? (locale === "zh" ? "已确认起点是同一圈号、同一弯道位置" : "I confirmed the lap and matching corner start") : c.checked}</label>
       <p className="text-xs text-slate-400">{c.cropNote}</p>
-      <div className="flex flex-wrap gap-2"><button className={btn} disabled={!duration || (startOnly && !confirmed)} onClick={applyManual}><Check size={15} />{startOnly ? (locale === "zh" ? "确认起点，取后 5 秒" : "Confirm start, take next 5s") : c.apply}</button><button className={btn} onClick={() => { setEditing(false); setError(""); }}><X size={15} />{c.cancel}</button></div>
+      <div className="flex flex-wrap gap-2"><button className={btn} disabled={!duration || (startOnly && !confirmed)} onClick={applyManual}><Check size={15} />{startOnly ? (context ? (locale === "zh" ? "确认起点，保留完整过程" : "Confirm start, keep full context") : (locale === "zh" ? "确认起点，取后 5 秒" : "Confirm start, take next 5s")) : c.apply}</button><button className={btn} onClick={() => { setEditing(false); setError(""); }}><X size={15} />{c.cancel}</button></div>
     </div>}
     {url && (editing || clip) && <div className="mt-3 flex flex-wrap items-center gap-2">
       <button className={btn} onClick={() => togglePlay()} aria-label={playing ? c.pause : c.play}>{playing ? <Pause size={15} /> : <Play size={15} />}{playing ? c.pause : c.play}</button>

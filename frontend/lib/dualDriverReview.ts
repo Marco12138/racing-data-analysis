@@ -4,6 +4,7 @@ import type { XrkAnalysis, XrkLapQualityRow } from "./xrkAnalysisApi";
 export type DriverPoint = { session_time_s: number; lap_time_s: number; distance_m: number;
   local_x_m: number; local_y_m: number; speed?: number | null; rpm?: number | null };
 export type DriverSession = { metadata: Record<string, string | number | null>; selected_lap: number;
+  file_fingerprint?: string;
   timing: { start_time_ms: number; end_time_ms: number; duration_s: number }; track: DriverPoint[];
   lap_quality: XrkAnalysis["lap_quality"]; gps_quality: Record<string, unknown>;
   channel_provenance: Record<string, { source: string; name?: string }>;
@@ -14,6 +15,7 @@ export type CornerObservation = { start_session_s: number; end_session_s: number
   events: { type: string; from_entry_s: number; confidence: string; evidence: Record<string, unknown> }[];
   driver_input_confirmed: false };
 export type DriverCorner = { id: string; status: "candidate" | "unavailable"; reason?: string;
+  context?: { status: string; reason: string };
   a?: CornerObservation; b?: CornerObservation; difference_s?: number; differences?: Record<string, number | null> };
 export type DualDriverResult = { version: 1; sessions: { a: DriverSession; b: DriverSession };
   corners: DriverCorner[]; warnings: string[]; limitations?: string[]; registration: null | { status: string };
@@ -44,6 +46,19 @@ export function driverClipStart(observation: CornerObservation, binding: DriverB
   return Number.isFinite(start) && start >= binding.video_start_s && start + 5 <= Math.min(duration, binding.video_end_s) ? start : null;
 }
 
+/** Playback and telemetry use the same physical interval, with independent video clocks. */
+export function driverClipWindow(observation: CornerObservation, binding: DriverBinding, duration: number) {
+  const start = observation.start_session_s + binding.offset_s, end = observation.end_session_s + binding.offset_s;
+  return [start, end].every(Number.isFinite) && end > start && start >= binding.video_start_s
+    && end <= Math.min(duration, binding.video_end_s) ? { start, end } : null;
+}
+
+export function clipTelemetryTime(videoTime: number, videoStart: number, observation: CornerObservation) {
+  const elapsed = videoTime - videoStart;
+  return Number.isFinite(elapsed) && elapsed >= 0 && elapsed <= observation.elapsed_s + .001
+    ? observation.start_session_s + elapsed : null;
+}
+
 export function channelAt(points: DriverPoint[], time: number, key: "rpm" | "speed"): number | null {
   const i = points.findIndex(p => p.session_time_s >= time);
   if (i < 0) return null;
@@ -59,7 +74,7 @@ export async function requestDriverReview(ids: [string, string], laps: [number |
   signal: AbortSignal, start?: number): Promise<DualDriverResult> {
   const response = await fetch(await resolveApiUrl("/comparisons/review"), { method: "POST", signal,
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-      session_a: { inspection_id: ids[0], lap: laps[0] }, session_b: { inspection_id: ids[1], lap: laps[1] }, source_start_s: start ?? null }) });
+      session_a: { inspection_id: ids[0], lap: laps[0] }, session_b: { inspection_id: ids[1], lap: laps[1] }, source_start_s: start ?? null, include_context: true }) });
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw Error(`${error.message || "Comparison unavailable"} [${error.error_code || response.status}]`);

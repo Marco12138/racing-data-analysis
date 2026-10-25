@@ -8,6 +8,7 @@ import pandas as pd
 from .cross_session_analysis import prepare_session, track_compatibility_warnings
 from .selected_corner import _gate, _profile, _section
 from .sector_zone_analysis import generate_auto_zones
+from .review_context import review_context, verify_section_path
 from .track_reference import gate_crossings, register_translation
 from .xrk_session_analysis import dataframe_records, json_safe
 from ..models.track_reference import TrackAcceptance
@@ -55,7 +56,7 @@ def _observations(session, frame: pd.DataFrame, lap: int, start: float, end: flo
 
 def build_driver_review(telemetry_a: pd.DataFrame, manifest_a: dict, telemetry_b: pd.DataFrame,
                         manifest_b: dict, *, lap_a: int | None = None, lap_b: int | None = None,
-                        source_start_s: float | None = None) -> dict:
+                        source_start_s: float | None = None, include_context: bool = False) -> dict:
     """Build a linked review without assuming logger timing lines or sector IDs agree."""
     a, b = prepare_session(telemetry_a, manifest_a), prepare_session(telemetry_b, manifest_b)
     warnings = track_compatibility_warnings(a, b, reject_large_difference=True)
@@ -67,6 +68,7 @@ def build_driver_review(telemetry_a: pd.DataFrame, manifest_a: dict, telemetry_b
     columns = ["session_time_s", "lap_time_s", "distance_m", "local_x_m", "local_y_m", "speed", "rpm"]
     for key, session, lap, frame, timing in [("a", a, la, fa, ta), ("b", b, lb, fb, tb)]:
         response["sessions"][key] = {"metadata": session.manifest.get("metadata", {}),
+            "file_fingerprint": session.manifest.get("fingerprint"),
             "selected_lap": lap, "timing": timing, "lap_quality": session.quality,
             "fastest_five": fastest_five_summary(session.quality),
             "track": dataframe_records(frame[[c for c in columns if c in frame]]) if not frame.empty else [],
@@ -94,6 +96,10 @@ def build_driver_review(telemetry_a: pd.DataFrame, manifest_a: dict, telemetry_b
         row = {"id": key, "status": "unavailable", "source": "custom" if source_start_s is not None else "suggested",
                "visual_confirmation_required": True}
         try:
+            if include_context:
+                context = review_context(fa, start, end)
+                row["context"] = context
+                start, end = context["start_session_s"], context["end_session_s"]
             obs_a = _observations(a, fa, la, start, end)
             gates = [_gate(fa, t) for t in (start, end)]
             hits = [gate_crossings(points_b, fb.session_time_s.to_numpy(float), g) for g in gates]
@@ -103,7 +109,9 @@ def build_driver_review(telemetry_a: pd.DataFrame, manifest_a: dict, telemetry_b
             if not 1 <= eb - sb <= 15:
                 raise ValueError("gate_order_or_duration")
             obs_b = _observations(b, fb, lb, sb, eb)
-            # Five-second playback and physical gate traversal are deliberately separate.
+            row["path_check"] = verify_section_path(points_a[fa.session_time_s.between(start, end)],
+                                                     points_b[fb.session_time_s.between(sb, eb)])
+            # Both metrics and full-context playback use the same physical gates.
             row.update(status="candidate", a=obs_a, b=obs_b, gates=[g.model_dump() for g in gates],
                        difference_s=obs_b["elapsed_s"] - obs_a["elapsed_s"],
                        boundary_brackets_s=[h[0]["sample_bracket_s"] for h in hits],
@@ -117,7 +125,7 @@ def build_driver_review(telemetry_a: pd.DataFrame, manifest_a: dict, telemetry_b
         response["corners"] = candidates[:3] + [r for r in response["corners"] if r["status"] != "candidate"][:3]
     response["limitations"] = [
         "Matched GPS gates are provisional, not official corner labels; confirm the same landmark in both videos.",
-        "Five-second playback can end at different positions. Timing differences use the same physical gates instead.",
+        "The five-second selection is a seed; expanded playback and timing use the same physical gates.",
         "GPS-derived lateral acceleration and uncalibrated camera axes do not establish steering input.",
         "RPM decline is not confirmed braking. Higher RPM does not establish causally better exit performance.",
         "Different vehicles, gearing, tyres, weather, traffic and session conditions confound driver comparisons.",

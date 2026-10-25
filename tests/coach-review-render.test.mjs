@@ -11,10 +11,24 @@ mkdirSync(`${root}/tmp`, { recursive: true });
 const dir = mkdtempSync(`${root}/tmp/coach-review-test-`);
 execFileSync(`${root}/node_modules/.bin/esbuild`, [`${root}/tests/fixtures/coach-review-entry.tsx`, "--bundle", "--format=esm", "--platform=node", "--jsx=automatic",
   "--external:react", "--external:react-dom", "--external:recharts", "--external:lucide-react", `--outfile=${dir}/entry.mjs`], { stdio: "pipe" });
-const { CoachReviewTest, CoachDebriefTest } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
+const { CoachReviewTest, CoachDebriefTest, reviewContextBounds, reviewStartDistance } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
 after(() => rmSync(dir, { recursive: true, force: true }));
 const { analysis: demoAnalysis } = JSON.parse(readFileSync(`${root}/public/demo/reviewed-real-session.json`));
 const analysis = { ...demoAnalysis, video_review: undefined, inspection_id: "a".repeat(32), file_fingerprint: "b".repeat(64) };
+
+test("full-context confirmation binds the displayed approach, not the five-second preview", () => {
+  const trace = Array.from({length: 201}, (_, i) => ({distance_m:i, session_time_s:i / 10,
+    lap_time_s:i / 10, speed:i < 40 ? 65 + i / 8 : i < 70 ? 70 - (i - 40) * 4 / 3 : Math.min(70, 30 + (i - 70)),
+    rpm:8000,local_x_m:i,local_y_m:0}));
+  const review = {entry:60,exit:90,downstreamEnd:110,focus:70,target:trace,reference:trace};
+  const saved = JSON.stringify(review), bounds = reviewContextBounds(review);
+  assert.ok(bounds.entry < 40);
+  assert.ok(bounds.exit >= 110);
+  assert.equal(reviewStartDistance(review,true),bounds.entry);
+  assert.equal(reviewStartDistance(review,false),50);
+  assert.notEqual(reviewStartDistance(review,true),reviewStartDistance(review,false));
+  assert.equal(JSON.stringify(review), saved);
+});
 
 test("demo reviews never offer a vote, including with a local video attached", () => {
   const html = renderToStaticMarkup(createElement(CoachReviewTest, { analysis: demoAnalysis, locale: "zh", readOnly: true,
