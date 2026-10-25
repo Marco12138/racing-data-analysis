@@ -9,7 +9,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 mkdirSync(`${root}/tmp`, { recursive: true });
 const dir = mkdtempSync(`${root}/tmp/guide-render-`);
 execFileSync(`${root}/node_modules/.bin/esbuild`, [`${root}/tests/fixtures/guided-review-entry.tsx`, "--bundle", "--format=esm", "--platform=node", "--jsx=automatic", "--external:react", "--external:react-dom", "--external:lucide-react", `--outfile=${dir}/entry.mjs`], { stdio: "pipe" });
-const { GuideTest, ImportPanelsTest } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
+const { GuideTest, ImportPanelsTest, selectCoachReviews } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
 const analysis = JSON.parse(readFileSync(`${root}/public/demo/reviewed-real-session.json`, "utf8")).analysis;
 after(() => rmSync(dir, { recursive: true, force: true }));
 test("hidden free-workspace import cannot rename the guided import region", () => {
@@ -44,5 +44,23 @@ test("debrief does not promote unconfirmed model recommendations into confirmed 
     assert.ok(html.includes(locale === "zh" ? "GPS 异常提示不会因片段确认而解除" : "clip confirmation never clears GPS warnings"));
     assert.match(html, /±0.5/);
     assert.doesNotMatch(html, /L\d+ is [\d.]+s|连同下游慢 [\d.]+ 秒/);
+  }
+});
+test("new coach evidence reaches bilingual debrief independently of legacy votes", () => {
+  const review = selectCoachReviews(analysis)[0];
+  const evidence = { id: review.id, name: review.name, videoConfirmed: true, contextComplete: true,
+    comparison: { status: "available", section: { lap: 4 }, overall: { lap: 5 }, gain_s: .1,
+      downstream_gain_s: -.3, combined_gain_s: -.2, downstream_gps_warning: false,
+      parts: [{ index: 0, gain_s: .2 }, { index: 1, gain_s: -.1 }, { index: 2, gain_s: 0 }] } };
+  for (const locale of ["zh", "en"]) {
+    const render = () => renderToStaticMarkup(createElement(GuideTest, { locale, analysis, view: "summary", coachEvidence: [evidence] }));
+    evidence.contextComplete = true;
+    let html = render();
+    assert.match(html, /0.100/); assert.match(html, /0.200/);
+    assert.ok(html.includes(locale === "zh" ? "局部优势没有保持到下游" : "The local gain did not last downstream"));
+    assert.doesNotMatch(html, /先确认一个片段|Confirm a clip first/);
+    evidence.contextComplete = false; html = render();
+    assert.ok(html.includes(locale === "zh" ? "先补齐减速" : "Resolve missing approach"));
+    assert.ok(html.includes(locale === "zh" ? "不能称为完整弯道" : "not a complete corner"));
   }
 });

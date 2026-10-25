@@ -9,6 +9,7 @@ import { ManualLapBinding } from "./ManualLapBinding";
 import { CoachDebrief } from "./CoachDebrief";
 import { GuidedOverview, GuidedDebrief, ReviewSteps, ReviewFooter } from "./GuidedReview";
 import { REVIEW_STEPS, type ReviewStep, type ReviewReceipt } from "../lib/guidedReview";
+import type { RecommendedCoachEvidence } from "../lib/recommendedCoach";
 import type { SelectedCornerResult } from "../lib/selectedCorner";
 import { matchesReviewVideo, reviewVideoIdentity } from "../lib/manualReview";
 
@@ -206,9 +207,17 @@ export function XrkAnalysisWorkspace({
     return parseVideoSyncCalibration(window.localStorage.getItem(videoStorageKey));
   });
   const [offsetMs, setOffsetMs] = useState(calibration?.offset_ms ?? 0);
-  const scope = `${analysis.file_fingerprint}:${analysis.target_lap}:${analysis.reference_lap}:${videoFile?.size}:${videoFile?.lastModified}:${calibration?.calibrated_at}`;
+  const scope = `${analysis.inspection_id}:${analysis.file_fingerprint}:${analysis.target_lap}:${analysis.reference_lap}:${videoFile?.size}:${videoFile?.lastModified}:${videoDurationS}:${JSON.stringify(calibration)}`;
   const [decisions, setDecisions] = useState<{ scope: string; rows: ReviewReceipt[] }>({ scope: "", rows: [] });
   const [cornerSummary, setCornerSummary] = useState<{ scope: string; result: SelectedCornerResult | null }>({ scope: "", result: null });
+  const [coachEvidence, setCoachEvidence] = useState<{ scope: string; rows: RecommendedCoachEvidence[] }>({ scope: "", rows: [] });
+  const recordCoach = useCallback((row: RecommendedCoachEvidence) => {
+    setCoachEvidence(old => {
+      const rows = old.scope === scope ? old.rows : [];
+      if (rows.find(r => r.id === row.id) === row) return old;
+      return { scope, rows: [...rows.filter(r => r.id !== row.id), row] };
+    });
+  }, [scope]);
   const recordDecision = useCallback((row: ReviewReceipt) => {
     setDecisions(old => {
       const rows = old.scope === scope ? old.rows : [];
@@ -519,12 +528,12 @@ export function XrkAnalysisWorkspace({
             active={view === "coach"}
             videoDurationS={videoDurationS} calibration={calibration}
             guidedPage={guided ? (step === 4 ? "selected" : "recommended") : undefined}
-            onDecision={recordDecision} receipts={decisions.scope === scope ? decisions.rows : []} onCornerResult={recordCorner}
+            onDecision={recordDecision} receipts={decisions.scope === scope ? decisions.rows : []} onCornerResult={recordCorner} onCoachEvidence={recordCoach}
             onSync={() => guided ? goStep(2) : setActiveTab("video")} onCursor={selectDistance}
             onAnalyze={onAnalyze} analyzing={analyzing} readOnly={publishedDemo} />
       </div>
 
-      {view === "report" && (guided ? <GuidedDebrief analysis={analysis} receipts={decisions.scope === scope ? decisions.rows : []} corner={cornerSummary.scope === scope ? cornerSummary.result : null} onReview={() => goStep(3)} /> : <ReportPanel analysis={analysis} />)}
+      {view === "report" && (guided ? <GuidedDebrief analysis={analysis} receipts={decisions.scope === scope ? decisions.rows : []} corner={cornerSummary.scope === scope ? cornerSummary.result : null} coachEvidence={coachEvidence.scope === scope ? coachEvidence.rows : []} onReview={() => goStep(3)} /> : <ReportPanel analysis={analysis} />)}
       {guided && <ReviewFooter step={step} onStep={goStep} paired={paired} busy={analyzing} />}
     </section>
   );
