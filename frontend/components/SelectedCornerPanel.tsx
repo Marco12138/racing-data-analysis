@@ -17,6 +17,7 @@ import { ReviewAudioControl } from "./ReviewAudioControl";
 import { CornerCandidateNavigation, SelectedCornerTelemetry } from "./SelectedCornerTelemetry";
 import { CornerCoachComparison } from "./CornerCoachComparison";
 import { compareCornerBest } from "../lib/cornerCoach";
+import { coachObservation, type RecommendedSeed, type RecommendedCoachEvidence } from "../lib/recommendedCoach";
 
 type Visual = Awaited<ReturnType<typeof checkSelectedCornerFrames>>;
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded border border-slate-600 px-3 py-2 text-sm hover:border-cyan-400 disabled:opacity-40";
@@ -54,15 +55,17 @@ export function SelectedCornerPanel({ analysis, file, url, duration, anchors, on
   </section>;
 }
 
-function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, active: visible }: {
+export function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, active: visible, preset, onCoachEvidence }: {
   analysis: XrkAnalysis; file: File; url: string; duration: number; anchors: VideoSyncCalibration[];
   onResult?: (result: SelectedCornerResult | null) => void;
   active: boolean;
+  preset?: RecommendedSeed;
+  onCoachEvidence?: (evidence: RecommendedCoachEvidence) => void;
 }) {
   const { locale } = useI18n(), zh = locale === "zh";
-  const [sourceLap, setSourceLap] = useState(anchors[0].target_lap);
+  const [sourceLap, setSourceLap] = useState(preset?.sourceLap ?? anchors[0].target_lap);
   const anchor = anchors.find(a => a.target_lap === sourceLap)!;
-  const [start, setStart] = useState(anchors[0].video_time_s + 1), [now, setNow] = useState(0);
+  const [start, setStart] = useState(preset?.videoStart ?? anchors[0].video_time_s + 1), [now, setNow] = useState(0);
   const [result, setResult] = useState<SelectedCornerResult | null>(null), [request, setRequest] = useState<CornerRequest | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [selectedLap, setSelectedLap] = useState<number | null>(null), [confirmed, setConfirmed] = useState<number[]>([]);
@@ -97,6 +100,50 @@ function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, act
       return clip && typeof row.downstream_s === "number" && reviewGpsOverlaps(gps, clip.end - .5, clip.end + row.downstream_s + .5, clip.offset)
         .some(s => s.status === "gps_inconsistent");
     }).map(r => r.lap)) : null, [result, flagged, verdicts, anchor, duration, anchors, gps]);
+  const coachEvidence = useMemo<RecommendedCoachEvidence | null>(() => preset ? {
+    id: preset.id, name: preset.name, comparison: coach,
+    contextComplete: result?.context?.status === "expanded",
+    videoConfirmed: !!coach && coach.status !== "unavailable"
+      && [coach.section.lap, coach.overall.lap].every(lap => verdicts[lap] === "yes"),
+  } : null, [preset, coach, result, verdicts]);
+  const leftRole = !reviewPair ? (zh ? "你选择的弯" : "Your selected corner")
+    : coach && coach.status !== "unavailable" && leftLap === coach.section.lap
+      ? coach.status === "same_lap" ? (zh ? "区段及整圈最快" : "Section and full-lap best") : (zh ? "区段最快圈" : "Section-best lap")
+      : (zh ? "已选对照圈 · 待核对" : "Selected comparator · Check required");
+  const rightRole = reviewPair && coach?.status === "available" && selectedLap === coach.overall.lap
+    ? (zh ? "整圈最快圈" : "Full-lap best") : (zh ? "同一区段候选" : "Same-section candidate");
+  useEffect(() => { if (coachEvidence) onCoachEvidence?.(coachEvidence); }, [coachEvidence, onCoachEvidence]);
+  const [presetLoaded, setPresetLoaded] = useState(false);
+  useEffect(() => {
+    if (!preset || !visible || presetLoaded) return;
+    const controller = new AbortController();
+    const payload: CornerRequest = { inspection_id: analysis.inspection_id, source_lap: preset.sourceLap,
+      start_session_s: preset.videoStart - anchor.offset_ms / 1000,
+      end_session_s: preset.videoStart - anchor.offset_ms / 1000 + 5, confirmed_laps: [], include_context: true };
+    queueMicrotask(() => { if (!controller.signal.aborted) { setBusy(true); setError(""); } });
+    void analyzeSelectedCorner(payload, controller.signal).then(next => {
+      controller.signal.throwIfAborted(); setResult(next); setRequest(payload);
+      setSelectedLap(next.laps.find(r => r.status === "candidate" && r.lap !== sourceLap)?.lap ?? sourceLap);
+      if (sourcePlayer.current) sourcePlayer.current.currentTime = next.start_session_s + anchor.offset_ms / 1000;
+      setBusy(false); setPresetLoaded(true);
+    }).catch(e => { if (!controller.signal.aborted) { setError(e instanceof Error ? e.message : "CORNER_SERVICE_UNAVAILABLE"); setBusy(false); setPresetLoaded(true); } })
+      .finally(() => { if (!controller.signal.aborted) setBusy(false); });
+    return () => controller.abort();
+  }, [preset, visible, presetLoaded, analysis.inspection_id, anchor.offset_ms, sourceLap]);
+  const [initialPairChosen, setInitialPairChosen] = useState(false);
+  useEffect(() => {
+    if (!preset || !coach || initialPairChosen) return;
+    queueMicrotask(() => {
+      if (coach.status === "available") {
+        setReviewPair({ left: coach.section.lap, right: coach.overall.lap }); setSelectedLap(coach.overall.lap);
+      } else if (coach.status === "same_lap") {
+        const other = result?.laps.find(r => r.lap === sourceLap && r.lap !== coach.overall.lap && r.status === "candidate")
+          ?? result?.laps.find(r => r.lap !== coach.overall.lap && r.status === "candidate");
+        if (other) { setReviewPair({ left: coach.overall.lap, right: other.lap }); setSelectedLap(other.lap); }
+      }
+      setInitialPairChosen(true);
+    });
+  }, [preset, coach, initialPairChosen, result, sourceLap]);
   useEffect(() => {
     const read = () => { setGroupCurrent(false); try { setGpsRaw(localStorage.getItem(reviewGpsKey(analysis.file_fingerprint))); } catch { setGpsRaw(null); } };
     queueMicrotask(read); globalThis.addEventListener(REVIEW_GPS_EVENT, read);
@@ -187,13 +234,18 @@ function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, act
   }
 
   return <div className="mt-4 min-w-0 space-y-4" data-testid="selected-corner-workspace">
-    <div className="flex flex-wrap items-end gap-3">
+    <div hidden={!!preset} className="flex flex-wrap items-end gap-3">
       <label className="grid gap-1 text-xs text-slate-400">{zh ? "已同步的选择圈" : "Confirmed source lap"}<select aria-label="Corner source lap" className={input} value={sourceLap} onChange={e => { resetSelection(); setSourceLap(Number(e.target.value)); const next = anchors.find(a => a.target_lap === Number(e.target.value))!; setStart(next.video_time_s + 1); }}>{anchors.map(a => <option key={a.target_lap} value={a.target_lap}>L{a.target_lap}</option>)}</select></label>
       <label className="grid gap-1 text-xs text-slate-400">{zh ? "起点（视频秒）" : "Start (video seconds)"}<input aria-label="Corner start" className={`${input} w-36`} type="number" min={0} max={duration - 5} step={.05} value={start} onChange={e => { resetSelection(); setStart(Number(e.target.value)); }} /></label>
       <button className={button} disabled={!!reviewPair} onClick={() => { const time = sourcePlayer.current?.currentTime; if (time !== undefined) { resetSelection(); setStart(time); } }}><Scissors size={16} />{zh ? "用当前帧作为起点" : "Use current frame"}</button>
       <button className={`${button} border-cyan-600 text-cyan-200`} disabled={!window || busy} onClick={() => void calculate()}>{zh ? "查找每圈的同一弯" : "Find this corner in every lap"}</button>
       {busy && <button className={button} onClick={() => abort.current?.abort()}><X size={16} />{zh ? "取消" : "Cancel"}</button>}
     </div>
+    {preset && <header className="flex flex-wrap items-center gap-3"><h4 className="font-semibold">{zh ? preset.name.replace(/^(Suggested )?Zone\s+/i, "区间 ") : preset.name} · {zh ? "教练对照" : "Coach comparison"}</h4>
+      {busy && <span role="status" className="text-sm text-cyan-200">{zh ? "正在核对各圈同一区段…" : "Matching the same section across laps…"}</span>}
+      {error && <button className={button} onClick={() => setPresetLoaded(false)}>{zh ? "重试" : "Retry"}</button>}
+    </header>}
+    {coachEvidence && <div data-testid="recommended-coach-observation" className="space-y-2 border-y border-slate-700 py-3">{coachObservation(coachEvidence, zh).map((line, i) => <p key={i} className={i < 2 ? "text-sm text-cyan-100" : "text-xs text-slate-400"}>{line}</p>)}</div>}
     <p className="text-xs text-slate-400">{zh ? "以所选五秒定位弯道，再补入减速前段与出弯恢复段。不会自动修正同步，人工锚点及 ±0.5 秒不确定性不变。" : "Locate the corner from the five-second selection, then include approach and recovery. Checks never rewrite synchronization; manual anchors and ±0.5s uncertainty remain unchanged."}</p>
     {result?.context && <p className="text-xs text-amber-200">{result.context.status === "expanded"
       ? (zh ? "已扩展运动学上下文；完整刹车、转向与开油仍需视频或直接传感器确认。" : "Kinematic context expanded; braking, steering and throttle still need video or direct sensors.")
@@ -203,13 +255,13 @@ function CornerWorkspace({ analysis, file, url, duration, anchors, onResult, act
     {result && <CornerCandidateNavigation laps={candidates} selectedLap={selectedLap} sourceLap={sourceLap} onSelect={selectCandidate} />}
     {reviewPair && <div className="flex flex-wrap items-center gap-3 text-sm"><span>{zh ? "教练对照" : "Coach pair"}: L{reviewPair.left} / L{reviewPair.right}</span><button className={button} onClick={() => selectCandidate(reviewPair.right)}>{zh ? "返回所选圈" : "Return to selected lap"} L{sourceLap}</button></div>}
     <div className="grid min-w-0 gap-4 lg:grid-cols-2">
-      <div className="min-w-0"><h4 className="mb-2 text-sm text-cyan-200">L{leftLap} · {reviewPair ? (zh ? "区段最快圈" : "Section-best lap") : (zh ? "你选择的弯" : "Your selected corner")}</h4><div className="relative"><video key={leftLap} ref={sourcePlayer} src={url} muted={audio !== 0} controls playsInline preload="metadata" className="aspect-video w-full bg-black" onLoadedMetadata={e => { e.currentTarget.currentTime = sourceWindow?.start ?? start; }} /><GoproSpeedOverlay file={file} time={now} /></div>
+      <div className="min-w-0"><h4 className="mb-2 text-sm text-cyan-200">L{leftLap} · {leftRole}</h4><div className="relative"><video key={leftLap} ref={sourcePlayer} src={url} muted={audio !== 0} controls playsInline preload="metadata" className="aspect-video w-full bg-black" onLoadedMetadata={e => { e.currentTarget.currentTime = sourceWindow?.start ?? start; }} /><GoproSpeedOverlay file={file} time={now} /></div>
         {sourceRow && sourceWindow && <>
           <ReviewGpsNotice fingerprint={analysis.file_fingerprint} video={identity} start={sourceWindow.start} end={sourceWindow.end} offset={sourceWindow.offset} />
           <SelectedCornerTelemetry row={sourceRow} videoTime={now} videoStart={sourceWindow.start} confirmed={leftLap === sourceLap || verdicts[leftLap] === "yes"} domains={domains} elapsedLimit={elapsedLimit} active={visible} />
         </>}
       </div>
-      {activeWindow && active && <CornerPlayer key={`${selectedLap}:${activeWindow.start}:${fullInterval}`} audible={audio === 1} file={file} url={url} start={activeWindow.start} end={fullInterval ? activeWindow.end : activeWindow.start + 5} playerRef={targetPlayer} label={`L${selectedLap} · ${reviewPair ? (zh ? "整圈最快圈" : "Full-lap best") : (zh ? "同一区段候选" : "Same-section candidate")}`}
+      {activeWindow && active && <CornerPlayer key={`${selectedLap}:${activeWindow.start}:${fullInterval}`} audible={audio === 1} file={file} url={url} start={activeWindow.start} end={fullInterval ? activeWindow.end : activeWindow.start + 5} playerRef={targetPlayer} label={`L${selectedLap} · ${rightRole}`}
         row={active} confirmed={active.lap === sourceLap || verdicts[active.lap] === "yes"} domains={domains} elapsedLimit={elapsedLimit} visible={visible}>
         <ReviewGpsNotice fingerprint={analysis.file_fingerprint} video={identity} start={activeWindow.start} end={activeWindow.end} offset={activeWindow.offset} />
       </CornerPlayer>}

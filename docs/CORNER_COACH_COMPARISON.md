@@ -56,6 +56,35 @@ remains +/-0.5 seconds. A partial braking-to-exit interval remains partial.
 RPM decline is not brake pressure, and higher RPM alone does not establish a
 better exit. Visible posture and driving actions still need review.
 
+## Recommended Review and Debrief
+
+The recommended-review step reuses the same spatial-gate comparison and players.
+For each existing recommendation, a confirmed, matching local-video anchor locates
+a five-second seed around that zone's minimum-speed focus on that anchor's real
+lap. The existing bounded context detector then adds approach and recovery.
+The seed never changes a saved anchor or its +/-0.5-second uncertainty. A missing
+trace, unconfirmed anchor or uncovered video leaves the comparison unavailable.
+Original target-lap review and feedback remain in an expandable section.
+
+The default pair is the section winner and fastest eligible complete lap. When
+both are the same lap, show that real winner against another candidate and label
+the second lap as a comparator, not a second winner. Drivers can still browse
+all candidates and check boundary frames. Videos keep their own timing, audio
+selection and per-lap speed/RPM charts.
+
+Recommendation text, the final guided debrief and its Markdown download use one
+deterministic observation builder. They state the largest distance-third gain,
+the separate downstream delta, and whether the gain remains. Partial context,
+unconfirmed video, missing downstream timing and GPS warnings stay explicit.
+The new gate-based deltas do not replace or add to legacy consensus scores.
+No model infers pedal causes from RPM, and no local gains are summed into a
+theoretical target lap. A changed inspection, video or manual calibration
+invalidates cached review evidence; updated GPS diagnostics re-evaluate it.
+
+```bash
+pnpm run test:guided-review
+```
+
 ## Validation
 
 ```bash

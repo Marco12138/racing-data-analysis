@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { guidedReviewKey, reviewDecision, type ReviewReceipt } from "../lib/guidedReview";
 import type { SelectedCornerResult } from "../lib/selectedCorner";
 import { Check, MapPin, Send, Video } from "lucide-react";
@@ -17,6 +17,8 @@ import { ManualReviewVideo } from "./ManualReviewVideo";
 import { TopLapSegments } from "./TopLapSegments";
 import { PublishedVideoReview } from "./PublishedVideoReview";
 import { SelectedCornerPanel } from "./SelectedCornerPanel";
+import { RecommendedCoachReview } from "./RecommendedCoachReview";
+import type { RecommendedCoachEvidence } from "../lib/recommendedCoach";
 
 const COPY = {
   zh: {
@@ -26,7 +28,7 @@ const COPY = {
     noVideo: "尚未选择本地视频", noSync: "此圈视频尚未确认同步，暂不展示对应片段。",
     sync: "选择视频 / 确认同步", context: "完整弯道与下游", preview: "5 秒预览",
     local: "弯内时间差", downstream: "下游时间差", net: "合计时间差", loss: "目标圈 − 对照圈；正数表示目标圈更慢。",
-    measured: "真实圈计时对比，不保证提升；自动参考来自 Top 3，手动参考须通过质量门，不拼接参考圈。",
+    measured: "真实圈计时对比，不保证提升。在通过质量门的真实圈中，比较同一区段最快与整圈最快；保留原目标圈对照，不拼接理论圈。",
     pairTiming: "两侧从各自片段起点同时播放，不代表每一帧都处于同一赛道位置。",
     review: "重点核对两圈的减速、最低速度和恢复加速过程。先观看画面，再判断动作差异。",
     drill: "下次只测试一处经教练确认的调整，观察出弯后的时间优势是否保留；不稳定时停止尝试。",
@@ -48,7 +50,7 @@ const COPY = {
     noVideo: "No local video selected", noSync: "Video synchronization for this lap is unconfirmed. No corresponding clip is shown.",
     sync: "Choose video / Confirm sync", context: "Full corner and downstream", preview: "5-second preview",
     local: "Corner time delta", downstream: "Downstream time delta", net: "Combined time delta", loss: "Selected minus reference; positive means the selected lap is slower.",
-    measured: "Observed comparison, not promised improvement. Automatic references use real Top 3 laps; manual references must pass the quality gate. No stitched curves.",
+    measured: "Observed comparison, not promised improvement. Compare the best section with the full-lap best among eligible real laps. The original target comparison remains available; no theoretical lap is stitched.",
     pairTiming: "Both clips play from their own start; corresponding frames are not necessarily at the same track position.",
     review: "Compare deceleration, minimum speed and acceleration recovery. Watch the footage before judging differences in driver inputs.",
     drill: "Test one coach-confirmed adjustment next time. Check whether the exit advantage persists downstream; stop if the kart becomes unstable.",
@@ -69,7 +71,7 @@ const COLORS = ["#f6c945", "#35d6d0", "#ff5964"];
 const button = "inline-flex items-center justify-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400 disabled:opacity-40";
 const fmt = (n: unknown) => typeof n === "number" && Number.isFinite(n) ? n.toFixed(3) : "—";
 
-export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS, calibration, onSync, onCursor, onAnalyze, analyzing = false, readOnly = false, guidedPage, onDecision, receipts = [], onCornerResult, active = true }: {
+export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS, calibration, onSync, onCursor, onAnalyze, analyzing = false, readOnly = false, guidedPage, onDecision, receipts = [], onCornerResult, onCoachEvidence, active = true }: {
   analysis: XrkAnalysis; videoUrl: string; videoFile: File | null; videoDurationS: number;
   calibration: VideoSyncCalibration | null; onSync: () => void; onCursor: (distance: number) => void;
   onAnalyze?: (options: Partial<XrkAnalyzeOptions>) => Promise<void>; analyzing?: boolean; readOnly?: boolean;
@@ -77,6 +79,7 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
   onDecision?: (receipt: ReviewReceipt) => void;
   receipts?: ReviewReceipt[];
   onCornerResult?: (result: SelectedCornerResult | null) => void;
+  onCoachEvidence?: (row: RecommendedCoachEvidence) => void;
   active?: boolean;
 }) {
   const { locale } = useI18n(), c = COPY[locale];
@@ -118,6 +121,11 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
   const mappings: Record<string, VideoSyncCalibration> = useMemo(() => ({ ...(history.key === historyKey ? history.mappings : {}),
     ...(calibration ? { [calibration.target_lap]: calibration } : {}) }), [history, historyKey, calibration]);
   const sessionCalibrations = useMemo(() => Object.values(mappings), [mappings]);
+  const [coachRows, setCoachRows] = useState<RecommendedCoachEvidence[]>([]);
+  const recordCoach = useCallback((row: RecommendedCoachEvidence) => {
+    setCoachRows(old => old.find(r => r.id === row.id) === row ? old : [...old.filter(r => r.id !== row.id), row]);
+    onCoachEvidence?.(row);
+  }, [onCoachEvidence]);
   if (readOnly && analysis.video_review) return <div className="min-w-0 space-y-6" data-testid="coach-review-panel">
     <PublishedVideoReview review={analysis.video_review} active={active} />
     {active && <TopThreeCharts analysis={analysis} c={c} />}
@@ -162,18 +170,23 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
     <p className="text-xs text-slate-400">{c.measured}</p>
     {!reviews.length && <p className="text-sm text-slate-400">{c.empty}</p>}
     {guidedPage && reviews.length > 0 && <div className="my-4 flex flex-wrap gap-2" role="group" aria-label={locale === "zh" ? "推荐片段" : "Recommended clips"}>{reviews.map((review, i) => {
-      const decision = reviewDecision(review, receipts);
+      const evidence = coachRows.find(row => row.id === review.id);
+      const decision = evidence ? (evidence.videoConfirmed ? "confirmed" : "pending") : reviewDecision(review, receipts);
       const label = { confirmed: ["两侧已确认", "Both confirmed"], rejected: ["已否定", "Rejected"], pending: ["待核对", "Pending"] }[decision][locale === "zh" ? 0 : 1];
       return <button key={review.id} className={`${button} ${i === Math.min(reviewIndex, reviews.length - 1) ? "border-cyan-400 bg-cyan-400/10 text-cyan-100" : ""}`} aria-pressed={i === Math.min(reviewIndex, reviews.length - 1)} onClick={event => { event.currentTarget.closest('[data-testid="coach-review-panel"]')?.querySelectorAll("video").forEach(v => v.pause()); setReviewIndex(i); }}>
         {decision === "confirmed" && <Check size={14} />}{locale === "zh" ? `片段 ${i + 1}` : `Clip ${i + 1}`} · {locale === "zh" ? review.name.replace(/^Suggested Zone\s+/i, "区间 ").replace(/^Zone\s+/i, "区间 ") : review.name} · {label}
       </button>;
     })}</div>}
-    {reviews.map((review, i) => <div key={`${analysis.file_fingerprint}:${review.id}:${review.targetLap}:${review.referenceLap}`} hidden={!!guidedPage && i !== Math.min(reviewIndex, reviews.length - 1)}><ReviewCard
+    {reviews.map((review, i) => <div key={`${analysis.file_fingerprint}:${review.id}:${review.targetLap}:${review.referenceLap}`} hidden={!!guidedPage && i !== Math.min(reviewIndex, reviews.length - 1)}>
+      {!readOnly && <RecommendedCoachReview analysis={analysis} review={review} file={videoFile} url={videoUrl} duration={videoDurationS}
+        anchors={sessionCalibrations} onEvidence={recordCoach}
+        active={active && guidedPage !== "selected" && (!guidedPage || i === Math.min(reviewIndex, reviews.length - 1))} />}
+      <details className="border-b border-slate-700 py-3"><summary className="cursor-pointer text-sm text-slate-400">{locale === "zh" ? "原目标圈对照与片段反馈" : "Original target-lap comparison and feedback"}</summary><ReviewCard
       review={review} analysis={analysis} videoUrl={videoUrl} file={videoFile} duration={videoDurationS}
       targetCalibration={mappings[review.targetLap] ?? null} referenceCalibration={mappings[review.referenceLap] ?? null}
       sessionCalibrations={sessionCalibrations}
       onCursor={onCursor} c={c} readOnly={readOnly} onDecision={onDecision}
-      active={active && guidedPage !== "selected" && (!guidedPage || i === Math.min(reviewIndex, reviews.length - 1))} /></div>)}
+      active={active && guidedPage !== "selected" && (!guidedPage || i === Math.min(reviewIndex, reviews.length - 1))} /></details></div>)}
     </div>
   </div>;
 }

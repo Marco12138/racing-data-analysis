@@ -6,6 +6,7 @@ import { REVIEW_STEPS, buildGuidedDebrief, type ReviewStep, type ReviewReceipt }
 import { selectCoachReviews } from "../lib/coachReview";
 import type { SelectedCornerResult } from "../lib/selectedCorner";
 import type { XrkAnalysis } from "../lib/xrkAnalysisApi";
+import { coachObservation, type RecommendedCoachEvidence } from "../lib/recommendedCoach";
 
 export const guideButton = "inline-flex min-h-11 items-center justify-center gap-2 rounded border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:border-cyan-400 disabled:opacity-40";
 
@@ -56,9 +57,13 @@ export function GuidedOverview({ analysis, videoName, videoDuration }: { analysi
   </div>;
 }
 
-export function GuidedDebrief({ analysis, receipts, corner, onReview }: { analysis: XrkAnalysis; receipts: ReviewReceipt[]; corner: SelectedCornerResult | null; onReview: () => void }) {
+export function GuidedDebrief({ analysis, receipts, corner, coachEvidence = [], onReview }: { analysis: XrkAnalysis; receipts: ReviewReceipt[]; corner: SelectedCornerResult | null; coachEvidence?: RecommendedCoachEvidence[]; onReview: () => void }) {
   const { locale } = useI18n(), zh = locale === "zh";
   const result = buildGuidedDebrief(selectCoachReviews(analysis), receipts);
+  const coachRows = selectCoachReviews(analysis).map(review => coachEvidence.find(e => e.id === review.id)
+    ?? { id: review.id, name: review.name, comparison: null, videoConfirmed: false, contextComplete: false });
+  const coachText = coachRows.map(row => ({ id: row.id, lines: coachObservation(row, zh) }));
+  const coachCaution = zh ? "这些区段采用各自同一组空间门计时，不与原共识成绩混算，也不相加成目标圈速。人工锚点和 ±0.5 秒范围保持不变，GPS 异常不能通过人工确认解除。RPM差异不等于刹车或油门原因。" : "Each section uses its own shared spatial gates. These deltas are separate from consensus scores and are not summed into a target lap. Manual anchors and ±0.5s remain; confirmation cannot clear GPS warnings. RPM differences do not establish pedal causes.";
   const name = (s: string) => zh ? s.replace(/^Suggested Zone\s+/i, "建议区间 ").replace(/^Zone\s+/i, "区间 ") : s;
   const topLaps = analysis.lap_quality.top_valid_laps.filter(l => l.analysis_eligible).slice(0, 3)
     .map(l => `L${l.lap} · ${l.lap_time.toFixed(3)}s`).join(" / ");
@@ -70,15 +75,23 @@ export function GuidedDebrief({ analysis, receipts, corner, onReview }: { analys
     { title: zh ? "这次做得好的地方" : "What went well", rows: result.strengths.map(observation), empty: zh ? "还没有两侧均确认的优势片段。" : "No advantage clip has both sides confirmed yet." },
     { title: zh ? "值得继续核对的提升机会" : "Opportunities to investigate", rows: result.opportunities.map(observation), empty: zh ? "尚无两侧均确认的提升片段，不生成确定建议。" : "No opportunity has both clips confirmed; no definitive advice is generated." },
   ];
-  const next = result.opportunities.slice(0, 3).map(r => zh ? `${name(r.name)}：与教练核对减速结束和速度恢复的位置，一次只测试一项调整，再比较同一区段与下游用时；出现不稳定就停止。` : `${r.name}: review where deceleration ends and speed recovers with your coach. Test one change and compare the section plus downstream; stop if unstable.`);
+  const next = coachRows.flatMap(row => {
+    const c = row.comparison;
+    if (!row.videoConfirmed || !row.contextComplete || c?.status !== "available" || c.combined_gain_s === null) return [];
+    return [zh ? `${name(row.name)}：先与教练回看 L${c.section.lap} / L${c.overall.lap} 的速度差从哪里开始。${c.combined_gain_s > 0 ? "这次局部优势保持到了下游，但不代表可以直接复制动作。" : "局部优势没有保持到下游，不把局部更快当作改进目标。"}一次只测试一项调整，比较同一区段和下游用时；出现不稳定就停止。`
+      : `${row.name}: review where the speed difference begins in L${c.section.lap} / L${c.overall.lap} with your coach. ${c.combined_gain_s > 0 ? "The local gain lasted downstream this time, but that does not validate copying an action." : "The local gain did not last downstream; do not target the local time alone."} Test one change, compare the same section and downstream, and stop if unstable.`];
+  }).slice(0, 3);
+  const nextEmpty = coachRows.some(row => row.videoConfirmed)
+    ? (zh ? "已核对的片段尚不足以形成完整训练对照。先补齐减速、出弯或下游证据；不据局部更快直接要求更晚刹车。" : "Checked clips do not yet support a complete training comparison. Resolve missing approach, exit or downstream evidence before changing driving actions.")
+    : (zh ? "先核对教练对照的两圈首尾画面，再与教练选择要测试的动作。" : "Check both coach-comparison videos at their boundaries, then choose a test with your coach.");
   const custom = !corner ? (zh ? "未完成自选弯道分组，或确认已变更。" : "Custom-corner grouping is incomplete or confirmations have changed.")
     : corner.patterns.status === "exploratory_groups" ? (zh ? `已确认 ${corner.patterns.confirmed_laps.length} 圈，观察到 ${corner.patterns.groups.length} 组开法；仅为本节描述性分组。` : `${corner.patterns.confirmed_laps.length} confirmed laps, ${corner.patterns.groups.length} exploratory groups; descriptive only.`)
     : corner.patterns.status === "no_clear_separation" ? (zh ? "已确认样本未发现清晰分开的开法，不强行分类。" : "Confirmed samples show no clear pattern separation.")
     : (zh ? "可用确认圈不足，暂不分类。" : "Too few confirmed laps to group.");
-  const pending = zh ? `${result.pending.length} 个片段待确认；${result.rejected.length} 个已否定，不纳入建议。` : `${result.pending.length} pending; ${result.rejected.length} rejected and excluded from advice.`;
+  const pending = zh ? `原目标圈对照：${result.pending.length} 个片段待确认；${result.rejected.length} 个已否定，不纳入建议。` : `Original target-lap comparisons: ${result.pending.length} pending; ${result.rejected.length} rejected and excluded from advice.`;
   const pendingNames = result.pending.map(r => `${name(r.name)} · L${r.referenceLap} / L${r.targetLap}`).join("; ");
   function download() {
-    const text = [zh ? "本节复盘" : "Session debrief", lapSummary, ...sections.flatMap(s => [s.title, ...(s.rows.length ? s.rows : [s.empty])]), zh ? "下一次训练" : "Next session", ...next, custom, pending, pendingNames,
+    const text = [zh ? "本节复盘" : "Session debrief", lapSummary, zh ? "时间优势在哪里建立、是否保持" : "Where time is gained and whether it lasts", ...coachText.flatMap(row => row.lines), coachCaution, ...sections.flatMap(s => [s.title, ...(s.rows.length ? s.rows : [s.empty])]), zh ? "下一次训练" : "Next session", ...(next.length ? next : [nextEmpty]), custom, pending, pendingNames,
       zh ? "圈间差异不证明动作因果，不相加为目标圈速。视频未上传。" : "Observed differences are not causal and are not added into a target lap. Video was not uploaded."].join("\n\n");
     const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
     const a = document.createElement("a"); a.href = url; a.download = "session-debrief.md"; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -86,10 +99,15 @@ export function GuidedDebrief({ analysis, receipts, corner, onReview }: { analys
   return <div className="space-y-6" data-testid="guided-debrief">
     <div className="flex flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2 text-sm text-cyan-200"><FileCheck2 size={18} />{zh ? "来自本次复盘的确认记录" : "Based on this review's confirmations"}</span><button className={guideButton} onClick={download}><Download size={16} />{zh ? "保存总结" : "Save debrief"}</button></div>
     <p className="font-mono text-sm text-slate-300">{lapSummary}</p>
-    {sections.map(s => <section key={s.title} className="border-t border-slate-700 pt-5"><h3 className="mb-3 text-lg font-semibold">{s.title}</h3>{s.rows.length ? <ul className="space-y-3">{s.rows.map(row => <li key={row} className="flex items-start gap-2 text-sm text-slate-200"><Check size={16} className="mt-1 shrink-0 text-cyan-300" />{row}</li>)}</ul> : <p className="text-sm text-slate-400">{s.empty}</p>}</section>)}
-    <section className="border-t border-slate-700 pt-5"><h3 className="mb-3 text-lg font-semibold">{zh ? "下一次训练重点" : "Next training focus"}</h3>{next.length ? <ul className="space-y-3 text-sm text-slate-200">{next.map(row => <li key={row}>{row}</li>)}</ul> : <p className="text-sm text-slate-400">{zh ? "先确认一个片段，再与教练选择要测试的动作。" : "Confirm a clip first, then choose a test with your coach."}</p>}</section>
+    <section className="space-y-4 border-t border-slate-700 pt-5" data-testid="debrief-coach-evidence"><h3 className="text-lg font-semibold">{zh ? "时间优势在哪里建立、是否保持" : "Where time is gained and whether it lasts"}</h3>
+      {coachText.map(row => <div key={row.id} className="space-y-2 border-b border-slate-800 pb-4">{row.lines.map((line, i) => <p key={i} className={i < 2 ? "text-sm text-cyan-100" : "text-xs text-slate-400"}>{line}</p>)}</div>)}
+      {!coachText.length && <p className="text-sm text-slate-400">{zh ? "当前没有可用推荐区段。" : "No recommended section is available."}</p>}
+      <p className="text-xs text-amber-200">{coachCaution}</p><button className={guideButton} onClick={onReview}><Video size={16} />{zh ? "回看教练对照" : "Return to coach comparison"}</button>
+    </section>
+    <details className="space-y-4 border-t border-slate-700 pt-4"><summary className="cursor-pointer text-sm text-slate-400">{zh ? "原目标圈对照的确认记录" : "Original target-lap confirmation records"}</summary>{sections.map(s => <section key={s.title} className="border-t border-slate-700 pt-5"><h3 className="mb-3 text-lg font-semibold">{s.title}</h3>{s.rows.length ? <ul className="space-y-3">{s.rows.map(row => <li key={row} className="flex items-start gap-2 text-sm text-slate-200"><Check size={16} className="mt-1 shrink-0 text-cyan-300" />{row}</li>)}</ul> : <p className="text-sm text-slate-400">{s.empty}</p>}</section>)}</details>
+    <section className="border-t border-slate-700 pt-5"><h3 className="mb-3 text-lg font-semibold">{zh ? "下一次训练重点" : "Next training focus"}</h3>{next.length ? <ul className="space-y-3 text-sm text-slate-200">{next.map(row => <li key={row}>{row}</li>)}</ul> : <p className="text-sm text-slate-400">{nextEmpty}</p>}</section>
     <section className="border-t border-slate-700 pt-5"><h3 className="mb-3 font-semibold">{zh ? "自选弯道与待确认事项" : "Your corner and open questions"}</h3><p className="text-sm text-slate-300">{custom}</p><p className="mt-2 text-sm text-amber-200">{pending}</p>{pendingNames && <p className="mt-2 text-sm text-slate-400">{pendingNames}</p>}<button className={`${guideButton} mt-4`} onClick={onReview}>{zh ? "返回核对片段" : "Review the clips"}<ArrowRight size={16} /></button></section>
-    <p className="text-xs text-amber-200">{zh ? "人工起点仍有 ±0.5 秒不确定性，GPS 异常提示不会因片段确认而解除。总结沿用原分析区间的计时；扩展视频包含额外的减速和下游背景，不改变原共识成绩。" : "Manual starts retain ±0.5s uncertainty; clip confirmation never clears GPS warnings. Summary timing uses the original analysis interval. Extended video adds approach and downstream context without changing consensus scores."}</p>
+    <p className="text-xs text-amber-200">{zh ? "人工起点仍有 ±0.5 秒不确定性，GPS 异常提示不会因片段确认而解除。原目标圈记录沿用原分析区间计时；教练对照采用画面下标出的同一组空间门，不改变原共识成绩。" : "Manual starts retain ±0.5s uncertainty; clip confirmation never clears GPS warnings. Original target-lap records retain their original intervals; coach comparisons use the shared spatial gates shown below the videos, without changing consensus scores."}</p>
     <p className="text-xs text-slate-500">{zh ? "人工确认只说明片段对应，不证明刹车或油门原因。差异不相加为目标圈速；AI 建议请与教练核实。" : "Clip confirmation does not establish pedal causes. Differences are not added into a target lap; validate advice with your coach."}</p>
   </div>;
 }
