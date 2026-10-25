@@ -49,7 +49,9 @@ export function coachObservation(evidence: RecommendedCoachEvidence, zh: boolean
   const limits = [evidence.contextComplete
     ? (zh ? "已补入减速前段与速度恢复，但完整驾驶动作仍需核对。" : "Approach and speed recovery are included; driving actions still need review.")
     : (zh ? "减速或出弯覆盖不完整，只能解释这段区间，不能称为完整弯道。" : "Approach or exit coverage is incomplete; this is a section, not a complete corner."),
-  evidence.videoConfirmed ? (zh ? "两圈首尾画面已人工核对；不代表动作因果已确认。" : "Both videos' boundaries were checked manually, not causal driving claims.")
+  evidence.videoConfirmed ? (c.status === "same_lap"
+    ? (zh ? "最快圈首尾画面已人工核对；其他候选圈仍需分别确认。" : "The winning lap's boundaries were checked; other candidates still need their own confirmation.")
+    : (zh ? "两圈首尾画面已人工核对；不代表动作因果已确认。" : "Both videos' boundaries were checked manually, not causal driving claims."))
     : (zh ? "视频仍待首尾核对；以下仅为遥测观测。" : "Video boundaries remain unconfirmed; these are telemetry observations only.")];
   if (c.status === "same_lap") return [prefix + (zh ? `L${c.overall.lap} 同时是区段与整圈最快，不另造一种更快开法。` : `L${c.overall.lap} is both section and full-lap best; no alternate faster style is invented.`), ...limits];
   const parts = zh ? ["前段", "中段", "后段"] : ["first third", "middle third", "final third"];

@@ -51,6 +51,9 @@ test("unknown downstream, GPS and rejection never become a retained advantage", 
 test("same-lap winner and missing calculations never invent a faster style", () => {
   const e = evidence(); e.comparison = { status: "same_lap", overall: { lap: 5 } };
   assert.match(coachObservation(e, true)[0], /同时是区段与整圈最快/);
+  e.videoConfirmed = true;
+  assert.match(coachObservation(e, true).join(" "), /其他候选圈仍需分别确认/);
+  assert.doesNotMatch(coachObservation(e, false).join(" "), /Both videos/);
   e.comparison = null; assert.match(coachObservation(e, true)[0], /尚未完成/);
 });
 test("recommendation and debrief export share wording and retain manual/GPS boundaries", () => {

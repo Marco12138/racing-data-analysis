@@ -81,7 +81,10 @@ export function GuidedDebrief({ analysis, receipts, corner, coachEvidence = [], 
     return [zh ? `${name(row.name)}：先与教练回看 L${c.section.lap} / L${c.overall.lap} 的速度差从哪里开始。${c.combined_gain_s > 0 ? "这次局部优势保持到了下游，但不代表可以直接复制动作。" : "局部优势没有保持到下游，不把局部更快当作改进目标。"}一次只测试一项调整，比较同一区段和下游用时；出现不稳定就停止。`
       : `${row.name}: review where the speed difference begins in L${c.section.lap} / L${c.overall.lap} with your coach. ${c.combined_gain_s > 0 ? "The local gain lasted downstream this time, but that does not validate copying an action." : "The local gain did not last downstream; do not target the local time alone."} Test one change, compare the same section and downstream, and stop if unstable.`];
   }).slice(0, 3);
-  const nextEmpty = coachRows.some(row => row.videoConfirmed)
+  const confirmedCoaches = coachRows.filter(row => row.videoConfirmed);
+  const nextEmpty = confirmedCoaches.length && confirmedCoaches.every(row => row.comparison?.status === "same_lap")
+    ? (zh ? "已核对区段的最快圈也是整圈最快圈，暂没有另一种更快开法的证据。可继续核对其他候选圈，不为填满建议而要求改变动作。" : "In the checked sections, the section winner is also the full-lap winner. There is no evidence of an alternative faster style; review other candidates before changing an action.")
+    : confirmedCoaches.length
     ? (zh ? "已核对的片段尚不足以形成完整训练对照。先补齐减速、出弯或下游证据；不据局部更快直接要求更晚刹车。" : "Checked clips do not yet support a complete training comparison. Resolve missing approach, exit or downstream evidence before changing driving actions.")
     : (zh ? "先核对教练对照的两圈首尾画面，再与教练选择要测试的动作。" : "Check both coach-comparison videos at their boundaries, then choose a test with your coach.");
   const custom = !corner ? (zh ? "未完成自选弯道分组，或确认已变更。" : "Custom-corner grouping is incomplete or confirmations have changed.")

@@ -172,7 +172,9 @@ export function CoachReviewPanel({ analysis, videoUrl, videoFile, videoDurationS
     {guidedPage && reviews.length > 0 && <div className="my-4 flex flex-wrap gap-2" role="group" aria-label={locale === "zh" ? "推荐片段" : "Recommended clips"}>{reviews.map((review, i) => {
       const evidence = coachRows.find(row => row.id === review.id);
       const decision = evidence ? (evidence.videoConfirmed ? "confirmed" : "pending") : reviewDecision(review, receipts);
-      const label = { confirmed: ["两侧已确认", "Both confirmed"], rejected: ["已否定", "Rejected"], pending: ["待核对", "Pending"] }[decision][locale === "zh" ? 0 : 1];
+      const label = decision === "confirmed" && evidence?.comparison?.status === "same_lap"
+        ? (locale === "zh" ? "最快圈已确认" : "Winning lap confirmed")
+        : { confirmed: ["两侧已确认", "Both confirmed"], rejected: ["已否定", "Rejected"], pending: ["待核对", "Pending"] }[decision][locale === "zh" ? 0 : 1];
       return <button key={review.id} className={`${button} ${i === Math.min(reviewIndex, reviews.length - 1) ? "border-cyan-400 bg-cyan-400/10 text-cyan-100" : ""}`} aria-pressed={i === Math.min(reviewIndex, reviews.length - 1)} onClick={event => { event.currentTarget.closest('[data-testid="coach-review-panel"]')?.querySelectorAll("video").forEach(v => v.pause()); setReviewIndex(i); }}>
         {decision === "confirmed" && <Check size={14} />}{locale === "zh" ? `片段 ${i + 1}` : `Clip ${i + 1}`} · {locale === "zh" ? review.name.replace(/^Suggested Zone\s+/i, "区间 ").replace(/^Zone\s+/i, "区间 ") : review.name} · {label}
       </button>;
