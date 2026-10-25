@@ -3,6 +3,14 @@ import { SelectedCornerPanel } from "../../frontend/components/SelectedCornerPan
 import type { XrkAnalysis } from "../../frontend/lib/xrkAnalysisApi";
 import { CornerCandidateNavigation, SelectedCornerTelemetry } from "../../frontend/components/SelectedCornerTelemetry";
 import { cornerTelemetryDomains, type CornerLap } from "../../frontend/lib/selectedCorner";
+import { CornerCoachComparison } from "../../frontend/components/CornerCoachComparison";
+import { compareCornerBest } from "../../frontend/lib/cornerCoach";
+
+export function CornerCoachTest({ locale, flagged = false, missingRpm = false }: { locale: "zh" | "en"; flagged?: boolean; missingRpm?: boolean }) {
+  const rows: CornerLap[] = [4, 5].map(lap => ({ lap, status: "candidate", reason: null, quality: { analysis_eligible: true, reasons: [], lap_time: lap === 4 ? 41.2 : 41 }, elapsed_s: lap === 4 ? 3 : 3.1, downstream_s: lap === 4 ? 2.3 : 2,
+    spatial_profile: { status: "available", reason: null, method: "shared_directed_spatial_gates", points: [0, 1, 2, 3].map(i => ({ distance_m: i * 10, session_time_s: lap * 40 + i * (lap === 4 ? 1 : 3.1 / 3), elapsed_s: i * (lap === 4 ? 1 : 3.1 / 3), speed: 60 + i, rpm: missingRpm ? null : 9000 })) } }));
+  return <I18nProvider initialLocale={locale}><CornerCoachComparison comparison={compareCornerBest(rows, flagged ? [5] : [])} playable onReview={() => {}} active={false} /></I18nProvider>;
+}
 
 export function CornerTelemetryTest({ locale, confirmed = true, missing = false }: { locale: "zh" | "en"; confirmed?: boolean; missing?: boolean }) {
   const rows: CornerLap[] = [3, 4, 5, 6].map(lap => ({ lap, status: "candidate", reason: null, quality: { analysis_eligible: true, reasons: [] }, start_session_s: lap * 40, end_session_s: lap * 40 + 5, elapsed_s: 5,

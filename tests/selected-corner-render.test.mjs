@@ -7,8 +7,22 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 const root = fileURLToPath(new URL("..", import.meta.url)), dir = mkdtempSync(`${root}/tmp/corner-render-`);
 execFileSync(`${root}/node_modules/.bin/esbuild`, [`${root}/tests/fixtures/selected-corner-entry.tsx`, "--bundle", "--format=esm", "--platform=node", "--jsx=automatic", "--external:react", "--external:react-dom", "--external:recharts", "--external:lucide-react", `--outfile=${dir}/entry.mjs`], { stdio: "pipe" });
-const { CornerTest, CornerTelemetryTest } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
+const { CornerTest, CornerTelemetryTest, CornerCoachTest } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
 after(() => rmSync(dir, { recursive: true, force: true }));
+test("coach overlays show both real laps, downstream tradeoff and bounded interpretation in both languages", () => {
+  for (const locale of ["zh", "en"]) {
+    const html = renderToStaticMarkup(createElement(CornerCoachTest, { locale }));
+    for (const channel of ["speed", "rpm", "gain_s"]) assert.ok(html.includes(`coach-overlay-${channel}`));
+    assert.match(html, /L4/); assert.match(html, /L5/); assert.match(html, /0\.100s/); assert.match(html, /0\.200s/);
+    assert.ok(html.includes(locale === "zh" ? "合计慢" : "combined loss"));
+    assert.ok(html.includes(locale === "zh" ? "RPM下降不是刹车压力" : "RPM decline is not brake pressure"));
+    assert.match(html, /±0.5/);
+    const bad = renderToStaticMarkup(createElement(CornerCoachTest, { locale, flagged: true }));
+    assert.doesNotMatch(bad, /coach-overlay/); assert.match(bad, /GPS/);
+    const missing = renderToStaticMarkup(createElement(CornerCoachTest, { locale, missingRpm: true }));
+    assert.ok(missing.includes(locale === "zh" ? "RPM 数据不可用" : "RPM unavailable"));
+  }
+});
 test("unconfigured corner workspace stays unavailable in both languages", () => {
   for (const locale of ["zh", "en"]) {
     const html = renderToStaticMarkup(createElement(CornerTest, { locale }));

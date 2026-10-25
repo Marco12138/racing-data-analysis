@@ -88,6 +88,49 @@ def _clip_telemetry(section: pd.DataFrame) -> list[dict]:
             for row in section.itertuples(index=False)]
 
 
+def _coach_gates(source: pd.DataFrame, start: float, end: float) -> list[tuple[float, SpatialGate]]:
+    """Freeze spatial checkpoints on the selected real path, including equal thirds."""
+    first, last = [_value(source, t, "distance_m") for t in (start, end)]
+    length = last - first
+    distances = np.unique(np.r_[np.linspace(0, length, max(4, int(np.ceil(length / 5))) + 1),
+                                length / 3, length * 2 / 3])
+    return [(float(d), _gate(source, float(np.interp(first + d, source.distance_m, source.session_time_s))))
+            for d in distances]
+
+
+def _coach_profile(frame: pd.DataFrame, aligned: np.ndarray, start: float, end: float,
+                   checkpoints: list[tuple[float, SpatialGate]]) -> dict:
+    """Compare shared physical checkpoints, never stretch each lap's own distance."""
+    base = {"status": "unavailable", "reason": None, "points": [],
+            "method": "shared_directed_spatial_gates", "independent_ground_truth": False}
+    try:
+        if len(checkpoints) < 4:
+            raise ValueError("corner_checkpoint_geometry_unavailable")
+        t = frame.session_time_s.to_numpy(float)
+        mask = (t >= start - .5) & (t <= end + .5)
+        points = []
+        for i, (distance, gate) in enumerate(checkpoints):
+            if i in (0, len(checkpoints) - 1):
+                time = start if i == 0 else end
+            else:
+                hits = [h for h in gate_crossings(aligned[mask], t[mask], gate)
+                        if start < h["session_time_s"] < end]
+                if len(hits) != 1:
+                    raise ValueError("corner_checkpoint_not_unique")
+                time = hits[0]["session_time_s"]
+            if points and time <= points[-1]["session_time_s"]:
+                raise ValueError("corner_checkpoint_order")
+            try:
+                rpm = _value(frame, time, "rpm") if "rpm" in frame else None
+            except ValueError:
+                rpm = None
+            points.append({"distance_m": distance, "session_time_s": time, "elapsed_s": time - start,
+                           "speed": _value(frame, time, "speed"), "rpm": rpm})
+        return {**base, "status": "available", "points": points}
+    except ValueError as exc:
+        return {**base, "reason": str(exc)}
+
+
 def group_corner_patterns(rows: list[dict], confirmed_laps: list[int]) -> dict:
     """Ward clustering of observed profiles, with no timing labels or synthetic reference curves."""
     accepted = [row for row in rows if row["status"] == "candidate" and row["lap"] in confirmed_laps]
@@ -174,6 +217,10 @@ def analyze_selected_corner(telemetry: pd.DataFrame, manifest: dict, *, source_l
         start_session_s, end_session_s = context["start_session_s"], context["end_session_s"]
     _section(source, start_session_s, end_session_s)
     entry, exit_gate = _gate(source, start_session_s), _gate(source, end_session_s)
+    try:
+        checkpoints = _coach_gates(source, start_session_s, end_session_s)
+    except ValueError:
+        checkpoints = []
     reference = source[["local_x_m", "local_y_m"]].to_numpy(float)
     downstream_gate = None
     downstream_distance = _value(source, end_session_s, "distance_m") + 50
@@ -229,6 +276,7 @@ def analyze_selected_corner(telemetry: pd.DataFrame, manifest: dict, *, source_l
         rows.append({**result, "status": "candidate", "reason": None, "start_session_s": start, "end_session_s": end,
                      "elapsed_s": end - start, "downstream_s": downstream_s, "profile": profile,
                      "telemetry": _clip_telemetry(section),
+                     "spatial_profile": _coach_profile(frame, aligned, start, end, checkpoints),
                      "start_distance_m": float(section.distance_m.iloc[0]), "end_distance_m": float(section.distance_m.iloc[-1]),
                      "sample_count": len(section), "path_check": path_check, "boundary_brackets_s": [h[0]["sample_bracket_s"] for h in hits],
                      "visual_confirmation_required": True})
@@ -237,7 +285,7 @@ def analyze_selected_corner(telemetry: pd.DataFrame, manifest: dict, *, source_l
             "gates": {"entry": entry.model_dump(), "exit": exit_gate.model_dump()}, "laps": rows, "gps_quality": gps_quality,
             "patterns": group_corner_patterns(rows, confirmed_laps), "synthetic_curve_generated": False,
             "evidence": {"measured": ["GPS position", "GPS speed", "RPM when available"],
-                         "calculated": ["translation registration", "directed gate crossing times", "normalized-distance profiles"],
+                         "calculated": ["translation registration", "directed gate crossing times", "shared spatial checkpoint profiles", "normalized-distance clustering profiles"],
                          "inferred": ["exploratory driving-pattern groups"], "channel_provenance": manifest.get("channel_provenance", {})},
             "limitations": ["Video boundaries retain manual +/-0.5s uncertainty; visual similarity is not synchronization proof.",
                             "Timing is measured between the same inferred spatial gates, not fixed five-second clips.",
