@@ -71,3 +71,27 @@ acceptance remains an open follow-up, not a passed release check.
 Private-file audit outputs remain in ignored local storage. The release package
 contains only tracked source and previously approved public media; no private
 original video, XRK, inspection cache or local anchor storage is included.
+
+### Public browser follow-up, 2026-10-27
+
+The public desktop demo is now accessible to the browser test tool. On the
+merged PR #49 deployment, all six Chinese steps loaded; all three recommendation
+texts matched the debrief, and returning from a summary selected the correct
+section. Candidate arrows/dropdowns, independent playback clocks, pause and the
+left/right/mute states were exercised. English review controls also rendered.
+
+This exposed two playback defects: changing the right candidate left the other
+player at its previous position, and browser timestamp truncation put some entry
+seeks a few microseconds before the exact telemetry gate. The fixes remount both
+paused players when a pair changes and round playback seeks inward to millisecond
+precision. Evidence times, spatial gates, validation tolerances and the manual
+anchor are unchanged. Regression tests cover all nine published excerpt clocks.
+Recheck these two interactions against the released artifact before closing them.
+
+Browser download permission was denied for the summary export; that interaction
+remains unverified and must not be retried through another transfer mechanism.
+Audio track presence and mute routing do not establish sound heard from physical
+speakers. Physical listening, mobile/other-browser testing and independent visual
+confirmation of the original anchor remain outstanding. No private inputs were
+selected or uploaded. Preserve the pre-fix production deployment
+`dpl_Bufsqo9QbBxsRPkKJ5K22dfahGsp` for rollback.

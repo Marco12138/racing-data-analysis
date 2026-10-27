@@ -41,6 +41,11 @@ export type PublishedClipMedia = {
   points: GoproSpeedPoint[];
 };
 
+/** Seek inside the gates at millisecond precision; never change evidence times or sync anchors. */
+export function publishedPlaybackBounds(start: number, end: number): [number, number] {
+  return [Math.ceil(start * 1000) / 1000, Math.floor(end * 1000) / 1000];
+}
+
 /** Bind sanitized speed to the exact excerpt, including older cached demo summaries. */
 export function publishedClipMedia(clip: PublishedVideoReview["clips"][number], manifest: unknown): PublishedClipMedia | null {
   if (!manifest || typeof manifest !== "object") return null;

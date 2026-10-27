@@ -10,7 +10,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 mkdirSync(`${root}/tmp`, { recursive: true });
 const dir = mkdtempSync(`${root}/tmp/published-guide-test-`);
 execFileSync(`${root}/node_modules/.bin/esbuild`, [`${root}/tests/fixtures/published-guided-entry.tsx`, "--bundle", "--format=esm", "--platform=node", "--jsx=automatic", "--external:react", "--external:react-dom", "--external:lucide-react", "--external:recharts", `--outfile=${dir}/entry.mjs`], { stdio: "pipe" });
-const { PublishedGuideTest, publishedCoachEvidence, coachObservation, loadPublishedCoach, cornerTelemetryTime, cornerChannelAt } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
+const { PublishedGuideTest, publishedCoachEvidence, coachObservation, loadPublishedCoach, cornerTelemetryTime, cornerChannelAt, publishedPlaybackBounds } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
 after(() => rmSync(dir, { recursive: true, force: true }));
 const source = readFileSync(`${root}/public/demo/reviewed-real-session.json`, "utf8");
 const analysis = JSON.parse(source).analysis;
@@ -124,4 +124,30 @@ test("all nine excerpt clocks map to their own speed/RPM samples and reject out-
     count++;
   }
   assert.equal(count, 9);
+});
+
+test("published seeks stay inside exact gates despite browser clock truncation", () => {
+  const before = JSON.stringify(data);
+  for (const section of evidence.sections) for (const row of section.result.laps.filter(r => r.status === "candidate")) {
+    const clip = data.review.clips.find(c => c.sector_id === section.id && c.lap === row.lap);
+    const start = row.start_session_s - clip.telemetry_start_s, end = row.end_session_s - clip.telemetry_start_s;
+    const bounds = publishedPlaybackBounds(start, end);
+    assert.ok(bounds[0] >= start && bounds[0] - start <= .001 + 1e-9);
+    assert.ok(bounds[1] <= end && end - bounds[1] <= .001 + 1e-9);
+    for (const seek of bounds) {
+      const browserTime = Math.floor(seek * 1e6) / 1e6;
+      const time = cornerTelemetryTime(row, browserTime, start);
+      assert.notEqual(time, null);
+      assert.ok(Number.isFinite(cornerChannelAt(row.telemetry, time, "speed")));
+      assert.ok(Number.isFinite(cornerChannelAt(row.telemetry, time, "rpm")));
+    }
+    assert.equal(cornerTelemetryTime(row, start - .01, start), null);
+  }
+  assert.equal(JSON.stringify(data), before);
+});
+
+test("changing either candidate remounts both paused players at their own entry", () => {
+  const source = readFileSync(`${root}/frontend/components/PublishedGuidedReview.tsx`, "utf8");
+  assert.ok(source.includes('key={`${left}-${right}-${i}`}'));
+  assert.match(source, /function pair\(a: number, b: number\).*pause\(\).*setLeft\(a\).*setRight\(b\)/);
 });
