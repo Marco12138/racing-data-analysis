@@ -11,6 +11,7 @@ import { ReviewSteps, GuidedOverview } from "./GuidedReview";
 import { PublishedClip } from "./PublishedVideoReview";
 import { CornerCandidateNavigation } from "./SelectedCornerTelemetry";
 import { CornerCoachComparison } from "./CornerCoachComparison";
+import { publishedPlaybackBounds } from "../lib/publishedVideoReview";
 
 export function PublishedGuidedReview() {
   const { locale } = useI18n(), zh = locale === "zh";
@@ -102,15 +103,18 @@ function PublishedCoachExplorer({ section, data }: { section: PublishedCoachSect
   async function replay() {
     setError(false);
     try {
-      for (const [i, v] of players.current.entries()) if (v && rows[i] && clips[i]) { v.pause(); v.currentTime = rows[i]!.start_session_s! - clips[i]!.telemetry_start_s; }
+      for (const [i, v] of players.current.entries()) if (v && rows[i] && clips[i]) {
+        v.pause();
+        v.currentTime = publishedPlaybackBounds(rows[i]!.start_session_s! - clips[i]!.telemetry_start_s, rows[i]!.end_session_s! - clips[i]!.telemetry_start_s)[0];
+      }
       await Promise.all(players.current.map(v => v?.play()));
     } catch { setError(true); }
   }
-  function pair(a: number, b: number) { players.current.forEach(v => v?.pause()); setLeft(a); setRight(b); }
+  function pair(a: number, b: number) { players.current.forEach(v => v?.pause()); setError(false); setLeft(a); setRight(b); }
   return <section className="min-w-0 space-y-5" data-testid="published-coach-explorer">
     <div className="space-y-2 text-sm leading-6 text-cyan-100" data-testid={`published-recommendation-${section.id}`}>{coachObservation(evidence, zh).map(line => <p key={line}>{line}</p>)}</div>
     <CornerCandidateNavigation laps={laps.filter(r => r.lap !== left)} selectedLap={right ?? null} sourceLap={section.result.source_lap} onSelect={lap => pair(left, lap)} />
-    <div className="grid min-w-0 gap-5 lg:grid-cols-2">{rows.map((row, i) => row && clips[i] && <figure key={`${i}-${row.lap}`} className="min-w-0"><figcaption className="mb-2 font-semibold">L{row.lap} · {row.elapsed_s!.toFixed(3)}s · {zh ? "共同空间区段" : "Shared spatial section"}</figcaption>
+    <div className="grid min-w-0 gap-5 lg:grid-cols-2">{rows.map((row, i) => row && clips[i] && <figure key={`${left}-${right}-${i}`} className="min-w-0"><figcaption className="mb-2 font-semibold">L{row.lap} · {row.elapsed_s!.toFixed(3)}s · {zh ? "共同空间区段" : "Shared spatial section"}</figcaption>
       <PublishedClip clip={clips[i]!} row={row} domains={domains} elapsedLimit={limit} index={i} onVideo={register} active muted={audio !== i} onAudio={setAudio} onError={() => setError(true)} />
       {section.gps_flagged_laps.includes(row.lap) && <p className="mt-2 text-sm text-amber-200">{zh ? "GPS 异常候选：保留显示，不参与最快开法判断。" : "GPS-inconsistent candidate: visible, but excluded from best-technique ranking."}</p>}
     </figure>)}</div>

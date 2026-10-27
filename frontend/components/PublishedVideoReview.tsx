@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Play, RotateCcw, Volume2, VolumeX } from "lucide-react";
 import { useI18n } from "../lib/i18n";
-import { isPublishedVideoReview, publishedClipMedia, type PublishedVideoReview as Review } from "../lib/publishedVideoReview";
+import { isPublishedVideoReview, publishedClipMedia, publishedPlaybackBounds, type PublishedVideoReview as Review } from "../lib/publishedVideoReview";
 import { goproSpeedAt } from "../lib/goproVideoSpeed";
 import { observeVideoClock } from "../lib/videoFrameClock";
 import { GoproSpeedDisplay } from "./GoproSpeedOverlay";
@@ -89,25 +89,29 @@ export function PublishedClip({ clip, index, onVideo, active, muted, onAudio, on
   const video = useRef<HTMLVideoElement>(null), [time, setTime] = useState(0);
   const data = publishedClipMedia(clip, media);
   const src = data ? `${clip.url}?v=${data.revision}` : clip.url;
+  const [playbackStart, playbackEnd] = publishedPlaybackBounds(
+    row?.start_session_s != null ? row.start_session_s - clip.telemetry_start_s : 0,
+    row?.end_session_s != null ? row.end_session_s - clip.telemetry_start_s : clip.duration_s,
+  );
   useEffect(() => {
     const el = video.current;
     if (!el) return;
     const stop = observeVideoClock(el, sample => {
       setTime(sample.time_s);
-      if (row?.end_session_s != null && sample.time_s > row.end_session_s - clip.telemetry_start_s) {
+      if (row && sample.time_s > playbackEnd) {
         el.pause();
-        el.currentTime = row.end_session_s - clip.telemetry_start_s;
+        el.currentTime = playbackEnd;
         setTime(el.currentTime);
       }
     });
     return () => { stop(); el.pause(); };
-  }, [row, clip.telemetry_start_s]);
+  }, [row, playbackEnd]);
   useEffect(() => { if (!active) video.current?.pause(); }, [active]);
   const reading = goproSpeedAt(data?.points ?? [], time);
   return <><div className="relative">
     <video ref={el => { video.current = el; onVideo(index, el); }} src={src} poster={clip.poster} controls playsInline muted={muted} preload="metadata"
       className="aspect-video w-full bg-black" onError={onError}
-      onLoadedMetadata={() => { if (video.current && row?.start_session_s != null) { video.current.currentTime = row.start_session_s - clip.telemetry_start_s; setTime(video.current.currentTime); } }}
+      onLoadedMetadata={() => { if (video.current && row) { video.current.currentTime = playbackStart; setTime(video.current.currentTime); } }}
       onVolumeChange={() => { if (video.current && !video.current.muted) onAudio(index); }} />
     <GoproSpeedDisplay reading={reading} status={reading.reason} time={time} published />
   </div>{row && domains && <SelectedCornerTelemetry row={row} videoTime={time}
