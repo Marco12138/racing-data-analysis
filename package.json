@@ -18,6 +18,7 @@
     "test:selected-corner": "node --experimental-strip-types --test tests/selected-corner.test.mjs tests/selected-corner-render.test.mjs tests/corner-coach.test.mjs",
     "test:guided-review": "node --experimental-strip-types --test tests/guided-review.test.mjs tests/guided-review-render.test.mjs tests/recommended-coach.test.mjs",
     "test:clip-telemetry": "node --experimental-strip-types --test tests/clip-telemetry.test.mjs",
+    "test:published-guide": "node --experimental-strip-types --test tests/published-guided.test.mjs",
     "test:api-proxy": "node --experimental-strip-types --test cloudflare/api-proxy/tests/*.test.ts",
     "test:rpm-sync": "node --experimental-strip-types --test tests/audio-rpm.test.mjs tests/video-telemetry-sync.test.mjs tests/rpm-sync-render.test.mjs",
     "test:gnss-sync": "node --experimental-strip-types --test tests/gpmf-telemetry.test.mjs tests/gnss-sync-render.test.mjs tests/video-frame-clock.test.mjs tests/camera-spectrum.test.mjs",

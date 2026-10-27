@@ -8,6 +8,8 @@ import { goproSpeedAt } from "../lib/goproVideoSpeed";
 import { observeVideoClock } from "../lib/videoFrameClock";
 import { GoproSpeedDisplay } from "./GoproSpeedOverlay";
 import media from "../../public/demo/video/media.json";
+import type { CornerLap } from "../lib/selectedCorner";
+import { SelectedCornerTelemetry } from "./SelectedCornerTelemetry";
 
 async function replayPlayers(players: Array<HTMLVideoElement | null>) {
   for (const video of players) { if (video) { video.pause(); video.currentTime = 0; } }
@@ -79,9 +81,10 @@ export function PublishedVideoReview({ review, active = true }: { review: Review
 }
 
 /** The excerpt clock starts at zero; its own GPS5 samples follow presented frames and seeks. */
-function PublishedClip({ clip, index, onVideo, active, muted, onAudio, onError }: {
+export function PublishedClip({ clip, index, onVideo, active, muted, onAudio, onError, row, domains, elapsedLimit }: {
   clip: Review["clips"][number]; index: number; onVideo: (index: number, el: HTMLVideoElement | null) => void; active: boolean;
   muted: boolean; onAudio: (index: number) => void; onError: () => void;
+  row?: CornerLap; domains?: Record<"speed" | "rpm", [number, number]>; elapsedLimit?: number;
 }) {
   const video = useRef<HTMLVideoElement>(null), [time, setTime] = useState(0);
   const data = publishedClipMedia(clip, media);
@@ -89,14 +92,25 @@ function PublishedClip({ clip, index, onVideo, active, muted, onAudio, onError }
   useEffect(() => {
     const el = video.current;
     if (!el) return;
-    const stop = observeVideoClock(el, sample => setTime(sample.time_s));
+    const stop = observeVideoClock(el, sample => {
+      setTime(sample.time_s);
+      if (row?.end_session_s != null && sample.time_s > row.end_session_s - clip.telemetry_start_s) {
+        el.pause();
+        el.currentTime = row.end_session_s - clip.telemetry_start_s;
+        setTime(el.currentTime);
+      }
+    });
     return () => { stop(); el.pause(); };
-  }, []);
+  }, [row, clip.telemetry_start_s]);
   useEffect(() => { if (!active) video.current?.pause(); }, [active]);
   const reading = goproSpeedAt(data?.points ?? [], time);
-  return <div className="relative">
+  return <><div className="relative">
     <video ref={el => { video.current = el; onVideo(index, el); }} src={src} poster={clip.poster} controls playsInline muted={muted} preload="metadata"
-      className="aspect-video w-full bg-black" onError={onError} onVolumeChange={() => { if (video.current && !video.current.muted) onAudio(index); }} />
+      className="aspect-video w-full bg-black" onError={onError}
+      onLoadedMetadata={() => { if (video.current && row?.start_session_s != null) { video.current.currentTime = row.start_session_s - clip.telemetry_start_s; setTime(video.current.currentTime); } }}
+      onVolumeChange={() => { if (video.current && !video.current.muted) onAudio(index); }} />
     <GoproSpeedDisplay reading={reading} status={reading.reason} time={time} published />
-  </div>;
+  </div>{row && domains && <SelectedCornerTelemetry row={row} videoTime={time}
+    videoStart={row.start_session_s! - clip.telemetry_start_s} confirmed={false} publishedEstimate
+    domains={domains} elapsedLimit={elapsedLimit ?? row.elapsed_s!} active={active} />}</>;
 }

@@ -6,8 +6,11 @@ import { fetchPublicDemoSummary, type PublicDemoSummary } from "../lib/publicDem
 import { resolveApiConfig } from "../lib/config";
 import { SiteNavigation } from "./SiteNavigation";
 import { PublicDemoDashboard } from "./PublicDemoDashboard";
+import { PublishedGuidedReview } from "./PublishedGuidedReview";
+import { useI18n } from "../lib/i18n";
 
 export function PublicDemoClient({ initialDemo }: { initialDemo: PublicDemoSummary | null }) {
+  const { locale } = useI18n();
   const [demo, setDemo] = useState(initialDemo);
   const [loading, setLoading] = useState(false);
   const previewRef = useRef<HTMLElement>(null);
@@ -26,6 +29,8 @@ export function PublicDemoClient({ initialDemo }: { initialDemo: PublicDemoSumma
 
   return (
     <><SiteNavigation /><main className="public-demo-page demo-route-page">
+      <PublishedGuidedReview />
+      <details className="mx-auto max-w-7xl px-4 pb-8 sm:px-7"><summary className="cursor-pointer py-4 text-sm text-slate-400">{locale === "zh" ? "原始发布概览与分段计时" : "Original published overview and sector timing"}</summary>
       <PublicDemoDashboard
         ref={previewRef}
         demo={demo}
@@ -33,6 +38,7 @@ export function PublicDemoClient({ initialDemo }: { initialDemo: PublicDemoSumma
         onRetry={retryDemo}
         retryLoading={loading}
       />
+      </details>
     </main></>
   );
 }
