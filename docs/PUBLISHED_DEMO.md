@@ -53,3 +53,21 @@ identical recommendation/debrief statements, and visible GPS/coverage warnings.
 Do not equate server-rendered markup tests with browser playback acceptance.
 Keep the current public deployment until this visual/interactive acceptance is
 complete. Share only `https://ai-racing-telemetry-platform.vercel.app/demo`.
+
+### Explicit release exception, 2026-10-27
+
+The owner authorized this frontend release after automated tests and local
+real-file verification, with browser interaction acceptance explicitly pending.
+The browser permission gate prevented the full six-step playback check; it was
+not bypassed. Server-rendered tests, media decoding and HTTP resource checks do
+not establish audible browser playback, seek behavior or frame synchronization.
+
+Keep production deployment `dpl_Fh6twBWbe6BUfDWuioN4kohsckQA` (main commit
+`d1896bed1891223fa3eae047f83220b1320f1758`) as the rollback target. Stage and verify
+the new production artifact before promoting the fixed domain. Recheck all
+existing application routes and API configuration after promotion. Browser
+acceptance remains an open follow-up, not a passed release check.
+
+Private-file audit outputs remain in ignored local storage. The release package
+contains only tracked source and previously approved public media; no private
+original video, XRK, inspection cache or local anchor storage is included.

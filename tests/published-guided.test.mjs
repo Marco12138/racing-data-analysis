@@ -10,7 +10,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 mkdirSync(`${root}/tmp`, { recursive: true });
 const dir = mkdtempSync(`${root}/tmp/published-guide-test-`);
 execFileSync(`${root}/node_modules/.bin/esbuild`, [`${root}/tests/fixtures/published-guided-entry.tsx`, "--bundle", "--format=esm", "--platform=node", "--jsx=automatic", "--external:react", "--external:react-dom", "--external:lucide-react", "--external:recharts", `--outfile=${dir}/entry.mjs`], { stdio: "pipe" });
-const { PublishedGuideTest, publishedCoachEvidence, coachObservation, loadPublishedCoach } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
+const { PublishedGuideTest, publishedCoachEvidence, coachObservation, loadPublishedCoach, cornerTelemetryTime, cornerChannelAt } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
 after(() => rmSync(dir, { recursive: true, force: true }));
 const source = readFileSync(`${root}/public/demo/reviewed-real-session.json`, "utf8");
 const analysis = JSON.parse(source).analysis;
@@ -101,4 +101,27 @@ test("existing manual binding message requires the exact video and confirmed rev
   assert.match(saved, /review\?\.verdict === "confirmed"/);
   assert.match(saved, /video_start_s === lapStart/);
   assert.match(saved, /video_end_s === lapEnd/);
+});
+
+test("all nine excerpt clocks map to their own speed/RPM samples and reject out-of-range frames", () => {
+  let count = 0;
+  for (const section of evidence.sections) for (const row of section.result.laps.filter(r => r.status === "candidate")) {
+    const clip = data.review.clips.find(c => c.sector_id === section.id && c.lap === row.lap);
+    const videoStart = row.start_session_s - clip.telemetry_start_s;
+    for (const point of row.telemetry) {
+      const time = cornerTelemetryTime(row, point.session_time_s - clip.telemetry_start_s, videoStart);
+      assert.ok(Math.abs(time - point.session_time_s) < 1e-8);
+      for (const channel of ["speed", "rpm"]) assert.ok(Math.abs(cornerChannelAt(row.telemetry, time, channel) - point[channel]) < 1e-6);
+    }
+    for (let elapsed = 0; elapsed <= row.elapsed_s; elapsed += 1 / 60) {
+      const time = cornerTelemetryTime(row, videoStart + elapsed, videoStart);
+      assert.ok(Math.abs(time - row.start_session_s - elapsed) < 1e-8);
+      assert.ok(Number.isFinite(cornerChannelAt(row.telemetry, time, "speed")));
+      assert.ok(Number.isFinite(cornerChannelAt(row.telemetry, time, "rpm")));
+    }
+    assert.equal(cornerTelemetryTime(row, videoStart - .01, videoStart), null);
+    assert.equal(cornerTelemetryTime(row, videoStart + row.elapsed_s + .01, videoStart), null);
+    count++;
+  }
+  assert.equal(count, 9);
 });
