@@ -26,16 +26,16 @@ export function CornerCandidateNavigation({ laps, selectedLap, sourceLap, onSele
   </nav>;
 }
 
-export function SelectedCornerTelemetry({ row, videoTime, videoStart, confirmed, domains, elapsedLimit, active = true }: {
+export function SelectedCornerTelemetry({ row, videoTime, videoStart, confirmed, domains, elapsedLimit, active = true, publishedEstimate = false }: {
   row: CornerLap; videoTime: number; videoStart: number; confirmed: boolean;
-  domains: Record<"speed" | "rpm", [number, number]>; elapsedLimit: number; active?: boolean;
+  domains: Record<"speed" | "rpm", [number, number]>; elapsedLimit: number; active?: boolean; publishedEstimate?: boolean;
 }) {
   const { locale } = useI18n(), zh = locale === "zh";
   const points = row.telemetry ?? [], metrics = row.profile?.metrics;
-  const time = confirmed ? cornerTelemetryTime(row, videoTime, videoStart) : null;
+  const time = confirmed || publishedEstimate ? cornerTelemetryTime(row, videoTime, videoStart) : null;
   return <section className="mt-3 min-w-0 space-y-3 border-t border-slate-700 pt-3" data-testid={`corner-telemetry-L${row.lap}`}>
     <h5 className="text-sm font-semibold">L{row.lap} · {zh ? "片段遥测 · AiM" : "Clip telemetry · AiM"}</h5>
-    <p className="text-xs text-amber-200">{confirmed ? (zh ? "本圈人工配对 · ±0.5秒；GPS异常提示仍有效" : "Human-paired lap · ±0.5s; GPS warnings remain")
+    <p className="text-xs text-amber-200">{publishedEstimate ? (zh ? "已发布网格遥测 · 按原锚点推算画面读数，±0.5秒；不代表本片段已人工确认" : "Published grid telemetry · frame readings extrapolated from the original anchor, ±0.5s; this clip is not independently confirmed") : confirmed ? (zh ? "本圈人工配对 · ±0.5秒；GPS异常提示仍有效" : "Human-paired lap · ±0.5s; GPS warnings remain")
       : (zh ? "下方是本圈实测遥测；视频位置待确认，实时读数暂不绑定画面" : "Recorded telemetry for this lap; frame-linked readings await video confirmation")}</p>
     <output className="block min-h-6 font-mono text-sm" data-testid={`corner-live-L${row.lap}`} data-session-time={time ?? ""}>
       {zh ? "速度" : "Speed"}: {time === null ? "—" : number(cornerChannelAt(points, time, "speed"))} km/h · RPM: {time === null ? "—" : number(cornerChannelAt(points, time, "rpm"), 0)}

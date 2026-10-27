@@ -2203,7 +2203,8 @@ export function SingleLapAnalysisPanel({
         <ManualLapBinding key={`${analysis.target_lap}:${lapStart}:${lapEnd}:${videoFile?.lastModified}`}
           lap={analysis.target_lap} bounds={manualBounds} marked={bothLapMarks}
           disabled={!!readOnly || analyzing || rpmSyncing || autoSyncing || !videoFile}
-          saved={calibration?.review?.method === "manual_lap_bounds_v1" && calibration.target_lap === analysis.target_lap
+          saved={!!videoFile && !!calibration && matchesReviewVideo(calibration.video, reviewVideoIdentity(videoFile, videoDurationS))
+            && calibration.review?.verdict === "confirmed" && calibration.review.method === "manual_lap_bounds_v1" && calibration.target_lap === analysis.target_lap
             && calibration.lap_bounds?.video_start_s === lapStart && calibration.lap_bounds?.video_end_s === lapEnd}
           onBind={bindManualLap} />
         <div hidden={guided && !advanced}>

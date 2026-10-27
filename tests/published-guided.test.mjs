@@ -1,0 +1,127 @@
+import assert from "node:assert/strict";
+import { test, after } from "node:test";
+import { execFileSync } from "node:child_process";
+import { readFileSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+const root = fileURLToPath(new URL("..", import.meta.url));
+mkdirSync(`${root}/tmp`, { recursive: true });
+const dir = mkdtempSync(`${root}/tmp/published-guide-test-`);
+execFileSync(`${root}/node_modules/.bin/esbuild`, [`${root}/tests/fixtures/published-guided-entry.tsx`, "--bundle", "--format=esm", "--platform=node", "--jsx=automatic", "--external:react", "--external:react-dom", "--external:lucide-react", "--external:recharts", `--outfile=${dir}/entry.mjs`], { stdio: "pipe" });
+const { PublishedGuideTest, publishedCoachEvidence, coachObservation, loadPublishedCoach, cornerTelemetryTime, cornerChannelAt } = await import(pathToFileURL(`${dir}/entry.mjs`).href);
+after(() => rmSync(dir, { recursive: true, force: true }));
+const source = readFileSync(`${root}/public/demo/reviewed-real-session.json`, "utf8");
+const analysis = JSON.parse(source).analysis;
+const evidence = JSON.parse(readFileSync(`${root}/public/demo/coach-evidence.json`, "utf8"));
+const data = { analysis, review: analysis.video_review, evidence };
+const render = (step, locale = "zh") => renderToStaticMarkup(createElement(PublishedGuideTest, { locale, data, step }));
+test("public evidence binds to the already-published source without private assets", () => {
+  assert.equal(evidence.source_sha256, createHash("sha256").update(source).digest("hex"));
+  assert.equal(evidence.manual_anchor_modified, false);
+  assert.equal(evidence.independent_video_validation, false);
+  assert.equal(evidence.sampling, "already_published_distance_grid");
+  assert.doesNotMatch(JSON.stringify(evidence), /\/Users\/|\.xrk|GH010681|latitude|longitude/i);
+  assert.equal(evidence.sections.length, 3);
+});
+test("the loader rejects stale evidence and restricts reads to public static resources", async () => {
+  const original = globalThis.fetch, requests = [];
+  let manifest = evidence;
+  globalThis.fetch = async url => {
+    requests.push(url);
+    return new Response(url.endsWith("coach-evidence.json") ? JSON.stringify(manifest) : source);
+  };
+  try {
+    assert.equal((await loadPublishedCoach()).evidence.version, 1);
+    manifest = { ...evidence, source_sha256: "stale" };
+    await assert.rejects(loadPublishedCoach(), /VERSION_MISMATCH/);
+    assert.deepEqual([...new Set(requests)], ["/demo/reviewed-real-session.json", "/demo/coach-evidence.json"]);
+  } finally { globalThis.fetch = original; }
+});
+test("demo interactions never write coach labels or saved anchors", () => {
+  const component = readFileSync(`${root}/frontend/components/PublishedGuidedReview.tsx`, "utf8");
+  assert.doesNotMatch(component, /localStorage|sessionStorage|submit.*Feedback|method:\s*["']POST|analyzeSelectedCorner/);
+});
+test("all six published steps render in both languages without anchor-writing controls", () => {
+  for (const locale of ["zh", "en"]) for (let step = 0; step < 6; step++) {
+    const html = render(step, locale);
+    assert.match(html, /data-testid="published-guided-review"/);
+    assert.match(html, /aria-current="step"/);
+    assert.match(html, /±0.5/);
+    assert.doesNotMatch(html, /type="file"|type="number"|确认这两个片段|Confirm both/);
+  }
+});
+test("the summary uses exactly the same observation strings and numerical evidence", () => {
+  for (const locale of ["zh", "en"]) {
+    const html = render(5, locale);
+    for (const section of evidence.sections) {
+      const lines = coachObservation(publishedCoachEvidence(section, locale === "zh"), locale === "zh");
+      for (const line of lines) assert.ok(html.includes(line.replaceAll("&", "&amp;").replaceAll("'", "&#x27;").replaceAll('"', "&quot;")), line);
+    }
+    const recommendation = render(3, locale);
+    const marker = 'data-testid="published-recommendation-sector_1"';
+    const text = recommendation.split(marker)[1].split("</div>")[0];
+    assert.ok(html.split('data-testid="published-summary-sector_1"')[1].startsWith(text));
+  }
+});
+test("candidate navigation, sound and per-side speed/RPM stay visible", () => {
+  for (const step of [3, 4]) {
+    const html = render(step);
+    assert.equal((html.match(/<video/g) ?? []).length, 2);
+    assert.match(html, /corner-candidate-navigation/);
+    assert.match(html, /corner-chart-L4-speed/); assert.match(html, /corner-chart-L4-rpm/);
+    assert.match(html, /corner-chart-L5-speed/); assert.match(html, /corner-chart-L5-rpm/);
+    assert.match(html, /L6/); assert.match(html, /静音/);
+    assert.match(html, /本片段已人工确认/);
+    assert.match(html, /减速或出弯覆盖不完整/);
+  }
+});
+test("spatial timing is inside each published clip, no five-second timing shortcut", () => {
+  for (const section of evidence.sections) {
+    for (const row of section.result.laps.filter(r => r.status === "candidate")) {
+      const clip = data.review.clips.find(c => c.sector_id === section.id && c.lap === row.lap);
+      assert.ok(row.start_session_s >= clip.telemetry_start_s);
+      assert.ok(row.end_session_s <= clip.telemetry_start_s + clip.duration_s);
+      assert.ok(Math.abs(row.elapsed_s - 5) > .1);
+      assert.equal(row.spatial_profile.method, "shared_directed_spatial_gates");
+      assert.ok(row.telemetry.every(p => Number.isFinite(p.speed) && Number.isFinite(p.rpm)));
+    }
+    const c = publishedCoachEvidence(section).comparison;
+    assert.equal(c.status, "available");
+    assert.ok(Math.abs(c.parts.reduce((sum, p) => sum + p.gain_s, 0) - c.gain_s) < 1e-8);
+    assert.ok(Math.abs(c.gain_s + c.downstream_gain_s - c.combined_gain_s) < 1e-8);
+    for (const lap of section.gps_flagged_laps) assert.notEqual(c.section.lap, lap);
+  }
+});
+test("existing manual binding message requires the exact video and confirmed review", () => {
+  const source = readFileSync(`${root}/frontend/components/XrkAnalysisWorkspace.tsx`, "utf8");
+  const saved = source.slice(source.indexOf("saved={!!videoFile"), source.indexOf("onBind={bindManualLap}"));
+  assert.match(saved, /matchesReviewVideo\(calibration.video, reviewVideoIdentity\(videoFile, videoDurationS\)\)/);
+  assert.match(saved, /review\?\.verdict === "confirmed"/);
+  assert.match(saved, /video_start_s === lapStart/);
+  assert.match(saved, /video_end_s === lapEnd/);
+});
+
+test("all nine excerpt clocks map to their own speed/RPM samples and reject out-of-range frames", () => {
+  let count = 0;
+  for (const section of evidence.sections) for (const row of section.result.laps.filter(r => r.status === "candidate")) {
+    const clip = data.review.clips.find(c => c.sector_id === section.id && c.lap === row.lap);
+    const videoStart = row.start_session_s - clip.telemetry_start_s;
+    for (const point of row.telemetry) {
+      const time = cornerTelemetryTime(row, point.session_time_s - clip.telemetry_start_s, videoStart);
+      assert.ok(Math.abs(time - point.session_time_s) < 1e-8);
+      for (const channel of ["speed", "rpm"]) assert.ok(Math.abs(cornerChannelAt(row.telemetry, time, channel) - point[channel]) < 1e-6);
+    }
+    for (let elapsed = 0; elapsed <= row.elapsed_s; elapsed += 1 / 60) {
+      const time = cornerTelemetryTime(row, videoStart + elapsed, videoStart);
+      assert.ok(Math.abs(time - row.start_session_s - elapsed) < 1e-8);
+      assert.ok(Number.isFinite(cornerChannelAt(row.telemetry, time, "speed")));
+      assert.ok(Number.isFinite(cornerChannelAt(row.telemetry, time, "rpm")));
+    }
+    assert.equal(cornerTelemetryTime(row, videoStart - .01, videoStart), null);
+    assert.equal(cornerTelemetryTime(row, videoStart + row.elapsed_s + .01, videoStart), null);
+    count++;
+  }
+  assert.equal(count, 9);
+});

@@ -493,6 +493,7 @@ pnpm run test:frontend
 pnpm run test:coach-debrief
 pnpm run test:video-comparison
 pnpm run test:guided-review
+pnpm run test:published-guide
 pnpm run test:dual-driver
 pnpm run test:selected-corner
 pnpm run test:gnss-sync
