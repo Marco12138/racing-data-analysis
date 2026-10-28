@@ -12,7 +12,7 @@ export const guideButton = "inline-flex min-h-11 items-center justify-center gap
 
 export function ReviewSteps({ step, hasData, onStep }: { step: ReviewStep; hasData: boolean; onStep?: (step: ReviewStep) => void }) {
   const { locale } = useI18n();
-  return <nav aria-label={locale === "zh" ? "复盘步骤" : "Review steps"} className="grid grid-cols-3 gap-1 border-y border-slate-700 py-3 lg:grid-cols-6">
+  return <nav aria-label={locale === "zh" ? "复盘步骤" : "Review steps"} className="grid grid-cols-2 gap-1 border-y border-slate-700 py-3 min-[380px]:grid-cols-3 lg:grid-cols-6">
     {REVIEW_STEPS.map(([zh, en], i) => <button key={en} aria-current={step === i ? "step" : undefined}
       disabled={!onStep || (!hasData && i > 0)} onClick={() => onStep?.(i as ReviewStep)}
       className={`flex min-h-14 min-w-0 items-center gap-2 rounded px-2 py-2 text-left text-sm disabled:cursor-default ${step === i ? "bg-[#f6c945] font-semibold text-black" : "text-slate-400 hover:bg-white/5"}`}>

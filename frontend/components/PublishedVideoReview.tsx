@@ -83,7 +83,7 @@ export function PublishedVideoReview({ review, active = true }: { review: Review
 /** The excerpt clock starts at zero; its own GPS5 samples follow presented frames and seeks. */
 export function PublishedClip({ clip, index, onVideo, active, muted, onAudio, onError, row, domains, elapsedLimit }: {
   clip: Review["clips"][number]; index: number; onVideo: (index: number, el: HTMLVideoElement | null) => void; active: boolean;
-  muted: boolean; onAudio: (index: number) => void; onError: () => void;
+  muted: boolean; onAudio: (index: number | null) => void; onError: () => void;
   row?: CornerLap; domains?: Record<"speed" | "rpm", [number, number]>; elapsedLimit?: number;
 }) {
   const video = useRef<HTMLVideoElement>(null), [time, setTime] = useState(0);
@@ -112,7 +112,12 @@ export function PublishedClip({ clip, index, onVideo, active, muted, onAudio, on
     <video ref={el => { video.current = el; onVideo(index, el); }} src={src} poster={clip.poster} controls playsInline muted={muted} preload="metadata"
       className="aspect-video w-full bg-black" onError={onError}
       onLoadedMetadata={() => { if (video.current && row) { video.current.currentTime = playbackStart; setTime(video.current.currentTime); } }}
-      onVolumeChange={() => { if (video.current && !video.current.muted) onAudio(index); }} />
+      onVolumeChange={() => {
+        const el = video.current;
+        // Native controls can change mute without changing the parent selection.
+        // Ignore the volumechange emitted when React applies that selection.
+        if (el && el.muted !== muted) onAudio(el.muted ? null : index);
+      }} />
     <GoproSpeedDisplay reading={reading} status={reading.reason} time={time} published />
   </div>{row && domains && <SelectedCornerTelemetry row={row} videoTime={time}
     videoStart={row.start_session_s! - clip.telemetry_start_s} confirmed={false} publishedEstimate

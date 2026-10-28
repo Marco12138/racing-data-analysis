@@ -151,3 +151,16 @@ test("changing either candidate remounts both paused players at their own entry"
   assert.ok(source.includes('key={`${left}-${right}-${i}`}'));
   assert.match(source, /function pair\(a: number, b: number\).*pause\(\).*setLeft\(a\).*setRight\(b\)/);
 });
+
+test("native mute updates the shared audio selection without reacting to controlled changes", () => {
+  const component = readFileSync(`${root}/frontend/components/PublishedVideoReview.tsx`, "utf8");
+  assert.match(component, /onAudio: \(index: number \| null\) => void/);
+  assert.match(component, /if \(el && el\.muted !== muted\) onAudio\(el\.muted \? null : index\)/);
+});
+
+test("narrow phone steps leave space for labels before switching to three columns", () => {
+  const html = render(0, "en");
+  assert.match(html, /grid-cols-2/);
+  assert.match(html, /min-\[380px\]:grid-cols-3/);
+  assert.match(html, /lg:grid-cols-6/);
+});

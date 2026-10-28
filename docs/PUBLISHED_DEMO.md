@@ -95,3 +95,32 @@ speakers. Physical listening, mobile/other-browser testing and independent visua
 confirmation of the original anchor remain outstanding. No private inputs were
 selected or uploaded. Preserve the pre-fix production deployment
 `dpl_Bufsqo9QbBxsRPkKJ5K22dfahGsp` for rollback.
+
+### Responsive, seek and export follow-up, 2026-10-28
+
+The public sample now permits summary downloads. Both Chinese and English
+Markdown exports downloaded through the visible button; all fifteen observation
+paragraphs matched their on-screen debrief, including the GPS and +/-0.5s
+limitations. This supersedes the earlier download-permission blocker.
+
+Native timeline drags on the public sample changed only the selected video's
+clock and its speed/RPM readings. Ready, paused readouts were independently
+interpolated from that lap's published telemetry and matched. One observation
+during seeking was excluded until media became ready; no validation tolerance
+or evidence timestamp was changed.
+
+Native mute exposed a real control mismatch: muting the selected video left the
+page's audio selection active, so clicking that same selection did not restore
+sound. The player now reports native mute/unmute changes to the shared selection,
+while ignoring events caused by applying the controlled mute property. Local
+browser regression confirmed mute selection and restoration. Narrow screens use
+two step columns below 380px to avoid splitting short English labels.
+
+All six steps were exercised in both languages at 320x740, 390x844 and 844x390
+browser viewport sizes with no document-width overflow. These are desktop-browser
+responsive tests, not physical phone or touch-browser certification. Actual
+speaker listening, iOS/Android hardware, other browser engines, independent anchor
+accuracy and complete corner coverage remain unverified. The immutable public
+media, manual anchor and GPS warnings remain unchanged; no private inputs were
+opened or uploaded. Release receipts and post-deployment results are kept locally
+under ignored `tmp/demo-mobile-qa/`.
