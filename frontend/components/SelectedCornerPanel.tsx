@@ -254,24 +254,24 @@ export function CornerWorkspace({ analysis, file, url, duration, anchors, onResu
     {error && <p role="alert" className="text-sm text-amber-200">{zh ? "无法完成此次操作。检查视频和连续遥测覆盖，或重新导入 Session。" : "Could not complete this operation. Check video and continuous telemetry coverage, or re-import the session."} [{error}]</p>}
     {result && <CornerCandidateNavigation laps={candidates} selectedLap={selectedLap} sourceLap={sourceLap} onSelect={selectCandidate} />}
     {reviewPair && <div className="flex flex-wrap items-center gap-3 text-sm"><span>{zh ? "教练对照" : "Coach pair"}: L{reviewPair.left} / L{reviewPair.right}</span><button className={button} onClick={() => selectCandidate(reviewPair.right)}>{zh ? "返回所选圈" : "Return to selected lap"} L{sourceLap}</button></div>}
-    <div className="grid min-w-0 gap-4 lg:grid-cols-2">
-      <div className="min-w-0"><h4 className="mb-2 text-sm text-cyan-200">L{leftLap} · {leftRole}</h4><div className="relative"><video key={leftLap} ref={sourcePlayer} src={url} muted={audio !== 0} controls playsInline preload="metadata" className="aspect-video w-full bg-black" onLoadedMetadata={e => { e.currentTarget.currentTime = sourceWindow?.start ?? start; }} /><GoproSpeedOverlay file={file} time={now} /></div>
-        {sourceRow && sourceWindow && <>
+    <div className="grid min-w-0 gap-4 lg:grid-cols-2" data-testid="review-media-grid">
+      <div className="order-1 min-w-0" data-testid="review-media"><h4 className="mb-2 text-sm text-cyan-200">L{leftLap} · {leftRole}</h4><div className="relative"><video key={leftLap} ref={sourcePlayer} src={url} muted={audio !== 0} controls playsInline preload="metadata" className="aspect-video w-full bg-black" onLoadedMetadata={e => { e.currentTarget.currentTime = sourceWindow?.start ?? start; }} /><GoproSpeedOverlay file={file} time={now} /></div>
+        {sourceRow && sourceWindow &&
           <ReviewGpsNotice fingerprint={analysis.file_fingerprint} video={identity} start={sourceWindow.start} end={sourceWindow.end} offset={sourceWindow.offset} />
-          <SelectedCornerTelemetry row={sourceRow} videoTime={now} videoStart={sourceWindow.start} confirmed={leftLap === sourceLap || verdicts[leftLap] === "yes"} domains={domains} elapsedLimit={elapsedLimit} active={visible} />
-        </>}
+        }
       </div>
+      {sourceRow && sourceWindow && <div className="order-3 min-w-0" data-testid="review-telemetry"><SelectedCornerTelemetry row={sourceRow} videoTime={now} videoStart={sourceWindow.start} confirmed={leftLap === sourceLap || verdicts[leftLap] === "yes"} domains={domains} elapsedLimit={elapsedLimit} active={visible} /></div>}
       {activeWindow && active && <CornerPlayer key={`${selectedLap}:${activeWindow.start}:${fullInterval}`} audible={audio === 1} file={file} url={url} start={activeWindow.start} end={fullInterval ? activeWindow.end : activeWindow.start + 5} playerRef={targetPlayer} label={`L${selectedLap} · ${rightRole}`}
         row={active} confirmed={active.lap === sourceLap || verdicts[active.lap] === "yes"} domains={domains} elapsedLimit={elapsedLimit} visible={visible}>
         <ReviewGpsNotice fingerprint={analysis.file_fingerprint} video={identity} start={activeWindow.start} end={activeWindow.end} offset={activeWindow.offset} />
       </CornerPlayer>}
-    </div>
-    {activeWindow && <>
+    {activeWindow && <div className="order-2 col-span-full space-y-3" data-testid="review-playback-controls">
       <ReviewAudioControl value={audio} onChange={setAudio} labels={[`L${leftLap}`, `L${selectedLap}`]} />
       <div className="flex flex-wrap items-center gap-3"><button className={button} onClick={() => void playPair()}><Play size={16} />{zh ? "并排重播" : "Replay pair"}</button><button className={button} onClick={() => { sourcePlayer.current?.pause(); targetPlayer.current?.pause(); }}><Pause size={16} />{zh ? "暂停" : "Pause"}</button>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={fullInterval} onChange={e => { sourcePlayer.current?.pause(); targetPlayer.current?.pause(); setFullInterval(e.target.checked); }} />{zh ? "播放完整相同空间区段" : "Play full common spatial interval"}</label></div>
       <p className="text-xs text-slate-400">{zh ? "默认播放完整相同空间区段。计时按同一对 GPS 空间门；两侧同时起播，不拉伸视频，也不保证逐帧处于同一位置。" : "Defaults to the full common spatial interval. Timing uses the same GPS gates; playback is simultaneous, not time-warped or position-locked."}</p>
-    </>}
+    </div>}
+    </div>
     {coach && <CornerCoachComparison comparison={coach} onReview={reviewCoachPair} active={visible}
       playable={coach.status !== "unavailable" && [coach.section, coach.overall].every(row => cornerVideoWindow(row, anchor, duration, anchors))} />}
     {result && <>
@@ -306,9 +306,9 @@ function CornerPlayer({ file, url, start, end, label, playerRef, audible, row, c
 }) {
   const [time, setTime] = useState(start);
   useEffect(() => { const player = playerRef.current; if (!player) return; return observeVideoClock(player, s => { setTime(s.time_s); if (s.time_s >= end) player.pause(); }); }, [playerRef, end]);
-  return <div className="min-w-0"><h4 className="mb-2 text-sm text-amber-200">{label}</h4><div className="relative"><video ref={playerRef} src={url} muted={!audible} controls playsInline preload="metadata" className="aspect-video w-full bg-black" onLoadedMetadata={e => { e.currentTarget.currentTime = start; }} /><GoproSpeedOverlay file={file} time={time} /></div>
-    {children}<SelectedCornerTelemetry row={row} videoTime={time} videoStart={start} confirmed={confirmed} domains={domains} elapsedLimit={elapsedLimit} active={visible} />
-  </div>;
+  return <><div className="order-1 min-w-0" data-testid="review-media"><h4 className="mb-2 text-sm text-amber-200">{label}</h4><div className="relative"><video ref={playerRef} src={url} muted={!audible} controls playsInline preload="metadata" className="aspect-video w-full bg-black" onLoadedMetadata={e => { e.currentTarget.currentTime = start; }} /><GoproSpeedOverlay file={file} time={time} /></div>{children}</div>
+    <div className="order-3 min-w-0" data-testid="review-telemetry"><SelectedCornerTelemetry row={row} videoTime={time} videoStart={start} confirmed={confirmed} domains={domains} elapsedLimit={elapsedLimit} active={visible} /></div>
+  </>;
 }
 
 function CornerPatterns({ result, onLap, active }: { result: SelectedCornerResult; onLap: (lap: number) => void; active: boolean }) {

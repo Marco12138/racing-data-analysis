@@ -124,3 +124,15 @@ accuracy and complete corner coverage remain unverified. The immutable public
 media, manual anchor and GPS warnings remain unchanged; no private inputs were
 opened or uploaded. Release receipts and post-deployment results are kept locally
 under ignored `tmp/demo-mobile-qa/`.
+
+### Review control placement
+
+The published sample and live recommended/corner review now share this visual
+order: both videos, shared playback/audio controls, then each side's telemetry.
+The same ordering applies to narrow screens and two-driver/fallback reviews;
+lap/driver labels remain on the telemetry panels. CSS layout keeps the existing
+player instances and independent clocks, without moving timing into new state.
+Manual anchors, +/-0.5s uncertainty and GPS gates/warnings are unchanged.
+
+This placement change does not close the outstanding physical-device touch,
+speaker-listening, other-browser or independent synchronization acceptance gaps.

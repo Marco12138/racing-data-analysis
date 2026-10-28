@@ -115,9 +115,13 @@ export function DualCornerVideo({ videos, sessions, bindings, starts, observatio
     } catch { const cancelled = c.signal.aborted; stop(); if (!cancelled) setError(zh ? "未能同时播放，请重试。" : "Paired playback failed. Please retry."); }
   }
   return <div className="space-y-3">
-    <button className={`${dualButton} border-yellow-400 text-yellow-300`} onClick={() => playing ? stop() : void play()}>{playing ? <Pause size={16} /> : <Play size={16} />}{zh ? "两侧播放 / 暂停 · 同一空间区间" : "Play / pause both · shared interval"}</button>
-    <ReviewAudioControl value={audio} onChange={setAudio} />
-    <div className="grid min-w-0 gap-4 lg:grid-cols-2">{videos.map((v, i) => <div key={i} className="min-w-0">
+    <div className="grid min-w-0 gap-4 lg:grid-cols-2" data-testid="review-media-grid">
+    <div className="order-2 col-span-full flex flex-wrap items-center gap-3" data-testid="review-playback-controls">
+      <button className={`${dualButton} border-yellow-400 text-yellow-300`} onClick={() => playing ? stop() : void play()}>{playing ? <Pause size={16} /> : <Play size={16} />}{zh ? "两侧播放 / 暂停 · 同一空间区间" : "Play / pause both · shared interval"}</button>
+      <ReviewAudioControl value={audio} onChange={setAudio} />
+    </div>
+    {videos.map((v, i) => <div key={i} className="contents">
+      <div className="order-1 min-w-0" data-testid="review-media">
       <h3 className="mb-2 font-semibold">{i === 0 ? "A" : "B"} · L{sessions[i].selected_lap}</h3>
       <div className="relative"><video ref={i === 0 ? a : b} src={v.url} controls muted={audio !== i} playsInline className="aspect-video w-full bg-black"
         onLoadedMetadata={e => { e.currentTarget.currentTime = starts[i]; }} />
@@ -129,7 +133,8 @@ export function DualCornerVideo({ videos, sessions, bindings, starts, observatio
           onBlur={() => commitStart(i)} onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} /></label>
       {Math.abs(starts[i] - observations[i].start_session_s - bindings[i].offset_s) > .5 && <p className="text-xs text-amber-200">{zh ? "调整已超出人工 ±0.5 秒范围，请重新核对圈号与参照物。GPS 警告未解除。" : "Adjustment exceeds ±0.5s. Recheck lap and landmarks; GPS warnings remain."}</p>}
       <DriverGpsNotice video={v} fingerprint={sessions[i].file_fingerprint} observation={observations[i]} />
-      <DriverClipTelemetry session={sessions[i]} observation={observations[i]} videoTime={times[i]} videoStart={starts[i]} confirmed={confirmed} domains={domains} />
+      </div>
+      <div className="order-3 min-w-0" data-testid="review-telemetry"><h4 className="text-sm font-semibold">{i === 0 ? "A" : "B"} · L{sessions[i].selected_lap}</h4><DriverClipTelemetry session={sessions[i]} observation={observations[i]} videoTime={times[i]} videoStart={starts[i]} confirmed={confirmed} domains={domains} /></div>
     </div>)}</div>
     <ReviewBoundaryCheck key={starts.join(":")} reference={{ url: videos[0].url, start: starts[0], end: ends[0], duration: videos[0].duration, lap: sessions[0].selected_lap, label: "A", confirmed }}
       target={{ url: videos[1].url, start: starts[1], end: ends[1], duration: videos[1].duration, lap: sessions[1].selected_lap, label: "B", confirmed }}

@@ -114,13 +114,14 @@ function PublishedCoachExplorer({ section, data }: { section: PublishedCoachSect
   return <section className="min-w-0 space-y-5" data-testid="published-coach-explorer">
     <div className="space-y-2 text-sm leading-6 text-cyan-100" data-testid={`published-recommendation-${section.id}`}>{coachObservation(evidence, zh).map(line => <p key={line}>{line}</p>)}</div>
     <CornerCandidateNavigation laps={laps.filter(r => r.lap !== left)} selectedLap={right ?? null} sourceLap={section.result.source_lap} onSelect={lap => pair(left, lap)} />
-    <div className="grid min-w-0 gap-5 lg:grid-cols-2">{rows.map((row, i) => row && clips[i] && <figure key={`${left}-${right}-${i}`} className="min-w-0"><figcaption className="mb-2 font-semibold">L{row.lap} · {row.elapsed_s!.toFixed(3)}s · {zh ? "共同空间区段" : "Shared spatial section"}</figcaption>
-      <PublishedClip clip={clips[i]!} row={row} domains={domains} elapsedLimit={limit} index={i} onVideo={register} active muted={audio !== i} onAudio={setAudio} onError={() => setError(true)} />
-      {section.gps_flagged_laps.includes(row.lap) && <p className="mt-2 text-sm text-amber-200">{zh ? "GPS 异常候选：保留显示，不参与最快开法判断。" : "GPS-inconsistent candidate: visible, but excluded from best-technique ranking."}</p>}
-    </figure>)}</div>
-    <div className="flex flex-wrap gap-2"><button onClick={() => void replay()} className="inline-flex min-h-10 items-center gap-2 rounded border border-cyan-500 px-3 text-cyan-200"><Play size={16} />{zh ? "共同入口并排重播" : "Replay from common entry"}</button><button onClick={() => players.current.forEach(v => v?.pause())} className="inline-flex min-h-10 items-center gap-2 rounded border border-slate-600 px-3"><Pause size={16} />{zh ? "暂停" : "Pause"}</button>
+    <div className="grid min-w-0 gap-5 lg:grid-cols-2" data-testid="review-media-grid">{rows.map((row, i) => row && clips[i] && <figure key={`${left}-${right}-${i}`} className="contents" aria-label={`L${row.lap}`}>
+      <PublishedClip clip={clips[i]!} row={row} domains={domains} elapsedLimit={limit} index={i} onVideo={register} active muted={audio !== i} onAudio={setAudio} onError={() => setError(true)}
+        caption={<h4 className="mb-2 font-semibold">L{row.lap} · {row.elapsed_s!.toFixed(3)}s · {zh ? "共同空间区段" : "Shared spatial section"}</h4>}
+        notice={section.gps_flagged_laps.includes(row.lap) && <p className="mt-2 text-sm text-amber-200">{zh ? "GPS 异常候选：保留显示，不参与最快开法判断。" : "GPS-inconsistent candidate: visible, but excluded from best-technique ranking."}</p>} />
+    </figure>)}
+    <div className="order-2 col-span-full flex flex-wrap gap-2" data-testid="review-playback-controls"><button onClick={() => void replay()} className="inline-flex min-h-10 items-center gap-2 rounded border border-cyan-500 px-3 text-cyan-200"><Play size={16} />{zh ? "共同入口并排重播" : "Replay from common entry"}</button><button onClick={() => players.current.forEach(v => v?.pause())} className="inline-flex min-h-10 items-center gap-2 rounded border border-slate-600 px-3"><Pause size={16} />{zh ? "暂停" : "Pause"}</button>
       {[0, 1, null].map((side, i) => <button key={i} aria-pressed={audio === side} onClick={() => setAudio(side)} className={`inline-flex min-h-10 items-center gap-2 rounded border px-3 text-sm ${audio === side ? "border-cyan-400 text-cyan-200" : "border-slate-600"}`}>{side === null ? <VolumeX size={16} /> : <Volume2 size={16} />}{side === null ? (zh ? "静音" : "Mute") : `L${rows[side]?.lap} ${zh ? "声音" : "audio"}`}</button>)}
-    </div>
+    </div></div>
     {error && <p role="alert" className="text-sm text-amber-200">{zh ? "播放失败，可使用原生播放器重试。" : "Playback failed; retry with native video controls."}</p>}
     <p className="text-xs text-slate-400">{zh ? "原短片各5秒；共同空间门位于片段内，实际对照时长按各圈过门时刻计算，不把5秒当作区段圈速。两侧不拉伸，速度/RPM跟随各自时间。" : "Original excerpts are 5s; shared gates lie inside them. Section time comes from each lap's gate crossings, not the fixed clip duration. Videos are not stretched; speed/RPM use each side's clock."}</p>
     <CornerCoachComparison comparison={comparison} onReview={pair} playable={laps.length >= 2} />

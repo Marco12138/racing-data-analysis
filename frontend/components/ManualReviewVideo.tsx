@@ -89,15 +89,15 @@ export function ManualReviewVideo(props: Props) {
     timings.reference?.scope === scope ? timings.reference.timing : null,
     timings.target?.scope === scope ? timings.target.timing : null), [props.review.reference, props.review.target, timings, scope]);
   return <div className="scroll-mt-24" data-testid="paired-video-review">
-    <div className="mb-4 flex flex-wrap gap-3" data-testid="paired-video-controls">
+    <div className="grid min-w-0 gap-5 xl:grid-cols-2" data-testid="review-media-grid">
+    <div className="order-2 col-span-full" data-testid="review-playback-controls"><div className="flex flex-wrap gap-3" data-testid="paired-video-controls">
       <button className={btn} disabled={!ready.reference || !ready.target} onClick={event => {
         event.currentTarget.closest('[data-testid="paired-video-review"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
         setCommand(p => ({ type: "play", sequence: p.sequence + 1 }));
       }}><Play size={15} />{c.pair}</button>
       <button className={btn} onClick={() => setCommand(p => ({ type: "pause", sequence: p.sequence + 1 }))}><Pause size={15} />{c.stop}</button>
       <ReviewAudioControl value={audio} onChange={setAudio} labels={[c.reference, c.target]} />
-    </div>
-    <div className="grid min-w-0 gap-5 xl:grid-cols-2">
+    </div></div>
       {(["reference", "target"] as const).map(side => <ReviewVideoSide key={`${side}:${side === "reference" ? props.review.referenceLap : props.review.targetLap}`} {...props} side={side} command={command} onReady={onReady} onBoundary={onBoundary} startDistance={startDistance}
         scope={scope} comparison={comparison} onTiming={onTiming} onPlayhead={onPlayhead} audible={audio === (side === "reference" ? 0 : 1)} />)}
     </div>
@@ -303,7 +303,8 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
   const currentDistance = activeAnchor && !editing ? reviewDistanceAtTime(trace, now - activeAnchor.offset_ms / 1000) : null;
   const speed = currentDistance === null ? null : reviewValue(trace, currentDistance, "speed");
   const rpm = currentDistance === null ? null : reviewValue(trace, currentDistance, "rpm");
-  return <section className="min-w-0" aria-label={`${c[side]} L${lap}`} data-testid={`review-video-${side}`}>
+  return <section className="contents" aria-label={`${c[side]} L${lap}`} data-testid={`review-video-${side}`}>
+    <div className="order-1 min-w-0" data-testid="review-media">
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
       <h5 className={`font-semibold ${side === "reference" ? "text-amber-300" : "text-cyan-300"}`}>{c[side]} L{lap}</h5>
       <button className={btn} onClick={openEditor}><Scissors size={15} />{c.add}</button>
@@ -354,6 +355,9 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
     {clip && !editing && <p className={`mt-2 text-xs ${activeAnchor ? "text-emerald-300" : "text-amber-300"}`}>{activeAnchor ? c.linked : c.unlinked}</p>}
     {clip && !editing && <p className="mt-1 text-xs text-slate-400">{locale === "zh" ? "人工选点不确定范围：±0.5 秒；参照物候选不会自动应用。" : "Manual picking uncertainty: ±0.5s; landmark suggestions are never applied automatically."}</p>}
     {clip && identity && !editing && <ReviewGpsNotice fingerprint={fingerprint} video={identity} start={clip.start_s} end={clip.end_s} offset={checkedOffset === null ? null : checkedOffset / 1000} />}
+    </div>
+    <div className="order-3 min-w-0" data-testid="review-telemetry">
+    <h5 className={`text-sm font-semibold ${side === "reference" ? "text-amber-300" : "text-cyan-300"}`}>{c[side]} L{lap}</h5>
     {clip && !editing && <dl className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-400" aria-label={`${c[side]} ${c.sync}`}>
       <div><dt>{c.speed}</dt><dd className="mt-1 font-mono text-sm text-white">{speed === null ? "—" : speed.toFixed(1)} km/h</dd></div>
       <div><dt>{c.rpm}</dt><dd className="mt-1 font-mono text-sm text-white">{rpm === null ? "—" : Math.round(rpm)} rpm</dd></div>
@@ -371,5 +375,6 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
       events={landmarkEvents?.[lap] ?? { recovery: null, rpm_drop: null }} />}
     {feedback({ clipId: hash?.signature === signature ? hash.id : "", side, source: mode, clip,
       enabled: Boolean(!candidate && !editing && clip && hash?.signature === signature && hash.originalSignature === originalSignature && watched === signature), syncConfirmed: Boolean(activeAnchor), correction })}
+    </div>
   </section>;
 }

@@ -77,6 +77,26 @@ test("candidate navigation, sound and per-side speed/RPM stay visible", () => {
     assert.match(html, /减速或出弯覆盖不完整/);
   }
 });
+test("shared controls occupy the row between both videos and both telemetry panels", () => {
+  for (const locale of ["zh", "en"]) for (const step of [3, 4]) {
+    const html = render(step, locale);
+    assert.equal((html.match(/class="order-1 min-w-0" data-testid="review-media"/g) ?? []).length, 2);
+    assert.equal((html.match(/class="order-3 min-w-0" data-testid="review-telemetry"/g) ?? []).length, 2);
+    assert.equal((html.match(/data-testid="review-playback-controls"/g) ?? []).length, 1);
+    assert.match(html, /class="order-2 col-span-full [^"]+" data-testid="review-playback-controls"/);
+    assert.match(html, /aria-label="L4"/);
+    assert.match(html, /aria-label="L5"/);
+  }
+});
+test("live corner, fallback and two-driver reviews preserve the same control-row layout", () => {
+  for (const file of ["SelectedCornerPanel", "ManualReviewVideo", "DualDriverVideo"]) {
+    const source = readFileSync(`${root}/frontend/components/${file}.tsx`, "utf8");
+    assert.match(source, /data-testid="review-media-grid"/);
+    assert.match(source, /className="order-1 min-w-0" data-testid="review-media"/);
+    assert.match(source, /className="order-2 col-span-full[^"]*" data-testid="review-playback-controls"/);
+    assert.match(source, /className="order-3 min-w-0" data-testid="review-telemetry"/);
+  }
+});
 test("spatial timing is inside each published clip, no five-second timing shortcut", () => {
   for (const section of evidence.sections) {
     for (const row of section.result.laps.filter(r => r.status === "candidate")) {
