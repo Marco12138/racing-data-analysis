@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { pauseReviewPlayback, resumeReviewPlayback, reviewPlaybackState } from "../frontend/lib/reviewPlayback.ts";
 const root = fileURLToPath(new URL("..", import.meta.url));
 mkdirSync(`${root}/tmp`, { recursive: true });
 const dir = mkdtempSync(`${root}/tmp/published-guide-test-`);
@@ -17,6 +18,69 @@ const analysis = JSON.parse(source).analysis;
 const evidence = JSON.parse(readFileSync(`${root}/public/demo/coach-evidence.json`, "utf8"));
 const data = { analysis, review: analysis.video_review, evidence };
 const render = (step, locale = "zh") => renderToStaticMarkup(createElement(PublishedGuideTest, { locale, data, step }));
+function playbackTarget(time, start, end, options = {}) {
+  const video = { paused: true, ended: false, readyState: 4, plays: 0, pauses: 0,
+    get currentTime() { return time; }, set currentTime(_) { throw Error("Resume must not seek"); },
+    play() { this.plays++; this.paused = false; return Promise.resolve(); },
+    pause() { this.pauses++; this.paused = true; }, ...options };
+  return { video, start, end };
+}
+test("paired resume retains independent paused times without resetting either side", async () => {
+  const pair = [playbackTarget(103.1, 100, 105), playbackTarget(204.2, 200, 206)];
+  assert.equal(reviewPlaybackState(pair), "paused");
+  await resumeReviewPlayback(pair);
+  assert.equal(reviewPlaybackState(pair), "playing");
+  assert.deepEqual(pair.map(t => t.video.currentTime), [103.1, 204.2]);
+  pauseReviewPlayback(pair);
+  assert.equal(reviewPlaybackState(pair), "paused");
+  await resumeReviewPlayback(pair);
+  assert.deepEqual(pair.map(t => t.video.plays), [2, 2]);
+});
+test("native per-side pause is reflected by actual media state", () => {
+  const pair = [playbackTarget(2, 0, 5, { paused: false }), playbackTarget(3, 0, 5)];
+  assert.equal(reviewPlaybackState(pair), "playing");
+  pair[0].video.pause();
+  assert.equal(reviewPlaybackState(pair), "paused");
+});
+test("resume does not restart a completed side or cross the selected exit", async () => {
+  const pair = [playbackTarget(5, 0, 5), playbackTarget(4.5, 0, 6)];
+  await resumeReviewPlayback(pair);
+  assert.deepEqual(pair.map(t => t.video.plays), [0, 1]);
+  const complete = [playbackTarget(5, 0, 5), playbackTarget(6, 0, 6, { ended: true })];
+  assert.equal(reviewPlaybackState(complete), "ended");
+  await resumeReviewPlayback(complete);
+  assert.deepEqual(complete.map(t => t.video.plays), [0, 0]);
+});
+test("resume never rewinds out-of-window players or starts unloaded media", async () => {
+  const invalid = [playbackTarget(0, 100, 105), playbackTarget(8, 0, 5)];
+  await resumeReviewPlayback(invalid);
+  assert.deepEqual(invalid.map(t => t.video.plays), [0, 0]);
+  const loading = [playbackTarget(2, 0, 5, { readyState: 0 }), playbackTarget(3, 0, 5)];
+  assert.equal(reviewPlaybackState(loading), "unavailable");
+  await resumeReviewPlayback(loading);
+  assert.deepEqual(loading.map(t => t.video.plays), [0, 0]);
+});
+test("metadata-only preload can resume and let play request video frames", async () => {
+  const pair = [playbackTarget(100, 100, 105, { readyState: 1 }), playbackTarget(200, 200, 206, { readyState: 1 })];
+  assert.equal(reviewPlaybackState(pair), "paused");
+  await resumeReviewPlayback(pair);
+  assert.deepEqual(pair.map(t => t.video.plays), [1, 1]);
+});
+test("a failed resume pauses both sides instead of leaving one playing", async () => {
+  const pair = [playbackTarget(2, 0, 5), playbackTarget(3, 0, 5, { play: () => Promise.reject(Error("blocked")) })];
+  await assert.rejects(resumeReviewPlayback(pair), /blocked/);
+  assert.ok(pair.every(t => t.video.paused));
+});
+test("all paired review surfaces use the shared native-state pause/resume button", () => {
+  for (const file of ["PublishedGuidedReview", "SelectedCornerPanel", "DualDriverVideo", "ManualReviewVideo"]) {
+    assert.match(readFileSync(`${root}/frontend/components/${file}.tsx`, "utf8"), /<ReviewPauseButton/);
+  }
+  for (const locale of ["zh", "en"]) {
+    const html = render(3, locale);
+    assert.match(html, /data-testid="review-pause-resume"/);
+    assert.ok(html.includes(locale === "zh" ? "继续播放" : "Resume"));
+  }
+});
 test("public evidence binds to the already-published source without private assets", () => {
   assert.equal(evidence.source_sha256, createHash("sha256").update(source).digest("hex"));
   assert.equal(evidence.manual_anchor_modified, false);
@@ -75,6 +139,26 @@ test("candidate navigation, sound and per-side speed/RPM stay visible", () => {
     assert.match(html, /L6/); assert.match(html, /静音/);
     assert.match(html, /本片段已人工确认/);
     assert.match(html, /减速或出弯覆盖不完整/);
+  }
+});
+test("shared controls occupy the row between both videos and both telemetry panels", () => {
+  for (const locale of ["zh", "en"]) for (const step of [3, 4]) {
+    const html = render(step, locale);
+    assert.equal((html.match(/class="order-1 min-w-0" data-testid="review-media"/g) ?? []).length, 2);
+    assert.equal((html.match(/class="order-3 min-w-0" data-testid="review-telemetry"/g) ?? []).length, 2);
+    assert.equal((html.match(/data-testid="review-playback-controls"/g) ?? []).length, 1);
+    assert.match(html, /class="order-2 col-span-full [^"]+" data-testid="review-playback-controls"/);
+    assert.match(html, /aria-label="L4"/);
+    assert.match(html, /aria-label="L5"/);
+  }
+});
+test("live corner, fallback and two-driver reviews preserve the same control-row layout", () => {
+  for (const file of ["SelectedCornerPanel", "ManualReviewVideo", "DualDriverVideo"]) {
+    const source = readFileSync(`${root}/frontend/components/${file}.tsx`, "utf8");
+    assert.match(source, /data-testid="review-media-grid"/);
+    assert.match(source, /className="order-1 min-w-0" data-testid="review-media"/);
+    assert.match(source, /className="order-2 col-span-full[^"]*" data-testid="review-playback-controls"/);
+    assert.match(source, /className="order-3 min-w-0" data-testid="review-telemetry"/);
   }
 });
 test("spatial timing is inside each published clip, no five-second timing shortcut", () => {

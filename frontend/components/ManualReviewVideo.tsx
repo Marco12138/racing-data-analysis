@@ -19,6 +19,7 @@ import { GoproSpeedOverlay } from "./GoproSpeedOverlay";
 import { compareClipTelemetry, type ClipComparison, type ClipTiming } from "../lib/clipTelemetry";
 import { ClipTelemetrySide, ClipTelemetryDelta } from "./ClipTelemetry";
 import { ReviewAudioControl } from "./ReviewAudioControl";
+import { ReviewPauseButton } from "./ReviewPauseButton";
 
 const TEXT = {
   zh: {
@@ -73,6 +74,9 @@ export function ManualReviewVideo(props: Props) {
   const [command, setCommand] = useState<PairCommand>({ type: "pause", sequence: 0 });
   const [ready, setReady] = useState({ reference: false, target: false });
   const [audio, setAudio] = useState<number | null>(0);
+  const players = useRef<Record<ReviewSide, HTMLVideoElement | null>>({ reference: null, target: null });
+  const onVideo = useCallback((side: ReviewSide, video: HTMLVideoElement | null) => { players.current[side] = video; }, []);
+  const [playbackError, setPlaybackError] = useState(false);
   const [boundaries, setBoundaries] = useState<{ reference: BoundaryVideo | null; target: BoundaryVideo | null }>({ reference: null, target: null });
   const onBoundary = useCallback((side: ReviewSide, value: BoundaryVideo | null) => setBoundaries(p => JSON.stringify(p[side]) === JSON.stringify(value) ? p : { ...p, [side]: value }), []);
   const onReady = useCallback((side: ReviewSide, value: boolean) => setReady(p => p[side] === value ? p : { ...p, [side]: value }), []);
@@ -89,18 +93,21 @@ export function ManualReviewVideo(props: Props) {
     timings.reference?.scope === scope ? timings.reference.timing : null,
     timings.target?.scope === scope ? timings.target.timing : null), [props.review.reference, props.review.target, timings, scope]);
   return <div className="scroll-mt-24" data-testid="paired-video-review">
-    <div className="mb-4 flex flex-wrap gap-3" data-testid="paired-video-controls">
+    <div className="grid min-w-0 gap-5 xl:grid-cols-2" data-testid="review-media-grid">
+    <div className="order-2 col-span-full" data-testid="review-playback-controls"><div className="flex flex-wrap gap-3" data-testid="paired-video-controls">
       <button className={btn} disabled={!ready.reference || !ready.target} onClick={event => {
         event.currentTarget.closest('[data-testid="paired-video-review"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
         setCommand(p => ({ type: "play", sequence: p.sequence + 1 }));
       }}><Play size={15} />{c.pair}</button>
-      <button className={btn} onClick={() => setCommand(p => ({ type: "pause", sequence: p.sequence + 1 }))}><Pause size={15} />{c.stop}</button>
+      <ReviewPauseButton className={btn} onResume={() => setPlaybackError(false)} onError={() => setPlaybackError(true)} getTargets={() => (["reference", "target"] as const).map(side => ({
+        video: players.current[side], start: boundaries[side]?.start ?? NaN, end: boundaries[side]?.end ?? NaN,
+      }))} />
       <ReviewAudioControl value={audio} onChange={setAudio} labels={[c.reference, c.target]} />
-    </div>
-    <div className="grid min-w-0 gap-5 xl:grid-cols-2">
+    </div></div>
       {(["reference", "target"] as const).map(side => <ReviewVideoSide key={`${side}:${side === "reference" ? props.review.referenceLap : props.review.targetLap}`} {...props} side={side} command={command} onReady={onReady} onBoundary={onBoundary} startDistance={startDistance}
-        scope={scope} comparison={comparison} onTiming={onTiming} onPlayhead={onPlayhead} audible={audio === (side === "reference" ? 0 : 1)} />)}
+        scope={scope} comparison={comparison} onTiming={onTiming} onPlayhead={onPlayhead} onVideo={onVideo} audible={audio === (side === "reference" ? 0 : 1)} />)}
     </div>
+    {playbackError && <p role="alert" className="text-sm text-amber-200">{c.error}</p>}
     <ClipTelemetryDelta comparison={comparison} cursors={cursors} />
     <p className="mt-2 text-xs text-slate-400">{c.pairNote}</p>
     <p className="mt-2 text-xs text-slate-500">{c.localOnly}</p>
@@ -111,7 +118,8 @@ export function ManualReviewVideo(props: Props) {
 
 function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, defaultDuration, targetCalibration, referenceCalibration, sessionCalibrations, lapRanges,
   context, onCursor, feedback, side, command, onReady, onBoundary, startDistance, landmarkEvents, readOnly = false,
-  scope, comparison, onTiming, onPlayhead, audible }: Props & { side: ReviewSide; command: PairCommand; audible: boolean;
+  scope, comparison, onTiming, onPlayhead, onVideo, audible }: Props & { side: ReviewSide; command: PairCommand; audible: boolean;
+    onVideo: (side: ReviewSide, video: HTMLVideoElement | null) => void;
     onReady: (side: ReviewSide, ready: boolean) => void; onBoundary: (side: ReviewSide, value: BoundaryVideo | null) => void; startDistance: number | null;
     scope: string; comparison: ClipComparison; onTiming: (side: ReviewSide, value: { scope: string; timing: ClipTiming | null }) => void;
     onPlayhead: (side: ReviewSide, distance: number | null) => void }) {
@@ -126,6 +134,7 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
   const calibration = side === "reference" ? referenceCalibration : targetCalibration;
   const key = `racing-manual-review:v1:${fingerprint}:${review.id}:${side}:${lap}`;
   const video = useRef<HTMLVideoElement>(null);
+  const registerVideo = useCallback((element: HTMLVideoElement | null) => { video.current = element; onVideo(side, element); }, [onVideo, side]);
   const [ownFile, setOwnFile] = useState<File | null>(null), [ownResource, setOwnResource] = useState<{ file: File; url: string } | null>(null);
   const [ownDuration, setOwnDuration] = useState(0);
   const file = ownFile ?? defaultFile, duration = ownFile ? ownDuration : defaultDuration;
@@ -303,13 +312,14 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
   const currentDistance = activeAnchor && !editing ? reviewDistanceAtTime(trace, now - activeAnchor.offset_ms / 1000) : null;
   const speed = currentDistance === null ? null : reviewValue(trace, currentDistance, "speed");
   const rpm = currentDistance === null ? null : reviewValue(trace, currentDistance, "rpm");
-  return <section className="min-w-0" aria-label={`${c[side]} L${lap}`} data-testid={`review-video-${side}`}>
+  return <section className="contents" aria-label={`${c[side]} L${lap}`} data-testid={`review-video-${side}`}>
+    <div className="order-1 min-w-0" data-testid="review-media">
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
       <h5 className={`font-semibold ${side === "reference" ? "text-amber-300" : "text-cyan-300"}`}>{c[side]} L{lap}</h5>
       <button className={btn} onClick={openEditor}><Scissors size={15} />{c.add}</button>
     </div>
     <p className="mb-2 text-xs text-slate-400">{c.scope}: L{lap}</p>
-    {url && (editing || clip) ? <div className="relative min-w-0"><video ref={video} src={url} muted={!audible} playsInline preload="metadata" className="aspect-video w-full bg-black object-contain" aria-label={`${c[side]} L${lap}`}
+    {url && (editing || clip) ? <div className="relative min-w-0"><video ref={registerVideo} src={url} muted={!audible} playsInline preload="metadata" className="aspect-video w-full bg-black object-contain" aria-label={`${c[side]} L${lap}`}
       onError={() => setError("error")} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
       onLoadedMetadata={event => { const el = event.currentTarget; if (ownFile && Number.isFinite(el.duration)) { setOwnDuration(el.duration); setEnd(p => Math.min(p, el.duration)); } el.playbackRate = rate; if (!editing && clip) el.currentTime = clip.start_s; }}
       /><GoproSpeedOverlay file={file} time={now} /></div> : <div className="flex aspect-video items-center justify-center bg-slate-950 p-4 text-center text-sm text-slate-400">{!url ? c.noVideo : c.missing}</div>}
@@ -354,6 +364,9 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
     {clip && !editing && <p className={`mt-2 text-xs ${activeAnchor ? "text-emerald-300" : "text-amber-300"}`}>{activeAnchor ? c.linked : c.unlinked}</p>}
     {clip && !editing && <p className="mt-1 text-xs text-slate-400">{locale === "zh" ? "人工选点不确定范围：±0.5 秒；参照物候选不会自动应用。" : "Manual picking uncertainty: ±0.5s; landmark suggestions are never applied automatically."}</p>}
     {clip && identity && !editing && <ReviewGpsNotice fingerprint={fingerprint} video={identity} start={clip.start_s} end={clip.end_s} offset={checkedOffset === null ? null : checkedOffset / 1000} />}
+    </div>
+    <div className="order-3 min-w-0" data-testid="review-telemetry">
+    <h5 className={`text-sm font-semibold ${side === "reference" ? "text-amber-300" : "text-cyan-300"}`}>{c[side]} L{lap}</h5>
     {clip && !editing && <dl className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-400" aria-label={`${c[side]} ${c.sync}`}>
       <div><dt>{c.speed}</dt><dd className="mt-1 font-mono text-sm text-white">{speed === null ? "—" : speed.toFixed(1)} km/h</dd></div>
       <div><dt>{c.rpm}</dt><dd className="mt-1 font-mono text-sm text-white">{rpm === null ? "—" : Math.round(rpm)} rpm</dd></div>
@@ -371,5 +384,6 @@ function ReviewVideoSide({ review, fingerprint, defaultFile, defaultUrl, default
       events={landmarkEvents?.[lap] ?? { recovery: null, rpm_drop: null }} />}
     {feedback({ clipId: hash?.signature === signature ? hash.id : "", side, source: mode, clip,
       enabled: Boolean(!candidate && !editing && clip && hash?.signature === signature && hash.originalSignature === originalSignature && watched === signature), syncConfirmed: Boolean(activeAnchor), correction })}
+    </div>
   </section>;
 }

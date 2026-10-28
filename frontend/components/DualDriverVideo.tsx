@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera, Pause, Play } from "lucide-react";
+import { Camera } from "lucide-react";
 import { useI18n } from "../lib/i18n";
 import { observeVideoClock } from "../lib/videoFrameClock";
 import { seekComparisonVideo } from "../lib/videoComparison";
@@ -11,6 +11,7 @@ import { ManualLapBinding } from "./ManualLapBinding";
 import { GoproSpeedOverlay } from "./GoproSpeedOverlay";
 import { ReviewBoundaryCheck } from "./ReviewBoundaryCheck";
 import { ReviewAudioControl } from "./ReviewAudioControl";
+import { ReviewPauseButton } from "./ReviewPauseButton";
 import { reviewVideoIdentity } from "../lib/manualReview";
 import { parseReviewGpsEvidence, REVIEW_GPS_EVENT, reviewGpsKey, type ReviewGpsEvidence } from "../lib/reviewGpsEvidence";
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, XAxis, YAxis } from "recharts";
@@ -70,7 +71,7 @@ export function DualCornerVideo({ videos, sessions, bindings, starts, observatio
 }) {
   const { locale } = useI18n(), zh = locale === "zh";
   const a = useRef<HTMLVideoElement>(null), b = useRef<HTMLVideoElement>(null);
-  const [times, setTimes] = useState<[number, number]>(starts), [playing, setPlaying] = useState(false), [error, setError] = useState("");
+  const [times, setTimes] = useState<[number, number]>(starts), [error, setError] = useState("");
   const [audio, setAudio] = useState<number | null>(0);
   const [draftStarts, setDraftStarts] = useState(() => starts.map(String));
   const startA = starts[0], startB = starts[1], lengthA = observations[0].elapsed_s, lengthB = observations[1].elapsed_s;
@@ -84,7 +85,7 @@ export function DualCornerVideo({ videos, sessions, bindings, starts, observatio
     })) as Record<"speed" | "rpm", [number, number]>;
   }, [sessions, observations]);
   const abort = useRef<AbortController | null>(null), running = useRef(false);
-  function stop() { running.current = false; abort.current?.abort(); a.current?.pause(); b.current?.pause(); setPlaying(false); }
+  function stop() { running.current = false; abort.current?.abort(); a.current?.pause(); b.current?.pause(); }
   useEffect(() => {
     const starts = [startA, startB], lengths = [lengthA, lengthB];
     const elements = [a.current, b.current];
@@ -92,7 +93,7 @@ export function DualCornerVideo({ videos, sessions, bindings, starts, observatio
       setTimes(t => i === 0 ? [sample.time_s, t[1]] : [t[0], sample.time_s]);
       if (running.current && sample.time_s >= starts[i] + lengths[i] - .015) {
         v!.pause();
-        if (elements.every(e => !e || e.paused)) { running.current = false; setPlaying(false); }
+        if (elements.every(e => !e || e.paused)) running.current = false;
       }
     }) : () => {});
     elements.forEach((v, i) => { if (v) v.currentTime = starts[i]; });
@@ -111,13 +112,19 @@ export function DualCornerVideo({ videos, sessions, bindings, starts, observatio
       if (!a.current || !b.current) return;
       await Promise.all([a.current, b.current].map((v, i) => seekComparisonVideo(v, starts[i], c.signal)));
       c.signal.throwIfAborted(); running.current = true;
-      await Promise.all([a.current.play(), b.current.play()]); c.signal.throwIfAborted(); setPlaying(true);
+      await Promise.all([a.current.play(), b.current.play()]); c.signal.throwIfAborted();
     } catch { const cancelled = c.signal.aborted; stop(); if (!cancelled) setError(zh ? "未能同时播放，请重试。" : "Paired playback failed. Please retry."); }
   }
   return <div className="space-y-3">
-    <button className={`${dualButton} border-yellow-400 text-yellow-300`} onClick={() => playing ? stop() : void play()}>{playing ? <Pause size={16} /> : <Play size={16} />}{zh ? "两侧播放 / 暂停 · 同一空间区间" : "Play / pause both · shared interval"}</button>
-    <ReviewAudioControl value={audio} onChange={setAudio} />
-    <div className="grid min-w-0 gap-4 lg:grid-cols-2">{videos.map((v, i) => <div key={i} className="min-w-0">
+    <div className="grid min-w-0 gap-4 lg:grid-cols-2" data-testid="review-media-grid">
+    <div className="order-2 col-span-full flex flex-wrap items-center gap-3" data-testid="review-playback-controls">
+      <ReviewPauseButton className={`${dualButton} border-yellow-400 text-yellow-300`} onPause={stop} onResume={() => { running.current = true; setError(""); }} onReplay={() => void play()}
+        onError={() => setError(zh ? "未能同时播放，请重试。" : "Paired playback failed. Please retry.")}
+        getTargets={() => [a.current, b.current].map((video, i) => ({ video, start: starts[i], end: ends[i] }))} />
+      <ReviewAudioControl value={audio} onChange={setAudio} />
+    </div>
+    {videos.map((v, i) => <div key={i} className="contents">
+      <div className="order-1 min-w-0" data-testid="review-media">
       <h3 className="mb-2 font-semibold">{i === 0 ? "A" : "B"} · L{sessions[i].selected_lap}</h3>
       <div className="relative"><video ref={i === 0 ? a : b} src={v.url} controls muted={audio !== i} playsInline className="aspect-video w-full bg-black"
         onLoadedMetadata={e => { e.currentTarget.currentTime = starts[i]; }} />
@@ -129,7 +136,8 @@ export function DualCornerVideo({ videos, sessions, bindings, starts, observatio
           onBlur={() => commitStart(i)} onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} /></label>
       {Math.abs(starts[i] - observations[i].start_session_s - bindings[i].offset_s) > .5 && <p className="text-xs text-amber-200">{zh ? "调整已超出人工 ±0.5 秒范围，请重新核对圈号与参照物。GPS 警告未解除。" : "Adjustment exceeds ±0.5s. Recheck lap and landmarks; GPS warnings remain."}</p>}
       <DriverGpsNotice video={v} fingerprint={sessions[i].file_fingerprint} observation={observations[i]} />
-      <DriverClipTelemetry session={sessions[i]} observation={observations[i]} videoTime={times[i]} videoStart={starts[i]} confirmed={confirmed} domains={domains} />
+      </div>
+      <div className="order-3 min-w-0" data-testid="review-telemetry"><h4 className="text-sm font-semibold">{i === 0 ? "A" : "B"} · L{sessions[i].selected_lap}</h4><DriverClipTelemetry session={sessions[i]} observation={observations[i]} videoTime={times[i]} videoStart={starts[i]} confirmed={confirmed} domains={domains} /></div>
     </div>)}</div>
     <ReviewBoundaryCheck key={starts.join(":")} reference={{ url: videos[0].url, start: starts[0], end: ends[0], duration: videos[0].duration, lap: sessions[0].selected_lap, label: "A", confirmed }}
       target={{ url: videos[1].url, start: starts[1], end: ends[1], duration: videos[1].duration, lap: sessions[1].selected_lap, label: "B", confirmed }}

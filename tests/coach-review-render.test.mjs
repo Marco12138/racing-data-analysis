@@ -48,7 +48,10 @@ test("guided recommendations show pending status without promoting a single vote
   assert.match(html, /待核对/);
   assert.doesNotMatch(html, /两侧已确认/);
   assert.match(html, /data-testid="paired-video-controls"/);
-  assert.ok(html.indexOf('data-testid="paired-video-controls"') < html.indexOf('class="grid min-w-0 gap-5 xl:grid-cols-2"'));
+  assert.match(html, /class="order-2 col-span-full" data-testid="review-playback-controls"/);
+  const pairs = (html.match(/data-testid="paired-video-controls"/g) ?? []).length;
+  assert.equal((html.match(/data-testid="review-media"/g) ?? []).length, pairs * 2);
+  assert.equal((html.match(/class="order-3 min-w-0" data-testid="review-telemetry"/g) ?? []).length, pairs * 2);
 });
 
 test("Chinese coach review includes real Top 3 and all four selection choices, disabled without video", () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Play, RotateCcw, Volume2, VolumeX } from "lucide-react";
 import { useI18n } from "../lib/i18n";
 import { isPublishedVideoReview, publishedClipMedia, publishedPlaybackBounds, type PublishedVideoReview as Review } from "../lib/publishedVideoReview";
@@ -81,10 +81,11 @@ export function PublishedVideoReview({ review, active = true }: { review: Review
 }
 
 /** The excerpt clock starts at zero; its own GPS5 samples follow presented frames and seeks. */
-export function PublishedClip({ clip, index, onVideo, active, muted, onAudio, onError, row, domains, elapsedLimit }: {
+export function PublishedClip({ clip, index, onVideo, active, muted, onAudio, onError, row, domains, elapsedLimit, caption, notice }: {
   clip: Review["clips"][number]; index: number; onVideo: (index: number, el: HTMLVideoElement | null) => void; active: boolean;
   muted: boolean; onAudio: (index: number | null) => void; onError: () => void;
   row?: CornerLap; domains?: Record<"speed" | "rpm", [number, number]>; elapsedLimit?: number;
+  caption?: ReactNode; notice?: ReactNode;
 }) {
   const video = useRef<HTMLVideoElement>(null), [time, setTime] = useState(0);
   const data = publishedClipMedia(clip, media);
@@ -108,7 +109,8 @@ export function PublishedClip({ clip, index, onVideo, active, muted, onAudio, on
   }, [row, playbackEnd]);
   useEffect(() => { if (!active) video.current?.pause(); }, [active]);
   const reading = goproSpeedAt(data?.points ?? [], time);
-  return <><div className="relative">
+  return <><div className="order-1 min-w-0" data-testid="review-media">
+    {caption}<div className="relative">
     <video ref={el => { video.current = el; onVideo(index, el); }} src={src} poster={clip.poster} controls playsInline muted={muted} preload="metadata"
       className="aspect-video w-full bg-black" onError={onError}
       onLoadedMetadata={() => { if (video.current && row) { video.current.currentTime = playbackStart; setTime(video.current.currentTime); } }}
@@ -119,7 +121,7 @@ export function PublishedClip({ clip, index, onVideo, active, muted, onAudio, on
         if (el && el.muted !== muted) onAudio(el.muted ? null : index);
       }} />
     <GoproSpeedDisplay reading={reading} status={reading.reason} time={time} published />
-  </div>{row && domains && <SelectedCornerTelemetry row={row} videoTime={time}
+  </div>{notice}</div>{row && domains && <div className="order-3 min-w-0" data-testid="review-telemetry"><SelectedCornerTelemetry row={row} videoTime={time}
     videoStart={row.start_session_s! - clip.telemetry_start_s} confirmed={false} publishedEstimate
-    domains={domains} elapsedLimit={elapsedLimit ?? row.elapsed_s!} active={active} />}</>;
+    domains={domains} elapsedLimit={elapsedLimit ?? row.elapsed_s!} active={active} /></div>}</>;
 }
