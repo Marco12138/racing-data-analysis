@@ -136,3 +136,9 @@ Manual anchors, +/-0.5s uncertainty and GPS gates/warnings are unchanged.
 
 This placement change does not close the outstanding physical-device touch,
 speaker-listening, other-browser or independent synchronization acceptance gaps.
+
+The existing pause button now switches to Resume based on actual media events,
+including native player controls. Resume preserves each side's current time and
+does not restart a side already at its selected exit. Paired replay remains the
+explicit action for returning to the shared entry. A failed resume pauses both
+sides and reports the playback error; it cannot change saved anchors or GPS flags.

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Download, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { ArrowLeft, ArrowRight, Download, Play, Volume2, VolumeX } from "lucide-react";
 import { useI18n } from "../lib/i18n";
 import { loadPublishedCoach, publishedCoachEvidence, type PublishedCoachData, type PublishedCoachSection } from "../lib/publishedCoach";
 import { coachObservation } from "../lib/recommendedCoach";
@@ -12,6 +12,7 @@ import { PublishedClip } from "./PublishedVideoReview";
 import { CornerCandidateNavigation } from "./SelectedCornerTelemetry";
 import { CornerCoachComparison } from "./CornerCoachComparison";
 import { publishedPlaybackBounds } from "../lib/publishedVideoReview";
+import { ReviewPauseButton } from "./ReviewPauseButton";
 
 export function PublishedGuidedReview() {
   const { locale } = useI18n(), zh = locale === "zh";
@@ -119,7 +120,11 @@ function PublishedCoachExplorer({ section, data }: { section: PublishedCoachSect
         caption={<h4 className="mb-2 font-semibold">L{row.lap} · {row.elapsed_s!.toFixed(3)}s · {zh ? "共同空间区段" : "Shared spatial section"}</h4>}
         notice={section.gps_flagged_laps.includes(row.lap) && <p className="mt-2 text-sm text-amber-200">{zh ? "GPS 异常候选：保留显示，不参与最快开法判断。" : "GPS-inconsistent candidate: visible, but excluded from best-technique ranking."}</p>} />
     </figure>)}
-    <div className="order-2 col-span-full flex flex-wrap gap-2" data-testid="review-playback-controls"><button onClick={() => void replay()} className="inline-flex min-h-10 items-center gap-2 rounded border border-cyan-500 px-3 text-cyan-200"><Play size={16} />{zh ? "共同入口并排重播" : "Replay from common entry"}</button><button onClick={() => players.current.forEach(v => v?.pause())} className="inline-flex min-h-10 items-center gap-2 rounded border border-slate-600 px-3"><Pause size={16} />{zh ? "暂停" : "Pause"}</button>
+    <div className="order-2 col-span-full flex flex-wrap gap-2" data-testid="review-playback-controls"><button onClick={() => void replay()} className="inline-flex min-h-10 items-center gap-2 rounded border border-cyan-500 px-3 text-cyan-200"><Play size={16} />{zh ? "共同入口并排重播" : "Replay from common entry"}</button>
+      <ReviewPauseButton className="inline-flex min-h-10 items-center gap-2 rounded border border-slate-600 px-3 disabled:opacity-40" onError={() => setError(true)} getTargets={() => rows.map((row, i) => {
+        const bounds = row && clips[i] ? publishedPlaybackBounds(row.start_session_s! - clips[i]!.telemetry_start_s, row.end_session_s! - clips[i]!.telemetry_start_s) : [NaN, NaN];
+        return { video: players.current[i], start: bounds[0], end: bounds[1] };
+      })} />
       {[0, 1, null].map((side, i) => <button key={i} aria-pressed={audio === side} onClick={() => setAudio(side)} className={`inline-flex min-h-10 items-center gap-2 rounded border px-3 text-sm ${audio === side ? "border-cyan-400 text-cyan-200" : "border-slate-600"}`}>{side === null ? <VolumeX size={16} /> : <Volume2 size={16} />}{side === null ? (zh ? "静音" : "Mute") : `L${rows[side]?.lap} ${zh ? "声音" : "audio"}`}</button>)}
     </div></div>
     {error && <p role="alert" className="text-sm text-amber-200">{zh ? "播放失败，可使用原生播放器重试。" : "Playback failed; retry with native video controls."}</p>}

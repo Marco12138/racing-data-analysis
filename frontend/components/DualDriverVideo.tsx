@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera, Pause, Play } from "lucide-react";
+import { Camera } from "lucide-react";
 import { useI18n } from "../lib/i18n";
 import { observeVideoClock } from "../lib/videoFrameClock";
 import { seekComparisonVideo } from "../lib/videoComparison";
@@ -11,6 +11,7 @@ import { ManualLapBinding } from "./ManualLapBinding";
 import { GoproSpeedOverlay } from "./GoproSpeedOverlay";
 import { ReviewBoundaryCheck } from "./ReviewBoundaryCheck";
 import { ReviewAudioControl } from "./ReviewAudioControl";
+import { ReviewPauseButton } from "./ReviewPauseButton";
 import { reviewVideoIdentity } from "../lib/manualReview";
 import { parseReviewGpsEvidence, REVIEW_GPS_EVENT, reviewGpsKey, type ReviewGpsEvidence } from "../lib/reviewGpsEvidence";
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, XAxis, YAxis } from "recharts";
@@ -70,7 +71,7 @@ export function DualCornerVideo({ videos, sessions, bindings, starts, observatio
 }) {
   const { locale } = useI18n(), zh = locale === "zh";
   const a = useRef<HTMLVideoElement>(null), b = useRef<HTMLVideoElement>(null);
-  const [times, setTimes] = useState<[number, number]>(starts), [playing, setPlaying] = useState(false), [error, setError] = useState("");
+  const [times, setTimes] = useState<[number, number]>(starts), [error, setError] = useState("");
   const [audio, setAudio] = useState<number | null>(0);
   const [draftStarts, setDraftStarts] = useState(() => starts.map(String));
   const startA = starts[0], startB = starts[1], lengthA = observations[0].elapsed_s, lengthB = observations[1].elapsed_s;
@@ -84,7 +85,7 @@ export function DualCornerVideo({ videos, sessions, bindings, starts, observatio
     })) as Record<"speed" | "rpm", [number, number]>;
   }, [sessions, observations]);
   const abort = useRef<AbortController | null>(null), running = useRef(false);
-  function stop() { running.current = false; abort.current?.abort(); a.current?.pause(); b.current?.pause(); setPlaying(false); }
+  function stop() { running.current = false; abort.current?.abort(); a.current?.pause(); b.current?.pause(); }
   useEffect(() => {
     const starts = [startA, startB], lengths = [lengthA, lengthB];
     const elements = [a.current, b.current];
@@ -92,7 +93,7 @@ export function DualCornerVideo({ videos, sessions, bindings, starts, observatio
       setTimes(t => i === 0 ? [sample.time_s, t[1]] : [t[0], sample.time_s]);
       if (running.current && sample.time_s >= starts[i] + lengths[i] - .015) {
         v!.pause();
-        if (elements.every(e => !e || e.paused)) { running.current = false; setPlaying(false); }
+        if (elements.every(e => !e || e.paused)) running.current = false;
       }
     }) : () => {});
     elements.forEach((v, i) => { if (v) v.currentTime = starts[i]; });
@@ -111,13 +112,15 @@ export function DualCornerVideo({ videos, sessions, bindings, starts, observatio
       if (!a.current || !b.current) return;
       await Promise.all([a.current, b.current].map((v, i) => seekComparisonVideo(v, starts[i], c.signal)));
       c.signal.throwIfAborted(); running.current = true;
-      await Promise.all([a.current.play(), b.current.play()]); c.signal.throwIfAborted(); setPlaying(true);
+      await Promise.all([a.current.play(), b.current.play()]); c.signal.throwIfAborted();
     } catch { const cancelled = c.signal.aborted; stop(); if (!cancelled) setError(zh ? "未能同时播放，请重试。" : "Paired playback failed. Please retry."); }
   }
   return <div className="space-y-3">
     <div className="grid min-w-0 gap-4 lg:grid-cols-2" data-testid="review-media-grid">
     <div className="order-2 col-span-full flex flex-wrap items-center gap-3" data-testid="review-playback-controls">
-      <button className={`${dualButton} border-yellow-400 text-yellow-300`} onClick={() => playing ? stop() : void play()}>{playing ? <Pause size={16} /> : <Play size={16} />}{zh ? "两侧播放 / 暂停 · 同一空间区间" : "Play / pause both · shared interval"}</button>
+      <ReviewPauseButton className={`${dualButton} border-yellow-400 text-yellow-300`} onPause={stop} onResume={() => { running.current = true; setError(""); }} onReplay={() => void play()}
+        onError={() => setError(zh ? "未能同时播放，请重试。" : "Paired playback failed. Please retry.")}
+        getTargets={() => [a.current, b.current].map((video, i) => ({ video, start: starts[i], end: ends[i] }))} />
       <ReviewAudioControl value={audio} onChange={setAudio} />
     </div>
     {videos.map((v, i) => <div key={i} className="contents">

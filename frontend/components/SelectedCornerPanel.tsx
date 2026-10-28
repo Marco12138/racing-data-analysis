@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Pause, Play, ScanEye, Scissors, X } from "lucide-react";
+import { Check, Play, ScanEye, Scissors, X } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useI18n } from "../lib/i18n";
 import type { XrkAnalysis } from "../lib/xrkAnalysisApi";
@@ -14,6 +14,7 @@ import { observeVideoClock } from "../lib/videoFrameClock";
 import { GoproSpeedOverlay } from "./GoproSpeedOverlay";
 import { ReviewGpsNotice } from "./ReviewGpsNotice";
 import { ReviewAudioControl } from "./ReviewAudioControl";
+import { ReviewPauseButton } from "./ReviewPauseButton";
 import { CornerCandidateNavigation, SelectedCornerTelemetry } from "./SelectedCornerTelemetry";
 import { CornerCoachComparison } from "./CornerCoachComparison";
 import { compareCornerBest } from "../lib/cornerCoach";
@@ -267,7 +268,10 @@ export function CornerWorkspace({ analysis, file, url, duration, anchors, onResu
       </CornerPlayer>}
     {activeWindow && <div className="order-2 col-span-full space-y-3" data-testid="review-playback-controls">
       <ReviewAudioControl value={audio} onChange={setAudio} labels={[`L${leftLap}`, `L${selectedLap}`]} />
-      <div className="flex flex-wrap items-center gap-3"><button className={button} onClick={() => void playPair()}><Play size={16} />{zh ? "并排重播" : "Replay pair"}</button><button className={button} onClick={() => { sourcePlayer.current?.pause(); targetPlayer.current?.pause(); }}><Pause size={16} />{zh ? "暂停" : "Pause"}</button>
+      <div className="flex flex-wrap items-center gap-3"><button className={button} onClick={() => void playPair()}><Play size={16} />{zh ? "并排重播" : "Replay pair"}</button>
+        <ReviewPauseButton className={button} onError={() => setError("VIDEO_PLAYBACK_UNAVAILABLE")} getTargets={() => [sourceWindow, activeWindow].map((clip, i) => ({
+          video: i ? targetPlayer.current : sourcePlayer.current, start: clip?.start ?? NaN, end: clip ? (fullInterval ? clip.end : clip.start + 5) : NaN,
+        }))} />
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={fullInterval} onChange={e => { sourcePlayer.current?.pause(); targetPlayer.current?.pause(); setFullInterval(e.target.checked); }} />{zh ? "播放完整相同空间区段" : "Play full common spatial interval"}</label></div>
       <p className="text-xs text-slate-400">{zh ? "默认播放完整相同空间区段。计时按同一对 GPS 空间门；两侧同时起播，不拉伸视频，也不保证逐帧处于同一位置。" : "Defaults to the full common spatial interval. Timing uses the same GPS gates; playback is simultaneous, not time-warped or position-locked."}</p>
     </div>}
