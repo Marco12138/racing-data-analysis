@@ -55,10 +55,16 @@ test("resume never rewinds out-of-window players or starts unloaded media", asyn
   const invalid = [playbackTarget(0, 100, 105), playbackTarget(8, 0, 5)];
   await resumeReviewPlayback(invalid);
   assert.deepEqual(invalid.map(t => t.video.plays), [0, 0]);
-  const loading = [playbackTarget(2, 0, 5, { readyState: 1 }), playbackTarget(3, 0, 5)];
+  const loading = [playbackTarget(2, 0, 5, { readyState: 0 }), playbackTarget(3, 0, 5)];
   assert.equal(reviewPlaybackState(loading), "unavailable");
   await resumeReviewPlayback(loading);
   assert.deepEqual(loading.map(t => t.video.plays), [0, 0]);
+});
+test("metadata-only preload can resume and let play request video frames", async () => {
+  const pair = [playbackTarget(100, 100, 105, { readyState: 1 }), playbackTarget(200, 200, 206, { readyState: 1 })];
+  assert.equal(reviewPlaybackState(pair), "paused");
+  await resumeReviewPlayback(pair);
+  assert.deepEqual(pair.map(t => t.video.plays), [1, 1]);
 });
 test("a failed resume pauses both sides instead of leaving one playing", async () => {
   const pair = [playbackTarget(2, 0, 5), playbackTarget(3, 0, 5, { play: () => Promise.reject(Error("blocked")) })];

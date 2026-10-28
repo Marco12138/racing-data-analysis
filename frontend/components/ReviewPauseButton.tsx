@@ -15,7 +15,7 @@ export function ReviewPauseButton({ getTargets, className, onPause, onResume, on
   const previous = useRef<ReviewPlaybackTarget[]>([]);
   useEffect(() => () => { generation.current++; }, []);
   useEffect(() => {
-    const targets = getTargets(), events = ["play", "pause", "ended", "seeked", "loadeddata", "emptied", "timeupdate"];
+    const targets = getTargets(), events = ["play", "pause", "ended", "seeked", "loadedmetadata", "loadeddata", "canplay", "emptied", "timeupdate"];
     if (targets.length !== previous.current.length || targets.some((t, i) => t.video !== previous.current[i]?.video
       || !Object.is(t.start, previous.current[i]?.start) || !Object.is(t.end, previous.current[i]?.end))) generation.current++;
     previous.current = targets;
