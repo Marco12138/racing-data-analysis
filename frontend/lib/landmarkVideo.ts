@@ -2,13 +2,13 @@ import { matchLandmarkFrame, rankLandmarkMatches, type LandmarkRect, type TrackL
 
 export type LandmarkFrame = { url: string; width: number; height: number; rgba: Uint8ClampedArray; time: number };
 
-export function captureLandmarkFrame(video: HTMLVideoElement): LandmarkFrame {
+export function captureLandmarkFrame(video: HTMLVideoElement, preview = true): LandmarkFrame {
   if (video.readyState < 2 || !video.videoWidth) throw Error("frame_unavailable");
   const canvas = document.createElement("canvas"); canvas.width = 320; canvas.height = Math.round(320 * video.videoHeight / video.videoWidth);
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw Error("canvas_unavailable");
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  return { url: canvas.toDataURL("image/jpeg", .8), width: canvas.width, height: canvas.height,
+  return { url: preview ? canvas.toDataURL("image/jpeg", .8) : "", width: canvas.width, height: canvas.height,
     rgba: ctx.getImageData(0, 0, canvas.width, canvas.height).data, time: video.currentTime };
 }
 
@@ -52,8 +52,15 @@ export async function withLandmarkDecoder<T>(url: string, signal: AbortSignal,
 
 /** Small local-only frame batch for explicit boundary review. The visible player is untouched. */
 export async function readLandmarkFrames(url: string, times: number[], signal: AbortSignal): Promise<LandmarkFrame[]> {
+  return readFrames(url, times, signal, false);
+}
+// The only additional decoder sources allowed for replay are the published same-origin excerpts.
+export function readTrajectoryFrames(url:string,times:number[],signal:AbortSignal) {
+  return readFrames(url,times,signal,true);
+}
+async function readFrames(url:string,times:number[],signal:AbortSignal,allowPublished:boolean):Promise<LandmarkFrame[]> {
   signal.throwIfAborted();
-  if (!url.startsWith("blob:") || !times.length || times.length > 32 || !times.every(t => Number.isFinite(t) && t >= 0))
+  if (!(url.startsWith("blob:") || (allowPublished && /^\/demo\/video\/sector-\d+-lap-\d+\.mp4$/.test(url))) || !times.length || times.length > 32 || !times.every(t => Number.isFinite(t) && t >= 0))
     throw Error("invalid_local_search");
   const probe = document.createElement("video"); probe.muted = true; probe.preload = "auto";
   try {
@@ -68,7 +75,7 @@ export async function readLandmarkFrames(url: string, times: number[], signal: A
     if (times.some(t => t > probe.duration)) throw Error("outside_video");
     const frames: LandmarkFrame[] = [];
     // At the exact file endpoint, inspect the last decodable frame, not a nonexistent next frame.
-    for (const time of times) { await seekFrame(probe, Math.min(time, Math.max(0, probe.duration - .001)), signal); frames.push(captureLandmarkFrame(probe)); await new Promise(resolve => setTimeout(resolve, 0)); }
+    for (const time of times) { await seekFrame(probe, Math.min(time, Math.max(0, probe.duration - .001)), signal); frames.push(captureLandmarkFrame(probe,!allowPublished)); await new Promise(resolve => setTimeout(resolve, 0)); }
     return frames;
   } finally { probe.pause(); probe.removeAttribute("src"); probe.load(); }
 }

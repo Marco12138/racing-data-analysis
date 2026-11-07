@@ -7,12 +7,14 @@ import { useI18n } from "../lib/i18n";
 import type { CornerCoachComparison as Comparison } from "../lib/cornerCoach";
 import { CornerTrajectoryOverlay } from "./CornerTrajectoryOverlay";
 import type { Trajectory } from "../lib/cornerTrajectory";
+import type { ClipPair } from "../lib/trajectoryVideo";
+import { TrajectoryChartScope,TrajectoryCursorLines } from "./TrajectoryChartCursor";
 
 const fmt = (value: number | null | undefined, digits = 3) => typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "—";
 const signed = (value: number) => `${value > 0 ? "+" : ""}${value.toFixed(3)}s`;
 
-export const CornerCoachComparison = memo(function CornerCoachComparison({ comparison, onReview, playable, active = true, trajectory }: {
-  comparison: Comparison; onReview: (left: number, right: number) => void; playable: boolean; active?: boolean; trajectory?: Trajectory;
+export const CornerCoachComparison = memo(function CornerCoachComparison({ comparison, onReview, playable, active = true, trajectory, clips }: {
+  comparison: Comparison; onReview: (left: number, right: number) => void; playable: boolean; active?: boolean; trajectory?: Trajectory; clips?:ClipPair;
 }) {
   const { locale } = useI18n(), zh = locale === "zh";
   const names = zh ? ["前段", "中段", "后段"] : ["First third", "Middle third", "Final third"];
@@ -49,7 +51,7 @@ export const CornerCoachComparison = memo(function CornerCoachComparison({ compa
         <button className="inline-flex min-h-10 items-center gap-2 rounded border border-cyan-600 px-3 py-2 text-sm text-cyan-200 disabled:opacity-40" disabled={!playable} onClick={() => onReview(comparison.section.lap, comparison.overall.lap)}><Play size={16} />{zh ? "并排查看" : "Review pair"} L{comparison.section.lap} / L{comparison.overall.lap}</button>
         {!playable && <p className="text-xs text-amber-200">{zh ? "视频未覆盖这两圈，保留遥测对照。" : "The video does not cover both laps; telemetry comparison remains available."}</p>}
         <div className="flex flex-wrap gap-5 text-xs"><span className="text-cyan-200">L{comparison.section.lap} · {zh ? "区段最快" : "Section best"}</span><span className="text-amber-200">L{comparison.overall.lap} · {zh ? "整圈最快" : "Full-lap best"}</span></div>
-        {active && trajectory && <CornerTrajectoryOverlay model={trajectory}/>}
+        <TrajectoryChartScope>{active && trajectory && <CornerTrajectoryOverlay model={trajectory} clips={clips}/>}
         {(["speed", "rpm", "gain_s"] as const).map(channel => <div key={channel} data-testid={`coach-overlay-${channel}`}>
           <h5 className="text-xs text-slate-400">{channel === "speed" ? (zh ? "速度叠加 · km/h" : "Speed overlay · km/h") : channel === "rpm" ? "RPM" : (zh ? "累计时间优势 · 秒（正值：区段最快圈更快）" : "Cumulative gain · s (positive: section best is faster)")}</h5>
           {channel === "rpm" && !comparison.samples.some(p => p.section_rpm !== null || p.overall_rpm !== null) ? <p className="py-5 text-xs text-amber-200">{zh ? "RPM 数据不可用，不从音频或速度补造。" : "RPM unavailable; not fabricated from audio or speed."}</p> : <div className="h-44 min-w-0">{active && <ResponsiveContainer width="100%" height="100%"><LineChart data={comparison.samples} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
@@ -57,10 +59,11 @@ export const CornerCoachComparison = memo(function CornerCoachComparison({ compa
             <YAxis width={58} domain={["auto", "auto"]} tick={{ fontSize: 10 }} tickFormatter={v => Number(v).toFixed(channel === "gain_s" ? 2 : 0)} />
             <Tooltip contentStyle={{ background: "#111820", borderColor: "#64748b", fontSize: 12 }} labelFormatter={v => `${zh ? "距共同入口" : "From common entry"} ${fmt(Number(v), 1)}m`} formatter={v => typeof v === "number" ? v.toFixed(channel === "rpm" ? 0 : channel === "speed" ? 1 : 3) : "—"} />
             {comparison.parts.map(p => <ReferenceArea key={p.index} x1={p.start_m} x2={p.end_m} fill={p.gain_s > 0 ? "#35d6d0" : "#f6c945"} fillOpacity={.04} />)}
+            {channel!=="gain_s" && <TrajectoryCursorLines/>}
             {channel === "gain_s" ? <><ReferenceLine y={0} stroke="#94a3b8" /><Line dataKey="gain_s" name={zh ? "累计优势" : "Cumulative gain"} stroke="#f8fafc" dot={false} isAnimationActive={false} /></>
               : (["section", "overall"] as const).map(side => <Line key={side} dataKey={`${side}_${channel}`} name={`L${comparison[side].lap}`} stroke={side === "section" ? "#35d6d0" : "#f6c945"} strokeWidth={2} dot={false} connectNulls={false} isAnimationActive={false} />)}
           </LineChart></ResponsiveContainer>}</div>}
-        </div>)}
+        </div>)}</TrajectoryChartScope>
         <div className="grid grid-cols-3 gap-3 text-sm">{comparison.parts.map(p => <div key={p.index}><span className="text-slate-400">{names[p.index]}</span><p className="font-mono">{signed(p.gain_s)}</p></div>)}</div>
         <p className="text-xs text-slate-400">{zh ? "横轴为同一参考路径的位置，前中后按距离等分，并非已确认的刹车／弯心／出弯阶段。时间差来自共同位置的过点时刻，不以速度曲线面积代替，也不拉伸对齐。" : "Shared reference-path positions; thirds are distance splits, not confirmed braking/apex/exit phases. Deltas use crossing timestamps, not speed-curve area or time warping."}</p>
         <p className="text-sm text-cyan-200">{zh ? `优先复核${names[comparison.parts.reduce((best, p) => p.gain_s > best.gain_s ? p : best).index]}的视频：对照减速、RPM恢复与车载姿态，再检查出口结果；局部最快不等于已验证的最佳动作。` : `Review the ${names[comparison.parts.reduce((best, p) => p.gain_s > best.gain_s ? p : best).index].toLowerCase()} first: compare deceleration, RPM recovery and visible posture, then check the exit outcome. Local best is not a validated best technique.`}</p>

@@ -22,6 +22,15 @@ can be compared by elapsed time, not by unmeasured intermediate gates.
 The three sample sections rebuild only from the existing published JSON with
 `python scripts/build_published_coach_demo.py`; no new footage is required.
 
+Plan-view karts follow the local GPS travel direction, not measured body yaw.
+The map and speed/RPM chart cursors share the same per-lap replay clocks.
+Zoom changes the camera centre and a single XY scale together. For a matched
+video pair, disposable local decoders compare two roadside patches at shared
+gates with distinctly different scenes as controls. The B search is bounded
+to ±0.5 s and the matched interval. Supported samples annotate GPS positions;
+they never move the karts, shift an anchor, or imply camera calibration.
+No sampled frames are stored or uploaded.
+
 ## Stage 1 public demo
 
 The current public demo only needs:

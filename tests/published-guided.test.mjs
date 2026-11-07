@@ -250,6 +250,39 @@ test("narrow phone steps leave space for labels before switching to three column
 });
 const {publishedGhost,ghostFrame,PublishedGhostReview,I18nProvider}=await import(pathToFileURL(`${dir}/entry.mjs`).href);
 const {coachTrajectory,driverTrajectory,trajectoryAt}=await import(pathToFileURL(`${dir}/entry.mjs`).href);
+const {replayFrame,sceneCandidate,samplePlan,readTrajectoryFrames,blendCamera,fitCamera,screenPoint}=await import(pathToFileURL(`${dir}/entry.mjs`).href);
+test("each real S2 kart has its own gate clock, channel readings and speed/RPM chart cursor",()=>{
+  const model=coachTrajectory(analysis,publishedCoachEvidence(evidence.sections[1]).comparison);
+  const end=replayFrame(model,"gate",15), timed=replayFrame(model,"time",4.43);
+  assert.equal(end.gap.toFixed(3),"0.061");assert.deepEqual(end.cars.map(c=>Math.round(c.rpm)),[9169,8871]);
+  assert.deepEqual(end.cars.map(c=>c.speed.toFixed(1)),["63.5","61.5"]);
+  assert.equal(end.cars[0].chartX,end.cars[1].chartX);assert.ok(end.cars.every(c=>Number.isFinite(c.heading)));
+  assert.ok(timed.cars[0].finished && !timed.cars[1].finished && timed.cars[0].chartX>timed.cars[1].chartX);
+  assert.equal(samplePlan(model).length,3);
+  const html=render(3);assert.equal((html.match(/data-testid="kart-glyph"/g)||[]).length,2);assert.match(html,/trajectory-readout/);
+  const d=structuredClone(model); for(const p of d.runs[0].points){p.local_x_m=0;p.local_y_m=0;p.rpm=null;}
+  const p=replayFrame(d,"time",.1).cars[0];assert.equal(p.heading,null);assert.equal(p.rpm,null);
+});
+test("the zoom preserves equal x/y scale at every intermediate camera position",()=>{
+  const a=fitCamera([{local_x_m:20,local_y_m:10},{local_x_m:30,local_y_m:45}]);
+  const b=fitCamera([{local_x_m:-50,local_y_m:60},{local_x_m:170,local_y_m:-35}]);
+  for(const u of [0,.1,.5,.9,1]){
+    const c=blendCamera(a,b,u), p=(x,y)=>screenPoint(c,{local_x_m:x,local_y_m:y});
+    assert.ok(Math.abs(p(1,0).x-p(0,0).x-(p(0,0).y-p(0,1).y))<1e-10);
+  }
+});
+test("visual sampling needs distinctive roadside patches at both sides and rejects arbitrary sources",async()=>{
+  const frame=(seed,time)=>{let n=seed;const rgba=new Uint8ClampedArray(96*64*4);
+    for(let i=0;i<rgba.length;i+=4){n=(Math.imul(1664525,n)+1013904223)>>>0;rgba[i]=rgba[i+1]=rgba[i+2]=n>>>24;rgba[i+3]=255;}
+    return {width:96,height:64,rgba,time};};
+  const frames=[frame(2,0),frame(3,2),frame(4,4)];
+  assert.equal(sceneCandidate(frames[1],frames,2),2);
+  assert.equal(sceneCandidate(frames[1],[frames[0],{...frames[1],time:2.5},frames[2]],2),2.5);
+  assert.equal(sceneCandidate(frames[1],[frames[0],{...frames[1],time:2.6},frames[2]],2),null);
+  assert.equal(sceneCandidate(frames[1],[frames[0],frames[1],{...frames[1],time:4}],2),null);
+  for(const url of ["https://other.invalid/a.mp4","/demo/video/unapproved.mp4","/demo/video/sector-2-lap-5.mp4?other=1"])
+    await assert.rejects(readTrajectoryFrames(url,[1],new AbortController().signal),/invalid_local_search/);
+});
 test("all published recommendations use their own registered gates above speed, without selecting an excluded lap",()=>{
   const html=render(3);
   assert.ok(html.indexOf('data-testid="corner-trajectory"')>=0 && html.indexOf('data-testid="corner-trajectory"')<html.indexOf('data-testid="coach-overlay-speed"'));

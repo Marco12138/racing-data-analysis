@@ -13,6 +13,7 @@ import { SiteNavigation } from "./SiteNavigation";
 import { DriverGpsNotice, DriverLapPairing, DualCornerVideo, dualButton, dualInput, useDriverGpsEvidence, type LocalDriverVideo } from "./DualDriverVideo";
 import { CornerTrajectoryOverlay } from "./CornerTrajectoryOverlay";
 import { driverTrajectory } from "../lib/cornerTrajectory";
+import { TrajectoryChartScope,TrajectoryCursorLines } from "./TrajectoryChartCursor";
 
 type Side = { inspection: XrkInspection | null; video: LocalDriverVideo | null; busy: boolean; error: string };
 const emptySide = (): Side => ({ inspection: null, video: null, busy: false, error: "" });
@@ -108,7 +109,7 @@ export function DualDriverReview() {
           videos={[sides[0].video!, sides[1].video!]} sessions={sessions} bindings={bindings as [DriverBinding, DriverBinding]}
           starts={starts as [number, number]} observations={[corner.a!, corner.b!]} confirmed={!!confirmed[corner.id]} onConfirm={value => setConfirmed(r => ({ ...r, [corner.id]: value }))}
           onStartsChange={value => { setClipStarts(r => ({ ...r, [corner.id]: value })); setConfirmed(r => ({ ...r, [corner.id]: false })); }} />
-        <CornerEvidence corner={corner} overlay={<DriverTrajectory result={(corner.id === "custom" ? custom : result)!} corner={corner} a={sides[0].video!} b={sides[1].video!} />} />
+        <CornerEvidence corner={corner} overlay={<DriverTrajectory result={(corner.id === "custom" ? custom : result)!} corner={corner} a={sides[0].video!} b={sides[1].video!} starts={starts as [number,number]} />} />
       </>}
     </section>;
   }
@@ -186,7 +187,7 @@ export function DualDriverReview() {
   </main></>;
 }
 
-function DriverTrajectory({ result, corner, a, b }: { result: DualDriverResult; corner: DriverCorner; a: LocalDriverVideo; b: LocalDriverVideo }) {
+function DriverTrajectory({ result, corner, a, b, starts:[startA,startB] }: { result: DualDriverResult; corner: DriverCorner; a: LocalDriverVideo; b: LocalDriverVideo; starts:[number,number] }) {
   const evidenceA = useDriverGpsEvidence(a, result.sessions.a.file_fingerprint);
   const evidenceB = useDriverGpsEvidence(b, result.sessions.b.file_fingerprint);
   const model = useMemo(() => {
@@ -195,7 +196,8 @@ function DriverTrajectory({ result, corner, a, b }: { result: DualDriverResult; 
       .map(s=>({lap,start:s.session_range_s[0]-.5,end:s.session_range_s[1]+.5})) ?? [];
     return driverTrajectory(result, corner, [ranges(evidenceA,result.sessions.a.selected_lap), ranges(evidenceB,result.sessions.b.selected_lap)]);
   }, [result, corner, evidenceA, evidenceB]);
-  return model ? <CornerTrajectoryOverlay model={model}/> : null;
+  const clips=useMemo(()=>[{url:a.url,start:startA},{url:b.url,start:startB}] as const,[a.url,b.url,startA,startB]);
+  return model ? <CornerTrajectoryOverlay model={model} clips={clips}/> : null;
 }
 export function CornerEvidence({ corner, compact = false, overlay }: { corner: DriverCorner; compact?: boolean; overlay?: ReactNode }) {
   const { locale } = useI18n(), zh = locale === "zh";
@@ -212,9 +214,9 @@ export function CornerEvidence({ corner, compact = false, overlay }: { corner: D
     <p className="text-sm">{zh ? "同一入口到出口的用时（不是各取5秒的时长）" : "Time between shared gates (not fixed clip length)"}: A {a.elapsed_s.toFixed(3)}s · B {b.elapsed_s.toFixed(3)}s · B−A {(b.elapsed_s - a.elapsed_s).toFixed(3)}s</p>
     <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th className="py-2">{zh ? "观测量" : "Observation"}</th><th>A</th><th>B</th><th>B−A</th></tr></thead><tbody>{metricNames.map(([key, cn, en, unit]) => <tr key={key} className="border-t border-slate-800"><th className="py-2 font-normal">{zh ? cn : en} ({unit})</th>
       {[a.metrics[key], b.metrics[key], corner.differences?.[key]].map((v, i) => <td className="font-mono" key={i}>{v == null ? "—" : v.toFixed(key === "minimum_rpm" ? 0 : 2)}</td>)}</tr>)}</tbody></table></div>
-    {!compact && overlay}
+    <TrajectoryChartScope>{!compact && overlay}
     {!compact && <div className="grid min-w-0 gap-4 lg:grid-cols-2">{["speed", "rpm"].map(channel => <div className="min-w-0" key={channel}><h4 className="text-sm">{channel === "speed" ? (zh ? "速度 · km/h" : "Speed · km/h") : "RPM"}</h4>
-      {channel === "rpm" && (!a.profile.rpm || !b.profile.rpm) ? <p className="py-8 text-sm text-slate-400">{zh ? "RPM 通道不可用" : "RPM channel unavailable"}</p> : <div className="h-52"><ResponsiveContainer width="100%" height="100%"><LineChart data={data}><CartesianGrid stroke="#263341" /><XAxis dataKey="progress" unit="%" /><YAxis domain={["auto", "auto"]} /><Tooltip /><Line name="A" dataKey={channel === "speed" ? "a" : "rpmA"} stroke="#2dd4bf" dot={false} isAnimationActive={false} /><Line name="B" dataKey={channel === "speed" ? "b" : "rpmB"} stroke="#facc15" dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer></div>}</div>)}</div>}
+      {channel === "rpm" && (!a.profile.rpm || !b.profile.rpm) ? <p className="py-8 text-sm text-slate-400">{zh ? "RPM 通道不可用" : "RPM channel unavailable"}</p> : <div className="h-52"><ResponsiveContainer width="100%" height="100%"><LineChart data={data}><CartesianGrid stroke="#263341" /><XAxis dataKey="progress" type="number" domain={[0,100]} unit="%" /><YAxis domain={["auto", "auto"]} /><Tooltip /><TrajectoryCursorLines/><Line name="A" dataKey={channel === "speed" ? "a" : "rpmA"} stroke="#2dd4bf" dot={false} isAnimationActive={false} /><Line name="B" dataKey={channel === "speed" ? "b" : "rpmB"} stroke="#facc15" dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer></div>}</div>)}</div>}</TrajectoryChartScope>
     <p className="text-xs text-slate-400">{zh ? "横轴是两道共享空间门之间各自的距离进度，不是强行对齐时间。更高的弯中 RPM 不必然带来更快出弯；车辆传动、线路和入口速度都可能影响结果。" : "The x-axis is each trajectory's distance progress between shared gates, not warped time. Higher mid-corner RPM does not prove a better exit; gearing, line and entry speed can confound the result."}</p>
     {[a, b].map((obs, i) => <details key={i} className="text-xs text-slate-400"><summary>{i === 0 ? "A" : "B"} · {zh ? "信号事件（推断，非踏板测量）" : "Signal events (inferred, not pedal measurements)"}</summary>
       {obs.events.length ? obs.events.map((e, j) => <p key={j}>{actionNames[e.type]?.[zh ? 0 : 1] ?? e.type} · {zh ? "经过入口后" : "after entry"} {e.from_entry_s.toFixed(2)}s · {e.confidence}</p>) : <p>{zh ? "此段无可靠事件" : "No reliable event in this interval"}</p>}</details>)}

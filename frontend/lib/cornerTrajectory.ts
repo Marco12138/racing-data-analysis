@@ -3,14 +3,16 @@ import type { DriverCorner, DualDriverResult } from "./dualDriverReview";
 import type { CornerLap } from "./selectedCorner";
 import type { XrkAnalysis } from "./xrkAnalysisApi";
 
-type Raw = { session_time_s: number | null; local_x_m: number | null; local_y_m: number | null };
-type Point = { time: number; local_x_m: number; local_y_m: number };
+type Channels = { speed?: number | null; rpm?: number | null; distance_m?: number | null };
+type Raw = Channels & { session_time_s: number | null; local_x_m: number | null; local_y_m: number | null };
+type Point = Channels & { time: number; local_x_m: number; local_y_m: number };
 export type GPSWindow = { start: number; end: number; lap: number };
 type Run = { label: string; points: Point[]; duration: number };
 type Gate = { distance: number; a: number; b: number };
 export type Trajectory = { ok: false; reason: "gps" | "registration" | "coverage" | "pair" }
   | { ok: true; runs: [Run, Run]; gates: Gate[]; course: Point[][] };
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const mix = (a: unknown,b: unknown,u: number) => finite(a) && finite(b) ? a+(b-a)*u : null;
 export const TRAJECTORY_MAX_GAP_S = .25;
 export function acceptedShift(reg?: CornerLap["registration"] | null) {
   const shift = reg?.translation_m;
@@ -22,7 +24,8 @@ export function trajectoryAt(points: Point[], time: number): Point | null {
   if (b.time === time) return b;
   if (!a || b.time - a.time > TRAJECTORY_MAX_GAP_S || b.time <= a.time) return null;
   const u = (time - a.time) / (b.time - a.time);
-  return { time, local_x_m: a.local_x_m + u * (b.local_x_m - a.local_x_m), local_y_m: a.local_y_m + u * (b.local_y_m - a.local_y_m) };
+  return { time, local_x_m: a.local_x_m + u * (b.local_x_m - a.local_x_m), local_y_m: a.local_y_m + u * (b.local_y_m - a.local_y_m),
+    speed:mix(a.speed,b.speed,u), rpm:mix(a.rpm,b.rpm,u), distance_m:mix(a.distance_m,b.distance_m,u) };
 }
 // Match crossings in one continuous GPS segment. Missing coordinates split the
 // segment even when the missing sample would otherwise fit inside the time limit.
@@ -39,7 +42,7 @@ function continuousPath(raw: Raw[], shift: number[], flags: GPSWindow[]): Point[
     lastTime = t;
     if (!finite(x) || !finite(y) || flags.some(f => f.start <= t && f.end >= t)) { finish(); continue; }
     if (crossesWarning || (segment.length && t - segment.at(-1)!.time > TRAJECTORY_MAX_GAP_S)) finish();
-    segment.push({time: t, local_x_m: x + shift[0], local_y_m: y + shift[1]});
+    segment.push({time: t, local_x_m: x + shift[0], local_y_m: y + shift[1], speed:row.speed, rpm:row.rpm, distance_m:row.distance_m});
   }
   finish();
   return segments;
@@ -55,6 +58,7 @@ function lapTrace(analysis: XrkAnalysis, lap: number): Raw[] {
   const prefix = `lap_${lap}_`, aligned = analysis.top_laps_comparison.aligned;
   if (aligned.some(r => finite(r[prefix + "session_time_s"]))) return aligned.map(r => ({
     session_time_s: r[prefix + "session_time_s"], local_x_m: r[prefix + "local_x_m"], local_y_m: r[prefix + "local_y_m"],
+    speed:r[prefix+"speed"], rpm:r[prefix+"rpm"], distance_m:r.distance_m,
   }));
   const track = analysis.track;
   return !track ? [] : track.reference_lap === lap ? track.reference : track.target_lap === lap ? track.target : [];
@@ -100,4 +104,28 @@ export function driverTrajectory(result: DualDriverResult, corner: DriverCorner,
   }
   // Two-driver review has verified entrance/exit gates, not shared interior gates.
   return {ok: true, runs: [runs[0], runs[1]], gates: [], course};
+}
+
+export type ReadyTrajectory = Extract<Trajectory,{ok:true}>;
+/** Each car uses its own elapsed clock. Only compare time at gates both cars reached. */
+export function replayFrame(model: ReadyTrajectory, mode: "time"|"gate", cursor: number) {
+  const gates = model.gates;
+  const selected = mode==="gate" && gates.length ? gates[Math.min(gates.length-1,Math.max(0,Math.round(cursor)))] : null;
+  const cars = model.runs.map((run,i) => {
+    const t = selected ? (i ? selected.b : selected.a) : Math.min(run.duration,Math.max(0,cursor));
+    const p = trajectoryAt(run.points,t)!;
+    const before = trajectoryAt(run.points,Math.max(0,t-.12))!, after = trajectoryAt(run.points,Math.min(run.duration,t+.12))!;
+    const dx=after.local_x_m-before.local_x_m, dy=after.local_y_m-before.local_y_m;
+    const heading = Math.hypot(dx,dy)>=.3 ? Math.atan2(-dy,dx)*180/Math.PI : null;
+    const clock = i ? "b" : "a";
+    const hi=gates.findIndex(g=>g[clock]>=t), g=gates[hi], prev=gates[hi-1];
+    const distance = selected ? selected.distance : g?.[clock]===t ? g.distance : prev && g
+      ? mix(prev.distance,g.distance,(t-prev[clock])/(g[clock]-prev[clock])) : null;
+    const first=run.points[0].distance_m,last=run.points.at(-1)!.distance_m;
+    const progress = finite(p.distance_m)&&finite(first)&&finite(last)&&last>first ? 100*(p.distance_m-first)/(last-first) : null;
+    return {...p,heading,chartX:gates.length ? distance : progress,finished:t===run.duration};
+  });
+  const lastGate = selected ?? gates.findLast(g=>g.a<=cars[0].time && g.b<=cars[1].time);
+  const gap = lastGate ? lastGate.b-lastGate.a : cars.every(c=>c.finished) ? model.runs[1].duration-model.runs[0].duration : null;
+  return {cars,gap,lastGate};
 }

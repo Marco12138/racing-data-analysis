@@ -98,6 +98,16 @@ function PublishedCoachExplorer({ section, data }: { section: PublishedCoachSect
   const evidence = useMemo(() => publishedCoachEvidence(section, zh), [section, zh]), comparison = evidence.comparison!;
   const trajectory = useMemo(() => coachTrajectory(data.analysis, comparison, data.review.clips.filter(c => c.gps_warning)
     .map(c => ({lap: c.lap, start: c.telemetry_start_s - .5, end: c.telemetry_start_s + c.duration_s + .5}))), [data, comparison]);
+  const sceneClips=useMemo(()=>{
+    if(comparison.status!=="available")return;
+    const clipFor=(row:typeof comparison.section)=>{
+      const clip=data.review.clips.find(c=>c.sector_id===section.id && c.lap===row.lap && !c.gps_warning);
+      if(!clip || row.start_session_s===undefined || row.end_session_s===undefined || row.start_session_s<clip.telemetry_start_s || row.end_session_s>clip.telemetry_start_s+clip.duration_s)return null;
+      return {url:clip.url,start:row.start_session_s-clip.telemetry_start_s};
+    };
+    const a=clipFor(comparison.section),b=clipFor(comparison.overall);
+    return a&&b ? [a,b] as const : undefined;
+  },[comparison,data.review.clips,section.id]);
   const laps = section.result.laps.filter(l => l.status === "candidate");
   const first = comparison.status !== "unavailable" ? comparison.section.lap : laps[0]?.lap;
   const [left, setLeft] = useState(first), [right, setRight] = useState(comparison.status === "available" ? comparison.overall.lap : laps.find(l => l.lap !== first)?.lap);
@@ -135,6 +145,6 @@ function PublishedCoachExplorer({ section, data }: { section: PublishedCoachSect
     </div></div>
     {error && <p role="alert" className="text-sm text-amber-200">{zh ? "播放失败，可使用原生播放器重试。" : "Playback failed; retry with native video controls."}</p>}
     <p className="text-xs text-slate-400">{zh ? "原短片各5秒；共同空间门位于片段内，实际对照时长按各圈过门时刻计算，不把5秒当作区段圈速。两侧不拉伸，速度/RPM跟随各自时间。" : "Original excerpts are 5s; shared gates lie inside them. Section time comes from each lap's gate crossings, not the fixed clip duration. Videos are not stretched; speed/RPM use each side's clock."}</p>
-    <CornerCoachComparison comparison={comparison} trajectory={trajectory} onReview={pair} playable={laps.length >= 2} />
+    <CornerCoachComparison comparison={comparison} trajectory={trajectory} clips={sceneClips} onReview={pair} playable={laps.length >= 2} />
   </section>;
 }
