@@ -3,6 +3,7 @@
 import { memo, useMemo, useEffect, useRef, useState } from "react";
 import { ghostFrame, type Ghost, type XY } from "../lib/publishedGhost";
 import { KartMarker } from "./KartMarker";
+import { GpsTrackSurface } from "./GpsTrackSurface";
 
 export type Extent="track"|"section"|"follow";
 type Car=ReturnType<typeof ghostFrame>["cars"][number];
@@ -42,7 +43,7 @@ export const GhostMap=memo(function GhostMap({model,extent,cars,zh}:{model:Ghost
   const x=300+view.follow*((centers[0][0]+centers[1][0])/2-300)-w/2,y=155+view.follow*((centers[0][1]+centers[1][1])/2-155)-h/2;
   const ruler=extent==="track"?25:5;
   return <svg className="block aspect-[600/310] w-full bg-[#151d20]" viewBox={[x,y,w,h].join(" ")} role="img" aria-label={zh?"武汉赛道 GPS 全图与 S2 双圈轨迹":"Wuhan GPS circuit and S2 lap traces"}>
-    {map.roads.map((p,i)=><g key={i}><polyline points={p} stroke="#859593" strokeWidth={8.4*map.scale} strokeLinejoin="round" fill="none"/><polyline points={p} stroke="#354247" strokeWidth={8*map.scale} strokeLinejoin="round" fill="none"/></g>)}
+    <GpsTrackSurface segments={map.roads} unitsPerMetre={map.scale}/>
     {map.traces.map((p,i)=><polyline key={i} points={p} stroke={colors[i]} strokeWidth="2.8" strokeDasharray={i?"7 4":undefined} fill="none"/>)}
     {extent!=="track" && model.exitAngle!==null && map.arrows.map((transform,i)=><path key={i} transform={transform} d="M-18 0 H0 M-6 -4 L0 0 L-6 4" fill="none" stroke={colors[i]} strokeWidth="2.5"/>)}
     {map.ends.map(([cx,cy],i)=><g key={i}><circle cx={cx} cy={cy} r="3" fill="white"/><text x={cx} y={cy+(i?19:-10)} fill="#e5e7eb" fontSize="14" textAnchor="middle">{i?(zh?"出口":"Exit"):(zh?"入口":"Entry")}</text></g>)}

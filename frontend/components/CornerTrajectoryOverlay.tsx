@@ -3,9 +3,10 @@
 import { Pause, Play, Route } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { replayFrame, trajectoryAt, type Trajectory } from "../lib/cornerTrajectory";
-import { blendCamera,fitCamera,screenPoint } from "../lib/trajectoryCamera";
+import { blendCamera,fitCamera,screenPoint,PLOT_WIDTH,PLOT_HEIGHT } from "../lib/trajectoryCamera";
 import { sampleTrajectoryVideo,type ClipPair,type SceneCheck } from "../lib/trajectoryVideo";
 import { KartMarker } from "./KartMarker";
+import { GpsTrackSurface } from "./GpsTrackSurface";
 import { useTrajectoryChartCursor } from "./TrajectoryChartCursor";
 import { useI18n } from "../lib/i18n";
 
@@ -31,7 +32,7 @@ function TracePlot({model, zh, clips}: {model:Ready; zh:boolean; clips?:ClipPair
   const map = useMemo(() => {
     const runPoints = model.runs.flatMap(r => r.points);
     const line = (points: typeof runPoints) => points.map(p => p.local_x_m.toFixed(3)+","+p.local_y_m.toFixed(3)).join(" ");
-    return {local:fitCamera(runPoints),full:fitCamera(runPoints.concat(model.course.flat())),paths:model.runs.map(r=>line(r.points)),course:model.course.map(line)};
+    return {local:fitCamera(runPoints),full:fitCamera(runPoints.concat(model.course.flat()),true),paths:model.runs.map(r=>line(r.points)),course:model.course.map(line)};
   },[model]);
   const [camera,setCamera]=useState(map.local), lastCamera=useRef(map.local);
   useEffect(()=>{
@@ -91,9 +92,9 @@ function TracePlot({model, zh, clips}: {model:Ready; zh:boolean; clips?:ClipPair
       }}>{playing?<Pause size={15}/>:<Play size={15}/>}</button>
       <span className="text-xs text-slate-400">{gate ? `${zh?"距入口":"From entry"} ${gate.distance.toFixed(1)} m` : `${cursor.toFixed(2)} s`}</span>
     </div>
-    <svg className="block aspect-[600/234] w-full bg-[#121c20]" role="img" aria-label={zh ? "共同坐标系内两条 GPS 走线" : "Two GPS traces in one coordinate frame"} viewBox="0 0 600 234">
-      <g transform={`translate(300 117) scale(${camera.scale} ${-camera.scale}) translate(${-camera.x} ${-camera.y})`}>
-        {map.course.map((p,i)=><polyline key={i} points={p} fill="none" stroke="#56676c" strokeWidth="5" strokeLinejoin="round" vectorEffect="non-scaling-stroke"/>)}
+    <svg className="block h-auto w-full bg-[#151d20]" role="img" aria-label={zh ? "共同坐标系内两条 GPS 走线" : "Two GPS traces in one coordinate frame"} viewBox={`0 0 ${PLOT_WIDTH} ${PLOT_HEIGHT}`}>
+      <g transform={`translate(${PLOT_WIDTH/2} ${PLOT_HEIGHT/2}) rotate(${camera.angle}) scale(${camera.scale} ${-camera.scale}) translate(${-camera.x} ${-camera.y})`}>
+        <GpsTrackSurface segments={map.course}/>
         {map.paths.map((path,i)=><polyline key={i} points={path} fill="none" stroke={colors[i]} strokeWidth="2.6" strokeDasharray={i ? "6 3" : undefined} vectorEffect="non-scaling-stroke"/>)}
       </g>
       {checks?.filter(s=>s.supported && s.visualB!==null).map(s=>{
@@ -101,9 +102,11 @@ function TracePlot({model, zh, clips}: {model:Ready; zh:boolean; clips?:ClipPair
         return <g key={s.a} fill="none" strokeWidth="1"><title>{zh?"视频参照物相符的 GPS 候选位置（±0.5s）":"GPS candidates supported by video landmarks (±0.5s)"}</title>
           <circle cx={a.x} cy={a.y} r="3.5" stroke={colors[0]}/><circle cx={b.x} cy={b.y} r="4.5" stroke={colors[1]} strokeDasharray="3 2"/></g>;})}
       {endpoints.map((p,i)=><text key={i} x={p.x} y={p.y+(i?18:-11)} textAnchor="middle" fontSize="13" fill="#e2e8f0">{i?(zh?"出口":"Exit"):(zh?"入口":"Entry")}</text>)}
-      {cars.map((car,i)=><KartMarker key={i} {...project(car)} heading={car.heading} color={colors[i]} outline={i===1} size={(i?1.24:.97)*Math.min(1,Math.max(.55,camera.scale/map.local.scale))}/>)}
-      <path d={`M12 219 v4 h${camera.scale*ruler} v-4`} stroke="#cbd5e1" fill="none"/><text x="12" y="216" fontSize="12" fill="#cbd5e1">{ruler} m</text>
+      {cars.map((car,i)=><KartMarker key={i} {...project(car)} heading={car.heading===null?null:car.heading+camera.angle} color={colors[i]} outline={i===1} size={(i?1.24:.97)*Math.min(1,Math.max(.55,camera.scale/map.local.scale))}/>)}
+      <g transform={`translate(12 ${PLOT_HEIGHT-15})`}><path d={`M0 -4 v4 h${camera.scale*ruler} v-4`} stroke="#cbd5e1" fill="none"/><text y="-7" fontSize="12" fill="#cbd5e1">{ruler} m</text></g>
     </svg>
+    <p className="text-xs text-slate-400">{zh ? `灰色路面沿 ${model.courseLabel} 的 GPS 走线绘制。8 米宽度为示意，不是实测路缘。`
+      : `The grey surface follows the GPS line of ${model.courseLabel}. Its 8 m width is illustrative, not a surveyed track boundary.`}</p>
     <input className="block w-full accent-cyan-400" type="range" aria-label={zh ? "轨迹位置" : "Trajectory position"} min={0} max={max} step={timeMode ? .01 : 1} value={Math.min(max,cursor)} onChange={e=>{setPlaying(false);setCursor(Number(e.target.value));}}/>
     <table className="w-full text-left text-xs tabular-nums" data-testid="trajectory-readout"><thead className="text-slate-400"><tr>
       {[zh?"单圈":"Lap",zh?"距入口用时":"Elapsed","AiM km/h","AiM RPM"].map(s=><th key={s} className="py-1">{s}</th>)}</tr></thead>

@@ -21,6 +21,10 @@ into A's frame, not two independently centred plots. Their interior positions
 can be compared by elapsed time, not by unmeasured intermediate gates.
 The three sample sections rebuild only from the existing published JSON with
 `python scripts/build_published_coach_demo.py`; no new footage is required.
+Both map views draw the same illustrative 8 m road ribbon behind the lap traces,
+in the GPS metre coordinate system. It follows the registered full-lap best
+(driver A in a two-driver comparison); it does not imply a measured centreline,
+distance to a kerb, or official track limits. GPS gaps remain open.
 
 Plan-view karts follow the local GPS travel direction, not measured body yaw.
 The map and speed/RPM chart cursors share the same per-lap replay clocks.

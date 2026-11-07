@@ -10,7 +10,7 @@ export type GPSWindow = { start: number; end: number; lap: number };
 type Run = { label: string; points: Point[]; duration: number };
 type Gate = { distance: number; a: number; b: number };
 export type Trajectory = { ok: false; reason: "gps" | "registration" | "coverage" | "pair" }
-  | { ok: true; runs: [Run, Run]; gates: Gate[]; course: Point[][] };
+  | { ok: true; runs: [Run, Run]; gates: Gate[]; course: Point[][]; courseLabel: string };
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const mix = (a: unknown,b: unknown,u: number) => finite(a) && finite(b) ? a+(b-a)*u : null;
 export const TRAJECTORY_MAX_GAP_S = .25;
@@ -78,12 +78,12 @@ export function coachTrajectory(analysis: XrkAnalysis, pair: CornerCoachComparis
     const run = windowRun(segments, start, end, `L${row.lap}`);
     if (!run) return {ok: false, reason: "coverage"};
     runs.push(run);
-    if (row === pair.section) course = segments;
+    if (row === pair.overall) course = segments;
   }
   const gates = pair.samples.map(s => ({ distance: s.distance_m, a: s.section_time - pair.section.start_session_s!, b: s.overall_time - pair.overall.start_session_s! }));
   if (gates.some((g,i) => !trajectoryAt(runs[0].points,g.a) || !trajectoryAt(runs[1].points,g.b)
     || (i > 0 && (g.a <= gates[i-1].a || g.b <= gates[i-1].b)))) return {ok: false, reason: "coverage"};
-  return {ok: true, runs: [runs[0], runs[1]], gates, course};
+  return {ok: true, runs: [runs[0], runs[1]], gates, course, courseLabel:runs[1].label};
 }
 export function driverTrajectory(result: DualDriverResult, corner: DriverCorner, flags: [GPSWindow[], GPSWindow[]]): Trajectory {
   if (!result.corners.includes(corner) || corner.status !== "candidate" || !corner.a || !corner.b) return {ok: false, reason: "pair"};
@@ -103,7 +103,7 @@ export function driverTrajectory(result: DualDriverResult, corner: DriverCorner,
     if(key==="a")course=segments;
   }
   // Two-driver review has verified entrance/exit gates, not shared interior gates.
-  return {ok: true, runs: [runs[0], runs[1]], gates: [], course};
+  return {ok: true, runs: [runs[0], runs[1]], gates: [], course, courseLabel:runs[0].label};
 }
 
 export type ReadyTrajectory = Extract<Trajectory,{ok:true}>;

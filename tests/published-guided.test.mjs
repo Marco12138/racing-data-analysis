@@ -298,6 +298,33 @@ test("all published recommendations use their own registered gates above speed, 
     if(s.id==="sector_1")assert.ok(pair.excluded.includes(6));
   }
 });
+test("recommended maps use the S2 schematic road, not a screen-width line or a synthetic closure",()=>{
+  const html=render(3), surface=html.match(/data-testid="gps-track-surface"[\s\S]*?(?=<polyline[^>]*stroke="#35d6d0")/)?.[0];
+  assert.ok(surface);assert.match(surface,/stroke-width="8"/);assert.match(surface,/stroke-width="8.4"/);
+  assert.doesNotMatch(surface,/non-scaling-stroke|<polygon|<path/);
+  assert.match(html,/L5 的 GPS 走线/);assert.match(html,/不是实测路缘/);
+  const s2=publishedGhost(data).model.course;
+  for(const s of evidence.sections){
+    const model=coachTrajectory(analysis,publishedCoachEvidence(s).comparison);
+    assert.equal(model.courseLabel,"L5");
+    assert.deepEqual(model.course.map(segment=>segment.map(p=>[p.local_x_m,-p.local_y_m])),
+      s2.map(segment=>segment.map(p=>[p.x,p.z])));
+  }
+  const pair=publishedCoachEvidence(evidence.sections[1]).comparison, begin=pair.overall.start_session_s;
+  const partial=coachTrajectory(analysis,pair,[{lap:5,start:begin-3,end:begin-2}]);
+  assert.ok(partial.ok);assert.ok(partial.course.length>=2);
+  assert.ok(partial.course.every(seg=>seg.at(-1).time<begin-3 || seg[0].time>begin-2));
+});
+test("a metre of road scales like a metre of GPS across full-circuit rotation and zoom",()=>{
+  const pts=[{local_x_m:0,local_y_m:0},{local_x_m:20,local_y_m:90}];
+  const local=fitCamera(pts.slice(0,1)),full=fitCamera(pts,true);
+  assert.equal(full.angle,-90);assert.ok(local.scale>full.scale);
+  for(const u of [0,.25,.5,.75,1]){
+    const c=blendCamera(local,full,u),p=(x,y)=>screenPoint(c,{local_x_m:x,local_y_m:y});
+    const origin=p(0,0),east=p(8,0),north=p(0,8);
+    for(const edge of [east,north])assert.ok(Math.abs(Math.hypot(edge.x-origin.x,edge.y-origin.y)-8*c.scale)<1e-8);
+  }
+});
 test("current GPS flags, coordinate holes and rejected registration withhold the map, not the timing evidence",()=>{
   const pair=publishedCoachEvidence(evidence.sections[1]).comparison, t=pair.section.start_session_s+2;
   assert.equal(coachTrajectory(analysis,pair,[{lap:4,start:t,end:t+.01}]).reason,"gps");
@@ -319,7 +346,7 @@ test("two drivers use A's coordinate frame and independent gate clocks, never B'
   assert.ok(model.runs[0].duration<model.runs[1].duration);
   assert.equal(driverTrajectory(result,corner,[[],[{lap:7,start:11.5,end:12}]]).reason,"gps");
   const split=driverTrajectory(result,corner,[[{lap:7,start:.4,end:.5}],[]]);
-  assert.ok(split.ok);assert.equal(split.course.length,2);
+  assert.ok(split.ok);assert.equal(split.course.length,2);assert.equal(split.courseLabel,"A · L7");
   assert.equal(driverTrajectory({...result,registration:null},corner,[[],[]]).reason,"registration");
   assert.equal(driverTrajectory(result,{...corner},[[],[]]).reason,"pair");
   result.sessions.b.track=result.sessions.b.track.filter(p=>p.session_time_s<11.4 || p.session_time_s>11.8);
