@@ -248,3 +248,33 @@ test("narrow phone steps leave space for labels before switching to three column
   assert.match(html, /min-\[380px\]:grid-cols-3/);
   assert.match(html, /lg:grid-cols-6/);
 });
+const {publishedGhost,ghostFrame,PublishedGhostReview,I18nProvider}=await import(pathToFileURL(`${dir}/entry.mjs`).href);
+test("S2 replay uses only approved clips, independent clocks and shared spatial gates",()=>{
+  const before=JSON.stringify(data),result=publishedGhost(data);assert.ok(result.ok);
+  const m=result.model;
+  assert.deepEqual(m.runs.map(r=>r.clip.url),["/demo/video/sector-2-lap-4.mp4","/demo/video/sector-2-lap-5.mp4"]);
+  assert.equal(m.gates.length,16);assert.equal(m.gain.toFixed(3),"0.061");assert.equal(m.net.toFixed(3),"0.055");
+  assert.equal(m.exitAngle.toFixed(1),"2.2");assert.equal(m.course.flat().length,817);
+  assert.deepEqual(m.thirds.map(p=>[p.gate,p.gain.toFixed(3)]),[[5,"-0.002"],[10,"0.030"],[15,"0.033"]]);
+  for(const [i,g] of m.gates.entries()){
+    const {cars}=ghostFrame(m,"gate",i);
+    assert.ok(Math.abs(cars[1].time-cars[0].time-g.gain)<1e-8);
+    for(const [j,p] of cars.entries())assert.ok(p.clipTime===p.time+m.runs[j].videoOffset&&p.clipTime>=0&&p.clipTime<=5);
+  }
+  const {cars}=ghostFrame(m,"time",4.43);assert.ok(cars[0].finished&&!cars[1].finished);
+  assert.equal(JSON.stringify(data),before);
+});
+test("S2 fails closed on flagged laps, missing coverage, or non-approved media",()=>{
+  let d=structuredClone(data);d.evidence.sections[1].gps_flagged_laps=[4];assert.equal(publishedGhost(d).reason,"gps");
+  d=structuredClone(data);const clip=d.review.clips.find(c=>c.lap===4&&c.sector_id==="sector_2");clip.url="/elsewhere.mp4";assert.equal(publishedGhost(d).reason,"media");
+  d=structuredClone(data);d.analysis.top_laps_comparison.aligned=d.analysis.top_laps_comparison.aligned.filter(p=>p.lap_4_session_time_s<163||p.lap_4_session_time_s>164);assert.equal(publishedGhost(d).reason,"coverage");
+  d=structuredClone(data);d.review.clips.push({...clip,lap:5,gps_warning:true,telemetry_start_s:208});assert.equal(publishedGhost(d).model.net,null);
+});
+test("public map and S2 entry render without private diagnostics, projections or writes",()=>{
+  assert.match(render(3),/武汉全图 · S2 双圈叠影/);
+  assert.doesNotMatch(render(4),/武汉全图 · S2 双圈叠影/);
+  const html=renderToStaticMarkup(createElement(I18nProvider,{initialLocale:"zh"},createElement(PublishedGhostReview,{data})));
+  assert.match(html,/published-s2-ghost/);assert.match(html,/159\.55s ±0\.5s/);
+  assert.match(html,/sector-2-lap-4\.mp4/);assert.match(html,/sector-2-lap-5\.mp4/);
+  assert.doesNotMatch(html,/__local|projection|\/qa\/|\/experiments\/|GH010681|type="file"/i);
+});
