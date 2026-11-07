@@ -249,6 +249,49 @@ test("narrow phone steps leave space for labels before switching to three column
   assert.match(html, /lg:grid-cols-6/);
 });
 const {publishedGhost,ghostFrame,PublishedGhostReview,I18nProvider}=await import(pathToFileURL(`${dir}/entry.mjs`).href);
+const {coachTrajectory,driverTrajectory,trajectoryAt}=await import(pathToFileURL(`${dir}/entry.mjs`).href);
+test("all published recommendations use their own registered gates above speed, without selecting an excluded lap",()=>{
+  const html=render(3);
+  assert.ok(html.indexOf('data-testid="corner-trajectory"')>=0 && html.indexOf('data-testid="corner-trajectory"')<html.indexOf('data-testid="coach-overlay-speed"'));
+  for(const s of evidence.sections){
+    const pair=publishedCoachEvidence(s).comparison, model=coachTrajectory(analysis,pair);
+    assert.equal(model.ok,true,s.id);
+    assert.deepEqual(model.runs.map(r=>r.label),["L4","L5"]);
+    assert.equal(model.gates.length,pair.samples.length);
+    assert.equal(model.gates.at(-1).b-model.gates.at(-1).a,pair.gain_s);
+    assert.equal(model.runs[0].points[0].time,0);
+    assert.equal(trajectoryAt(model.runs[1].points,model.gates[5].b).time,model.gates[5].b);
+    assert.equal(trajectoryAt(model.runs[0].points,model.runs[0].duration+.1),null);
+    if(s.id==="sector_1")assert.ok(pair.excluded.includes(6));
+  }
+});
+test("current GPS flags, coordinate holes and rejected registration withhold the map, not the timing evidence",()=>{
+  const pair=publishedCoachEvidence(evidence.sections[1]).comparison, t=pair.section.start_session_s+2;
+  assert.equal(coachTrajectory(analysis,pair,[{lap:4,start:t,end:t+.01}]).reason,"gps");
+  const d=structuredClone(analysis), affected=d.top_laps_comparison.aligned.find(r=>r.lap_4_session_time_s>=t);
+  affected.lap_4_local_x_m=null;
+  assert.equal(coachTrajectory(d,pair).reason,"coverage");
+  pair.section={...pair.section,registration:{status:"rejected",translation_m:[0,0]}};
+  assert.equal(coachTrajectory(analysis,pair).reason,"registration");
+  assert.equal(coachTrajectory(analysis,{status:"same_lap"}).reason,"pair");
+});
+test("two drivers use A's coordinate frame and independent gate clocks, never B's untranslated origin",()=>{
+  const track=(offset,start)=>Array.from({length:31},(_,i)=>({session_time_s:start+i*.1,local_x_m:offset+i,local_y_m:2}));
+  const session=(offset,start)=>({selected_lap:7,channel_provenance:{speed:{source:"gps_receiver"}},track:track(offset,start)});
+  const corner={status:"candidate",a:{start_session_s:1,end_session_s:2},b:{start_session_s:11,end_session_s:12.2}};
+  const result={corners:[corner],sessions:{a:session(0,0),b:session(13,10)},registration:{status:"accepted",translation_m:[-13,0]}};
+  const model=driverTrajectory(result,corner,[[],[]]);
+  assert.ok(model.ok);assert.equal(model.gates.length,0);
+  assert.equal(model.runs[0].points[0].local_x_m,model.runs[1].points[0].local_x_m);
+  assert.ok(model.runs[0].duration<model.runs[1].duration);
+  assert.equal(driverTrajectory(result,corner,[[],[{lap:7,start:11.5,end:12}]]).reason,"gps");
+  const split=driverTrajectory(result,corner,[[{lap:7,start:.4,end:.5}],[]]);
+  assert.ok(split.ok);assert.equal(split.course.length,2);
+  assert.equal(driverTrajectory({...result,registration:null},corner,[[],[]]).reason,"registration");
+  assert.equal(driverTrajectory(result,{...corner},[[],[]]).reason,"pair");
+  result.sessions.b.track=result.sessions.b.track.filter(p=>p.session_time_s<11.4 || p.session_time_s>11.8);
+  assert.equal(driverTrajectory(result,corner,[[],[]]).reason,"coverage");
+});
 test("S2 replay uses only approved clips, independent clocks and shared spatial gates",()=>{
   const before=JSON.stringify(data),result=publishedGhost(data);assert.ok(result.ok);
   const m=result.model;

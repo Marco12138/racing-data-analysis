@@ -5,12 +5,14 @@ import { memo } from "react";
 import { CartesianGrid, Line, LineChart, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useI18n } from "../lib/i18n";
 import type { CornerCoachComparison as Comparison } from "../lib/cornerCoach";
+import { CornerTrajectoryOverlay } from "./CornerTrajectoryOverlay";
+import type { Trajectory } from "../lib/cornerTrajectory";
 
 const fmt = (value: number | null | undefined, digits = 3) => typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "—";
 const signed = (value: number) => `${value > 0 ? "+" : ""}${value.toFixed(3)}s`;
 
-export const CornerCoachComparison = memo(function CornerCoachComparison({ comparison, onReview, playable, active = true }: {
-  comparison: Comparison; onReview: (left: number, right: number) => void; playable: boolean; active?: boolean;
+export const CornerCoachComparison = memo(function CornerCoachComparison({ comparison, onReview, playable, active = true, trajectory }: {
+  comparison: Comparison; onReview: (left: number, right: number) => void; playable: boolean; active?: boolean; trajectory?: Trajectory;
 }) {
   const { locale } = useI18n(), zh = locale === "zh";
   const names = zh ? ["前段", "中段", "后段"] : ["First third", "Middle third", "Final third"];
@@ -47,6 +49,7 @@ export const CornerCoachComparison = memo(function CornerCoachComparison({ compa
         <button className="inline-flex min-h-10 items-center gap-2 rounded border border-cyan-600 px-3 py-2 text-sm text-cyan-200 disabled:opacity-40" disabled={!playable} onClick={() => onReview(comparison.section.lap, comparison.overall.lap)}><Play size={16} />{zh ? "并排查看" : "Review pair"} L{comparison.section.lap} / L{comparison.overall.lap}</button>
         {!playable && <p className="text-xs text-amber-200">{zh ? "视频未覆盖这两圈，保留遥测对照。" : "The video does not cover both laps; telemetry comparison remains available."}</p>}
         <div className="flex flex-wrap gap-5 text-xs"><span className="text-cyan-200">L{comparison.section.lap} · {zh ? "区段最快" : "Section best"}</span><span className="text-amber-200">L{comparison.overall.lap} · {zh ? "整圈最快" : "Full-lap best"}</span></div>
+        {active && trajectory && <CornerTrajectoryOverlay model={trajectory}/>}
         {(["speed", "rpm", "gain_s"] as const).map(channel => <div key={channel} data-testid={`coach-overlay-${channel}`}>
           <h5 className="text-xs text-slate-400">{channel === "speed" ? (zh ? "速度叠加 · km/h" : "Speed overlay · km/h") : channel === "rpm" ? "RPM" : (zh ? "累计时间优势 · 秒（正值：区段最快圈更快）" : "Cumulative gain · s (positive: section best is faster)")}</h5>
           {channel === "rpm" && !comparison.samples.some(p => p.section_rpm !== null || p.overall_rpm !== null) ? <p className="py-5 text-xs text-amber-200">{zh ? "RPM 数据不可用，不从音频或速度补造。" : "RPM unavailable; not fabricated from audio or speed."}</p> : <div className="h-44 min-w-0">{active && <ResponsiveContainer width="100%" height="100%"><LineChart data={comparison.samples} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>

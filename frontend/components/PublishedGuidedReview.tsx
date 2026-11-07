@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Download, Play, Volume2, VolumeX } from "lucide-react";
 import { useI18n } from "../lib/i18n";
 import { loadPublishedCoach, publishedCoachEvidence, type PublishedCoachData, type PublishedCoachSection } from "../lib/publishedCoach";
@@ -11,6 +11,7 @@ import { ReviewSteps, GuidedOverview } from "./GuidedReview";
 import { PublishedClip } from "./PublishedVideoReview";
 import { CornerCandidateNavigation } from "./SelectedCornerTelemetry";
 import { CornerCoachComparison } from "./CornerCoachComparison";
+import { coachTrajectory } from "../lib/cornerTrajectory";
 import { publishedPlaybackBounds } from "../lib/publishedVideoReview";
 import { ReviewPauseButton } from "./ReviewPauseButton";
 import { PublishedGhostReview } from "./PublishedGhostReview";
@@ -94,7 +95,9 @@ export function PublishedGuidedContent({ data, initialStep = 0 }: { data: Publis
 
 function PublishedCoachExplorer({ section, data }: { section: PublishedCoachSection; data: PublishedCoachData }) {
   const { locale } = useI18n(), zh = locale === "zh";
-  const evidence = publishedCoachEvidence(section, zh), comparison = evidence.comparison!;
+  const evidence = useMemo(() => publishedCoachEvidence(section, zh), [section, zh]), comparison = evidence.comparison!;
+  const trajectory = useMemo(() => coachTrajectory(data.analysis, comparison, data.review.clips.filter(c => c.gps_warning)
+    .map(c => ({lap: c.lap, start: c.telemetry_start_s - .5, end: c.telemetry_start_s + c.duration_s + .5}))), [data, comparison]);
   const laps = section.result.laps.filter(l => l.status === "candidate");
   const first = comparison.status !== "unavailable" ? comparison.section.lap : laps[0]?.lap;
   const [left, setLeft] = useState(first), [right, setRight] = useState(comparison.status === "available" ? comparison.overall.lap : laps.find(l => l.lap !== first)?.lap);
@@ -132,6 +135,6 @@ function PublishedCoachExplorer({ section, data }: { section: PublishedCoachSect
     </div></div>
     {error && <p role="alert" className="text-sm text-amber-200">{zh ? "播放失败，可使用原生播放器重试。" : "Playback failed; retry with native video controls."}</p>}
     <p className="text-xs text-slate-400">{zh ? "原短片各5秒；共同空间门位于片段内，实际对照时长按各圈过门时刻计算，不把5秒当作区段圈速。两侧不拉伸，速度/RPM跟随各自时间。" : "Original excerpts are 5s; shared gates lie inside them. Section time comes from each lap's gate crossings, not the fixed clip duration. Videos are not stretched; speed/RPM use each side's clock."}</p>
-    <CornerCoachComparison comparison={comparison} onReview={pair} playable={laps.length >= 2} />
+    <CornerCoachComparison comparison={comparison} trajectory={trajectory} onReview={pair} playable={laps.length >= 2} />
   </section>;
 }

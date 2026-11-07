@@ -1,6 +1,7 @@
 import type { PublishedCoachData } from "./publishedCoach";
 import type { PublishedVideoReview } from "./publishedVideoReview";
 import { compareCornerBest } from "./cornerCoach";
+import { acceptedShift, TRAJECTORY_MAX_GAP_S } from "./cornerTrajectory";
 
 export type XY = { x: number; z: number };
 type Point = XY & { time: number; speed: number; rpm: number };
@@ -8,7 +9,7 @@ type Run = { lap: number; trace: Point[]; duration: number; videoOffset: number;
 export type Ghost = { runs: [Run, Run]; course: XY[][]; gates: { distance: number; times: [number, number]; gain: number }[];
   duration: number; gain: number; net: number | null; exitAngle: number | null; thirds:{gate:number;gain:number}[] };
 type Result = { ok: true; model: Ghost } | { ok: false; reason: "pair" | "gps" | "coverage" | "media" };
-const GAP = .25, finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const GAP = TRAJECTORY_MAX_GAP_S, finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
 function sampleAt(points: Point[], time: number): Point | null {
   const i=points.findIndex(p=>p.time>=time);
@@ -39,7 +40,9 @@ export function publishedGhost(data:PublishedCoachData):Result {
   for(const row of [pair.section,pair.overall]) {
     const start=row.start_session_s,end=row.end_session_s;
     if(!finite(start)||!finite(end)||end<=start)return {ok:false,reason:"coverage"};
-    const raw=series(data,row.lap), flags=warnings(data,row.lap);
+    const shift=acceptedShift(row.registration);
+    if(!shift)return {ok:false,reason:"coverage"};
+    const raw=series(data,row.lap).map(p=>({...p,x:p.x+shift[0],z:p.z-shift[1]})), flags=warnings(data,row.lap);
     if(flagged(flags,start,end))return {ok:false,reason:"gps"};
     if(!finite(row.downstream_s)||flagged(flags,end,end+row.downstream_s))downstreamOK=false;
     if(raw.some((p,i)=>i>0&&p.time<=raw[i-1].time))return {ok:false,reason:"coverage"};

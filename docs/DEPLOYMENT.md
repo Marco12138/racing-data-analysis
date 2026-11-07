@@ -12,6 +12,16 @@ lap times. Original anchor uncertainty and GPS warnings remain authoritative.
 Run `pnpm run test:published-guide` and the regular release checks. Never deploy
 from a directory containing private experiment output.
 
+Recommended coach comparisons also show a plan-view overlay immediately above
+speed, for each eligible section (not a fixed sector ID). The base trace and both
+passes use one isotropic metre scale and the accepted translations used for gate
+timing. A session needs both real coordinate traces; gaps above 0.25 s and GPS
+warnings are never bridged. Two-driver reviews use B's accepted translation
+into A's frame, not two independently centred plots. Their interior positions
+can be compared by elapsed time, not by unmeasured intermediate gates.
+The three sample sections rebuild only from the existing published JSON with
+`python scripts/build_published_coach_demo.py`; no new footage is required.
+
 ## Stage 1 public demo
 
 The current public demo only needs:

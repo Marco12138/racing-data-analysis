@@ -169,19 +169,25 @@ function DriverClipTelemetry({ session, observation, videoTime, videoStart, conf
   </section>;
 }
 
-export function DriverGpsNotice({ video, fingerprint, observation }: {
-  video: LocalDriverVideo; fingerprint?: string; observation: CornerObservation;
-}) {
-  const { locale } = useI18n(), zh = locale === "zh";
-  const [evidence, setEvidence] = useState<ReviewGpsEvidence | null>(null);
+export function useDriverGpsEvidence(video: LocalDriverVideo, fingerprint?: string) {
+  const [record, setRecord] = useState<{ file: File; fingerprint?: string; duration: number; evidence: ReviewGpsEvidence | null }>();
   useEffect(() => {
     const read = () => {
-      try { setEvidence(fingerprint ? parseReviewGpsEvidence(localStorage.getItem(reviewGpsKey(fingerprint)), reviewVideoIdentity(video.file, video.duration)) : null); }
-      catch { setEvidence(null); }
+      let evidence: ReviewGpsEvidence | null = null;
+      try { if (fingerprint) evidence = parseReviewGpsEvidence(localStorage.getItem(reviewGpsKey(fingerprint)), reviewVideoIdentity(video.file, video.duration)); }
+      catch { /* Diagnostic storage is optional. */ }
+      setRecord({file: video.file, duration: video.duration, fingerprint, evidence});
     };
     queueMicrotask(read); window.addEventListener(REVIEW_GPS_EVENT, read);
     return () => window.removeEventListener(REVIEW_GPS_EVENT, read);
   }, [video.file, video.duration, fingerprint]);
+  return record?.file === video.file && record.duration === video.duration && record.fingerprint === fingerprint ? record.evidence : undefined;
+}
+export function DriverGpsNotice({ video, fingerprint, observation }: {
+  video: LocalDriverVideo; fingerprint?: string; observation: CornerObservation;
+}) {
+  const { locale } = useI18n(), zh = locale === "zh";
+  const evidence = useDriverGpsEvidence(video, fingerprint);
   const bad = evidence?.segments.filter(s => s.status === "gps_inconsistent" && s.session_range_s[0] < observation.end_session_s && s.session_range_s[1] > observation.start_session_s) ?? [];
   return <p className="mt-2 text-xs text-amber-200" data-testid="driver-gps-warning">{bad.length
     ? (zh ? "GPS 异常区间：两路信号不一致。人工确认和参照物相似不会解除该警告。" : "GPS anomaly: the two signals disagree. Manual confirmation and similar scenery do not clear this warning.")
