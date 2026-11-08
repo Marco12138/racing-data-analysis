@@ -69,6 +69,7 @@ export function CornerWorkspace({ analysis, file, url, duration, anchors, onResu
   const anchor = anchors.find(a => a.target_lap === sourceLap)!;
   const [start, setStart] = useState(preset?.videoStart ?? anchors[0].video_time_s + 1), [now, setNow] = useState(0);
   const [result, setResult] = useState<SelectedCornerResult | null>(null), [request, setRequest] = useState<CornerRequest | null>(null);
+  const [ungrouped, setUngrouped] = useState<SelectedCornerResult | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [selectedLap, setSelectedLap] = useState<number | null>(null), [confirmed, setConfirmed] = useState<number[]>([]);
   const [reviewPair, setReviewPair] = useState<{ left: number; right: number } | null>(null);
@@ -77,7 +78,7 @@ export function CornerWorkspace({ analysis, file, url, duration, anchors, onResu
   const [visualErrors, setVisualErrors] = useState<number[]>([]), [groupCurrent, setGroupCurrent] = useState(false);
   const [fullInterval, setFullInterval] = useState(true), [gpsRaw, setGpsRaw] = useState<string | null>(null);
   const [audio, setAudio] = useState<number | null>(0);
-  useEffect(() => { onResult?.(groupCurrent ? result : null); }, [groupCurrent, result, onResult]);
+  useEffect(() => { onResult?.(groupCurrent ? result : ungrouped); }, [groupCurrent, result, ungrouped, onResult]);
   const sourcePlayer = useRef<HTMLVideoElement>(null), targetPlayer = useRef<HTMLVideoElement>(null);
   const abort = useRef<AbortController | null>(null), visualAbort = useRef<AbortController | null>(null);
   const identity = useMemo(() => reviewVideoIdentity(file, duration), [file, duration]);
@@ -170,6 +171,7 @@ export function CornerWorkspace({ analysis, file, url, duration, anchors, onResu
 
   function resetSelection() {
     abort.current?.abort(); visualAbort.current?.abort();
+    setUngrouped(null);
     setResult(null); setRequest(null); setConfirmed([]); setVerdicts({}); setVisuals({}); setVisualErrors([]); setGroupCurrent(false); setError(""); setProgress(""); setBusy(false); setReviewPair(null);
     sourcePlayer.current?.pause(); targetPlayer.current?.pause();
   }
@@ -204,6 +206,7 @@ export function CornerWorkspace({ analysis, file, url, duration, anchors, onResu
       const next = await analyzeSelectedCorner(payload, controller.signal);
       controller.signal.throwIfAborted(); setResult(next); setRequest(payload); setGroupCurrent(group);
       if (!group) {
+        setUngrouped(next);
         const playable = browsableCornerLaps(next.laps, anchor, duration, anchors);
         setSelectedLap(playable.find(r => r.lap !== sourceLap)?.lap ?? playable[0]?.lap ?? null);
         if (sourcePlayer.current) sourcePlayer.current.currentTime = next.start_session_s + anchor.offset_ms / 1000;
@@ -260,6 +263,8 @@ export function CornerWorkspace({ analysis, file, url, duration, anchors, onResu
     <p className="text-xs text-slate-400">{zh ? "以所选五秒定位弯道，再补入减速前段与出弯恢复段。不会自动修正同步，人工锚点及 ±0.5 秒不确定性不变。" : "Locate the corner from the five-second selection, then include approach and recovery. Checks never rewrite synchronization; manual anchors and ±0.5s uncertainty remain unchanged."}</p>
     {result?.context && <p className="text-xs text-amber-200">{result.context.status === "expanded"
       ? (zh ? "已扩展运动学上下文；完整刹车、转向与开油仍需视频或直接传感器确认。" : "Kinematic context expanded; braking, steering and throttle still need video or direct sensors.")
+      : result.context.reason === "context_reaches_lap_boundary_using_seed"
+      ? (zh ? "自动扩展碰到圈界，已保留你选的五秒；不能据此确认完整弯道。" : "The extension reached a lap boundary. Your original five seconds are retained, not a verified complete corner.")
       : (zh ? "减速或出弯阶段证据不足，当前片段不能视为完整弯道。" : "Approach or exit unresolved; this clip cannot be treated as a complete corner.")}</p>}
     {!window && <p className="text-sm text-amber-200">{zh ? "请在这个已确认圈的内部选择完整五秒，避开圈起终点各半秒。" : "Select five complete seconds inside the confirmed lap, allowing half a second at both lap boundaries."}</p>}
     {error && <p role="alert" className="text-sm text-amber-200">{zh ? "无法完成此次操作。检查视频和连续遥测覆盖，或重新导入 Session。" : "Could not complete this operation. Check video and continuous telemetry coverage, or re-import the session."} [{error}]</p>}
