@@ -6,6 +6,10 @@ In step 04 of the read-only sample at `/demo`, select Sector 1, 2 or 3 to
 review the registered trajectories, paired excerpts and speed/RPM for that
 section. All three use the same interface and previously published resources.
 Original anchor uncertainty and GPS warnings remain authoritative.
+Step 05 is a bilingual walkthrough of driver-chosen corner review. It links
+to `/review` for a session with a full video and a paired lap. No fourth
+corner has been published; the demo neither repeats the recommendations
+here nor adds a simulated result to the debrief.
 Run `pnpm run test:published-guide` and the regular release checks. Never deploy
 from a directory containing private experiment output.
 

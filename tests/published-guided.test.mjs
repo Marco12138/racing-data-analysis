@@ -129,21 +129,34 @@ test("the summary uses exactly the same observation strings and numerical eviden
     assert.ok(html.split('data-testid="published-summary-sector_1"')[1].startsWith(text));
   }
 });
-test("candidate navigation, sound and per-side speed/RPM stay visible", () => {
-  for (const step of [3, 4]) {
-    const html = render(step);
+test("recommended candidates retain sound and per-side speed/RPM in both languages", () => {
+  for (const locale of ["zh", "en"]) {
+    const html = render(3, locale);
     assert.equal((html.match(/<video/g) ?? []).length, 2);
     assert.match(html, /corner-candidate-navigation/);
     assert.match(html, /corner-chart-L4-speed/); assert.match(html, /corner-chart-L4-rpm/);
     assert.match(html, /corner-chart-L5-speed/); assert.match(html, /corner-chart-L5-rpm/);
-    assert.match(html, /L6/); assert.match(html, /静音/);
-    assert.match(html, /本片段已人工确认/);
-    assert.match(html, /减速或出弯覆盖不完整/);
+    assert.match(html, /L6/); assert.match(html, /静音|Mute/);
+    assert.match(html, /本片段已人工确认|not independently confirmed/);
+    if (locale === "zh") assert.match(html, /减速或出弯覆盖不完整/);
+  }
+});
+test("step five explains a driver's own landmark selection without recycling a recommendation or claiming a new result", () => {
+  for (const locale of ["zh", "en"]) {
+    const html = render(4, locale), zh = locale === "zh";
+    assert.match(html, /data-testid="published-selected-corner"/);
+    assert.ok(html.includes(zh ? "这一步由你挑" : "Here, you choose"));
+    assert.ok(html.includes(zh ? "起点帧" : "Mark just that frame"));
+    assert.ok(html.includes(zh ? "后 5 秒" : "next 5 seconds"));
+    assert.ok(html.includes(zh ? "不生成新的分析结论" : "not a new finding"));
+    assert.match(html, /href="\/review"[^>]*>(用自己的素材开始选弯|Start a review with your own footage)/);
+    assert.doesNotMatch(html, /<video|published-coach-explorer|corner-candidate-navigation|Sector [1-3] ·|type="file"/);
+    assert.doesNotMatch(render(3, locale) + render(5, locale), /data-testid="published-selected-corner"/);
   }
 });
 test("shared controls occupy the row between both videos and both telemetry panels", () => {
-  for (const locale of ["zh", "en"]) for (const step of [3, 4]) {
-    const html = render(step, locale);
+  for (const locale of ["zh", "en"]) {
+    const html = render(3, locale);
     assert.equal((html.match(/class="order-1 min-w-0" data-testid="review-media"/g) ?? []).length, 2);
     assert.equal((html.match(/class="order-3 min-w-0" data-testid="review-telemetry"/g) ?? []).length, 2);
     assert.equal((html.match(/data-testid="review-playback-controls"/g) ?? []).length, 1);
