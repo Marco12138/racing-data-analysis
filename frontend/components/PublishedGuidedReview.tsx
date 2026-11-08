@@ -72,15 +72,15 @@ export function PublishedGuidedContent({ data, initialStep = 0 }: { data: Publis
       <dl className="grid grid-cols-2 gap-4 border-y border-slate-700 py-5 text-sm"><div><dt className="text-slate-400">AiM {zh ? "圈号" : "lap"}</dt><dd className="mt-1 font-mono">L{data.review.anchor_lap}</dd></div><div><dt className="text-slate-400">{zh ? "原视频起点" : "Original video start"}</dt><dd className="mt-1 font-mono">{data.review.anchor_video_start_s.toFixed(2)}s ±0.5s</dd></div><div><dt className="text-slate-400">{zh ? "视频相对遥测偏移" : "Video minus telemetry offset"}</dt><dd className="mt-1 font-mono">+{data.review.offset_s.toFixed(3)}s</dd></div><div><dt className="text-slate-400">{zh ? "整段自动校验" : "Whole-recording validation"}</dt><dd className="mt-1 text-amber-200">{zh ? "未通过整段验证" : "Not fully validated"}</dd></div></dl>
       <p className="text-sm text-amber-200">{zh ? "公开片段不包含起终点线的完整过线画面，不能在此重新确认或修改原锚点。" : "Published clips do not include complete timing-line crossings. The original anchor cannot be reconfirmed or edited here."}</p>
     </section>}
-    {(step === 3 || step === 4) && <>
-      <h2 className="text-xl font-semibold">{step === 3 ? (zh ? "推荐复盘 · 已发布区段摘录" : "Recommended review · Published excerpts") : (zh ? "自选弯道 · 浏览已发布候选" : "Selected corner · Browse published candidates")}</h2>
+    {step === 3 && <>
+      <h2 className="text-xl font-semibold">{zh ? "推荐复盘 · 已发布区段摘录" : "Recommended review · Published excerpts"}</h2>
       <div className="flex flex-wrap gap-2" role="group" aria-label={zh ? "公开区段" : "Published section"}>
         {data.evidence.sections.map((s, i) => <button key={s.id} aria-pressed={s.id === sectionId} onClick={() => setSectionId(s.id)}
           className={`rounded border px-3 py-2 text-sm ${s.id === sectionId ? "border-yellow-400 bg-yellow-400 text-black" : "border-slate-600 text-slate-300"}`}>Sector {i + 1} · {zh ? "摘录" : "excerpt"}</button>)}
       </div>
       <PublishedCoachExplorer key={section.id} section={section} data={data} />
-      {step === 4 && <p className="text-sm text-amber-200">{zh ? "公开素材只有这三组区段、每段三圈；不足以验证常用开法分类。任意选弯和跨圈参照物搜索需要在本地导入完整视频。" : "The public material contains only these three sections and three laps each, insufficient to validate driving-style groups. Arbitrary corner selection and cross-lap landmark search require a full local video."}</p>}
     </>}
+    {step === 4 && <SelectedCornerWalkthrough zh={zh} />}
     {step === 5 && <section className="space-y-5" data-testid="published-debrief">
       <header className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-semibold">{zh ? "本节总结 · 与推荐复盘同一证据" : "Debrief · Same evidence as recommended review"}</h2><button onClick={download} className="inline-flex items-center gap-2 rounded border border-slate-600 px-3 py-2 text-sm"><Download size={16} />{zh ? "导出总结" : "Export debrief"}</button></header>
       <p className="text-sm text-emerald-200">{zh ? "真实整圈最快：" : "Fastest real full lap: "}{bestLabel}{zh ? "。局部更快不等于整圈更快，也不代表动作已被验证。" : ". A local advantage is not a faster full lap or a validated technique."}</p>
@@ -88,8 +88,26 @@ export function PublishedGuidedContent({ data, initialStep = 0 }: { data: Publis
       <p className="border-t border-slate-700 pt-4 text-sm text-amber-200">{zh ? "下一步：先核对完整减速到出弯过程及同弯位置，再由教练确认一项调整。现有摘录不支持直接给出刹车点或油门动作处方。" : "Next: verify the full deceleration-to-exit sequence and matching location, then ask a coach to confirm one adjustment. These excerpts cannot prescribe braking or throttle actions."}</p>
       <div className="flex flex-wrap gap-4 text-sm text-cyan-200"><a href="/compare">{zh ? "双车手六步复盘（需两组素材）" : "Two-driver review (requires two datasets)"}</a><a href="/video-coach">{zh ? "独立视频分析" : "Video-only analysis"}</a><a href="/workspace?demo=1">{zh ? "赛道图、单圈对比与完整数据表" : "Track map, lap comparison and data tables"}</a></div>
     </section>}
-    {step >= 3 && <p className="text-xs leading-5 text-slate-400">{sampling}</p>}
+    {(step === 3 || step === 5) && <p className="text-xs leading-5 text-slate-400">{sampling}</p>}
     <footer className="flex items-center justify-between gap-3 border-t border-slate-700 pt-5"><button disabled={step === 0} onClick={() => go(step - 1)} className="flex min-h-11 items-center gap-2 rounded border border-slate-600 px-4 disabled:opacity-40"><ArrowLeft size={16} />{zh ? "上一步" : "Back"}</button><span className="text-xs text-slate-400">{step + 1} / 6</span><button disabled={step === 5} onClick={() => go(step + 1)} className="flex min-h-11 items-center gap-2 rounded bg-yellow-400 px-4 font-semibold text-black disabled:opacity-40">{zh ? "下一步" : "Next"}<ArrowRight size={16} /></button></footer>
+  </section>;
+}
+
+function SelectedCornerWalkthrough({ zh }: { zh: boolean }) {
+  return <section className="max-w-3xl space-y-5" data-testid="published-selected-corner">
+    <header className="space-y-2"><h2 className="text-xl font-semibold">{zh ? "自选弯道 · 你想复盘哪个弯？" : "Choose a corner · What do you want to compare?"}</h2>
+      <p className="text-sm leading-6 text-slate-300">{zh
+        ? "上一步由系统推荐区段；这一步由你挑。哪怕两圈用时相近，只要你记得开法不同，这个弯就值得看。"
+        : "The previous step recommends sections. Here, you choose. Even if two laps took much the same time, a corner you remember driving differently is worth a look."}</p></header>
+    <blockquote className="border-l-2 border-cyan-400 pl-4 text-cyan-100">{zh
+      ? "比如：“这一圈入弯速度更高，可到了下一段，我还领先吗？”"
+      : "For example: “I carried more speed into this corner. Was I still ahead in the next section?”"}</blockquote>
+    <ol className="list-decimal space-y-3 border-y border-slate-700 py-4 pl-6 text-sm leading-6 text-slate-200 marker:text-cyan-300">
+      <li>{zh ? "在已配对的那圈视频里，找减速前看得清的路边参照物，比如路牌。只选经过它的起点帧，不必再点终点；系统先取后 5 秒。" : "In your paired lap, find a landmark you pass before slowing down, such as a sign. Mark just that frame; the initial clip takes the next 5 seconds."}</li>
+      <li>{zh ? "逐圈查看同一位置的候选片段。先看路牌和弯口是不是同一个，再比较两圈的速度、RPM 和出弯后的用时。GPS 有异常，或片段没拍到出弯，就保留疑问。" : "Check each candidate lap against the same landmark and corner entry. Then compare speed, RPM and time through the next section. Leave the question open if GPS is flagged or the exit is missing."}</li>
+    </ol>
+    <p className="text-sm text-slate-400">{zh ? "公开样例只有第四步的三组短片，没有另一个弯的完整视频。这里展示选弯方法，不生成新的分析结论。" : "Only the three sets of excerpts from step 4 are public. There is no footage covering another complete corner here; this is a walkthrough, not a new finding."}</p>
+    <a href="/review" className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-cyan-200 underline underline-offset-4">{zh ? "用自己的素材开始选弯" : "Start a review with your own footage"}<ArrowRight size={16} aria-hidden /></a>
   </section>;
 }
 
