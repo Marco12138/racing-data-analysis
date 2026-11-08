@@ -1,14 +1,11 @@
 # Deployment Guide
 
-## Published S2 replay
+## Published sector replays
 
-The read-only sample at `/demo` exposes **Wuhan circuit · S2 ghost replay** in
-step 04 (Recommended review). It reads the existing approved session and coach
-JSON plus the two existing S2 MP4 excerpts; it does not need a new API, media
-upload, calibration artifact or environment variable. The schematic road width
-is not a surveyed boundary. The plan-view symbols describe GPS travel direction,
-not measured body attitude. Same-clock replay and same-gate freeze use separate
-lap times. Original anchor uncertainty and GPS warnings remain authoritative.
+In step 04 of the read-only sample at `/demo`, select Sector 1, 2 or 3 to
+review the registered trajectories, paired excerpts and speed/RPM for that
+section. All three use the same interface and previously published resources.
+Original anchor uncertainty and GPS warnings remain authoritative.
 Run `pnpm run test:published-guide` and the regular release checks. Never deploy
 from a directory containing private experiment output.
 
