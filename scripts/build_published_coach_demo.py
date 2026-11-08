@@ -85,6 +85,7 @@ def build() -> dict:
                     _section(current, b, following[0]["session_time_s"])
                     downstream = following[0]["session_time_s"] - b
             rows.append({**row, "status": "candidate", "reason": None,
+                         "registration": {"status": fit["status"], "translation_m": fit["translation_m"]},
                          "start_session_s": a, "end_session_s": b, "elapsed_s": b-a,
                          "downstream_s": downstream, "start_distance_m": float(section.distance_m.iloc[0]),
                          "end_distance_m": float(section.distance_m.iloc[-1]),

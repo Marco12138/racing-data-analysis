@@ -36,6 +36,13 @@
             },
             "status": "candidate",
             "reason": null,
+            "registration": {
+              "status": "accepted",
+              "translation_m": [
+                0.0,
+                0.0
+              ]
+            },
             "start_session_s": 147.21798113639352,
             "end_session_s": 151.6179811363935,
             "elapsed_s": 4.399999999999977,
@@ -700,6 +707,13 @@
             },
             "status": "candidate",
             "reason": null,
+            "registration": {
+              "status": "accepted",
+              "translation_m": [
+                -0.860254485011354,
+                0.5067315058083537
+              ]
+            },
             "start_session_s": 188.14959657522198,
             "end_session_s": 192.56351844073632,
             "elapsed_s": 4.4139218655143395,
@@ -1364,6 +1378,13 @@
             },
             "status": "candidate",
             "reason": null,
+            "registration": {
+              "status": "accepted",
+              "translation_m": [
+                -0.9971341896764405,
+                -0.2162355253776167
+              ]
+            },
             "start_session_s": 229.2959646024115,
             "end_session_s": 233.69002190412078,
             "elapsed_s": 4.394057301709296,
@@ -2062,6 +2083,13 @@
             },
             "status": "candidate",
             "reason": null,
+            "registration": {
+              "status": "accepted",
+              "translation_m": [
+                0.0,
+                0.0
+              ]
+            },
             "start_session_s": 161.65041720194782,
             "end_session_s": 166.0504172019478,
             "elapsed_s": 4.399999999999977,
@@ -2738,6 +2766,13 @@
             },
             "status": "candidate",
             "reason": null,
+            "registration": {
+              "status": "accepted",
+              "translation_m": [
+                -0.860254485011354,
+                0.5067315058083537
+              ]
+            },
             "start_session_s": 202.59534421069262,
             "end_session_s": 207.05628756955164,
             "elapsed_s": 4.460943358859026,
@@ -3408,6 +3443,13 @@
             },
             "status": "candidate",
             "reason": null,
+            "registration": {
+              "status": "accepted",
+              "translation_m": [
+                -0.9971341896764405,
+                -0.2162355253776167
+              ]
+            },
             "start_session_s": 243.70954291226755,
             "end_session_s": 248.19805144856386,
             "elapsed_s": 4.488508536296308,
@@ -4118,6 +4160,13 @@
             },
             "status": "candidate",
             "reason": null,
+            "registration": {
+              "status": "accepted",
+              "translation_m": [
+                0.0,
+                0.0
+              ]
+            },
             "start_session_s": 164.22612190967783,
             "end_session_s": 168.6261219096778,
             "elapsed_s": 4.399999999999977,
@@ -4807,6 +4856,13 @@
             },
             "status": "candidate",
             "reason": null,
+            "registration": {
+              "status": "accepted",
+              "translation_m": [
+                -0.860254485011354,
+                0.5067315058083537
+              ]
+            },
             "start_session_s": 205.16100981383806,
             "end_session_s": 209.61427851268286,
             "elapsed_s": 4.453268698844795,
@@ -5490,6 +5546,13 @@
             },
             "status": "candidate",
             "reason": null,
+            "registration": {
+              "status": "accepted",
+              "translation_m": [
+                -0.9971341896764405,
+                -0.2162355253776167
+              ]
+            },
             "start_session_s": 246.35121618375166,
             "end_session_s": 250.75485024406768,
             "elapsed_s": 4.403634060316023,

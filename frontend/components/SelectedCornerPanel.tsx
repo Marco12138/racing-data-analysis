@@ -17,6 +17,7 @@ import { ReviewAudioControl } from "./ReviewAudioControl";
 import { ReviewPauseButton } from "./ReviewPauseButton";
 import { CornerCandidateNavigation, SelectedCornerTelemetry } from "./SelectedCornerTelemetry";
 import { CornerCoachComparison } from "./CornerCoachComparison";
+import { coachTrajectory } from "../lib/cornerTrajectory";
 import { compareCornerBest } from "../lib/cornerCoach";
 import { coachObservation, type RecommendedSeed, type RecommendedCoachEvidence } from "../lib/recommendedCoach";
 
@@ -101,6 +102,15 @@ export function CornerWorkspace({ analysis, file, url, duration, anchors, onResu
       return clip && typeof row.downstream_s === "number" && reviewGpsOverlaps(gps, clip.end - .5, clip.end + row.downstream_s + .5, clip.offset)
         .some(s => s.status === "gps_inconsistent");
     }).map(r => r.lap)) : null, [result, flagged, verdicts, anchor, duration, anchors, gps]);
+  const trajectory = useMemo(() => coach && visible ? coachTrajectory(analysis, coach,
+    coach.status === "available" ? [coach.section, coach.overall].flatMap(row => gps?.segments.filter(s => s.status === "gps_inconsistent")
+      .map(s => ({lap: row.lap, start: s.session_range_s[0] - .5, end: s.session_range_s[1] + .5})) ?? []) : []) : undefined,
+    [analysis, coach, gps, visible]);
+  const sceneClips=useMemo(()=>{
+    if(coach?.status!=="available")return;
+    const a=cornerVideoWindow(coach.section,anchor,duration,anchors),b=cornerVideoWindow(coach.overall,anchor,duration,anchors);
+    return a&&b ? [{url,start:a.start},{url,start:b.start}] as const : undefined;
+  },[coach,anchor,duration,anchors,url]);
   const coachEvidence = useMemo<RecommendedCoachEvidence | null>(() => preset ? {
     id: preset.id, name: preset.name, comparison: coach,
     contextComplete: result?.context?.status === "expanded",
@@ -276,7 +286,7 @@ export function CornerWorkspace({ analysis, file, url, duration, anchors, onResu
       <p className="text-xs text-slate-400">{zh ? "默认播放完整相同空间区段。计时按同一对 GPS 空间门；两侧同时起播，不拉伸视频，也不保证逐帧处于同一位置。" : "Defaults to the full common spatial interval. Timing uses the same GPS gates; playback is simultaneous, not time-warped or position-locked."}</p>
     </div>}
     </div>
-    {coach && <CornerCoachComparison comparison={coach} onReview={reviewCoachPair} active={visible}
+    {coach && <CornerCoachComparison comparison={coach} onReview={reviewCoachPair} active={visible} trajectory={trajectory} clips={sceneClips}
       playable={coach.status !== "unavailable" && [coach.section, coach.overall].every(row => cornerVideoWindow(row, anchor, duration, anchors))} />}
     {result && <>
       <div className="flex flex-wrap items-center gap-3"><button className={button} disabled={!!progress || busy} onClick={() => void scan()}><ScanEye size={16} />{zh ? "首尾参照物二次核对（全部）" : "Check boundary landmarks (all)"}</button>{progress && <><span role="status" className="text-sm text-cyan-200">{progress}</span><button className={button} onClick={() => visualAbort.current?.abort()}><X size={16} />{zh ? "取消" : "Cancel"}</button></>}</div>

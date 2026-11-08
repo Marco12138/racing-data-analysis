@@ -1,16 +1,36 @@
 # Deployment Guide
 
-## Published S2 replay
+## Published sector replays
 
-The read-only sample at `/demo` exposes **Wuhan circuit · S2 ghost replay** in
-step 04 (Recommended review). It reads the existing approved session and coach
-JSON plus the two existing S2 MP4 excerpts; it does not need a new API, media
-upload, calibration artifact or environment variable. The schematic road width
-is not a surveyed boundary. The plan-view symbols describe GPS travel direction,
-not measured body attitude. Same-clock replay and same-gate freeze use separate
-lap times. Original anchor uncertainty and GPS warnings remain authoritative.
+In step 04 of the read-only sample at `/demo`, select Sector 1, 2 or 3 to
+review the registered trajectories, paired excerpts and speed/RPM for that
+section. All three use the same interface and previously published resources.
+Original anchor uncertainty and GPS warnings remain authoritative.
 Run `pnpm run test:published-guide` and the regular release checks. Never deploy
 from a directory containing private experiment output.
+
+Recommended coach comparisons also show a plan-view overlay immediately above
+speed, for each eligible section (not a fixed sector ID). The base trace and both
+passes use one isotropic metre scale and the accepted translations used for gate
+timing. A session needs both real coordinate traces; gaps above 0.25 s and GPS
+warnings are never bridged. Two-driver reviews use B's accepted translation
+into A's frame, not two independently centred plots. Their interior positions
+can be compared by elapsed time, not by unmeasured intermediate gates.
+The three sample sections rebuild only from the existing published JSON with
+`python scripts/build_published_coach_demo.py`; no new footage is required.
+Both map views draw the same illustrative 8 m road ribbon behind the lap traces,
+in the GPS metre coordinate system. It follows the registered full-lap best
+(driver A in a two-driver comparison); it does not imply a measured centreline,
+distance to a kerb, or official track limits. GPS gaps remain open.
+
+Plan-view karts follow the local GPS travel direction, not measured body yaw.
+The map and speed/RPM chart cursors share the same per-lap replay clocks.
+Zoom changes the camera centre and a single XY scale together. For a matched
+video pair, disposable local decoders compare two roadside patches at shared
+gates with distinctly different scenes as controls. The B search is bounded
+to ±0.5 s and the matched interval. Supported samples annotate GPS positions;
+they never move the karts, shift an anchor, or imply camera calibration.
+No sampled frames are stored or uploaded.
 
 ## Stage 1 public demo
 

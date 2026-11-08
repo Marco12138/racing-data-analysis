@@ -10,6 +10,7 @@ export type CornerLap = {
   quality: { analysis_eligible: boolean; reasons: string[]; lap_time?: number };
   start_session_s?: number; end_session_s?: number; elapsed_s?: number; downstream_s?: number | null;
   start_distance_m?: number; end_distance_m?: number;
+  registration?: { status: string; translation_m?: number[] };
   profile?: { progress: number[]; speed: number[]; rpm: number[] | null; metrics: CornerMetrics };
   telemetry?: CornerTelemetryPoint[];
   spatial_profile?: { status: "available" | "unavailable"; reason: string | null; method: "shared_directed_spatial_gates"; points: CornerSpatialPoint[] };

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Download, Play, Volume2, VolumeX } from "lucide-react";
 import { useI18n } from "../lib/i18n";
 import { loadPublishedCoach, publishedCoachEvidence, type PublishedCoachData, type PublishedCoachSection } from "../lib/publishedCoach";
@@ -11,9 +11,9 @@ import { ReviewSteps, GuidedOverview } from "./GuidedReview";
 import { PublishedClip } from "./PublishedVideoReview";
 import { CornerCandidateNavigation } from "./SelectedCornerTelemetry";
 import { CornerCoachComparison } from "./CornerCoachComparison";
+import { coachTrajectory } from "../lib/cornerTrajectory";
 import { publishedPlaybackBounds } from "../lib/publishedVideoReview";
 import { ReviewPauseButton } from "./ReviewPauseButton";
-import { PublishedGhostReview } from "./PublishedGhostReview";
 
 export function PublishedGuidedReview() {
   const { locale } = useI18n(), zh = locale === "zh";
@@ -31,7 +31,6 @@ export function PublishedGuidedReview() {
 export function PublishedGuidedContent({ data, initialStep = 0 }: { data: PublishedCoachData; initialStep?: ReviewStep }) {
   const { locale } = useI18n(), zh = locale === "zh";
   const [step, setStep] = useState(initialStep), [sectionId, setSectionId] = useState(data.evidence.sections[0].id);
-  const [showGhost,setShowGhost]=useState(false);
   const root = useRef<HTMLElement>(null);
   const section = data.evidence.sections.find(s => s.id === sectionId)!;
   const evidence = data.evidence.sections.map(s => publishedCoachEvidence(s, zh));
@@ -46,7 +45,7 @@ export function PublishedGuidedContent({ data, initialStep = 0 }: { data: Publis
   function go(next: number) {
     if (!Number.isInteger(next) || next < 0 || next > 5) return;
     root.current?.querySelectorAll("video").forEach(v => v.pause());
-    setShowGhost(false);setStep(next as ReviewStep);
+    setStep(next as ReviewStep);
     root.current?.scrollIntoView({ block: "start", behavior: "instant" });
   }
   function download() {
@@ -75,9 +74,11 @@ export function PublishedGuidedContent({ data, initialStep = 0 }: { data: Publis
     </section>}
     {(step === 3 || step === 4) && <>
       <h2 className="text-xl font-semibold">{step === 3 ? (zh ? "推荐复盘 · 已发布区段摘录" : "Recommended review · Published excerpts") : (zh ? "自选弯道 · 浏览已发布候选" : "Selected corner · Browse published candidates")}</h2>
-      <div className="flex flex-wrap gap-2" role="group" aria-label={zh ? "公开区段" : "Published section"}>{data.evidence.sections.map((s, i) => <button key={s.id} aria-pressed={!showGhost && s.id === sectionId} onClick={() => {setShowGhost(false);setSectionId(s.id);}} className={`rounded border px-3 py-2 text-sm ${!showGhost && s.id === sectionId ? "border-yellow-400 bg-yellow-400 text-black" : "border-slate-600 text-slate-300"}`}>Sector {i + 1} · {zh ? "摘录" : "excerpt"}</button>)}
-      {step===3 && <button aria-pressed={showGhost} onClick={()=>{setSectionId("sector_2");setShowGhost(true);}} className={`rounded border px-3 py-2 text-sm ${showGhost?"border-yellow-400 bg-yellow-400 text-black":"border-cyan-700 text-cyan-200"}`}>{zh?"武汉全图 · S2 双圈叠影":"Wuhan circuit · S2 ghost replay"}</button>}</div>
-      {step===3 && showGhost ? <PublishedGhostReview data={data}/> : <PublishedCoachExplorer key={section.id} section={section} data={data} />}
+      <div className="flex flex-wrap gap-2" role="group" aria-label={zh ? "公开区段" : "Published section"}>
+        {data.evidence.sections.map((s, i) => <button key={s.id} aria-pressed={s.id === sectionId} onClick={() => setSectionId(s.id)}
+          className={`rounded border px-3 py-2 text-sm ${s.id === sectionId ? "border-yellow-400 bg-yellow-400 text-black" : "border-slate-600 text-slate-300"}`}>Sector {i + 1} · {zh ? "摘录" : "excerpt"}</button>)}
+      </div>
+      <PublishedCoachExplorer key={section.id} section={section} data={data} />
       {step === 4 && <p className="text-sm text-amber-200">{zh ? "公开素材只有这三组区段、每段三圈；不足以验证常用开法分类。任意选弯和跨圈参照物搜索需要在本地导入完整视频。" : "The public material contains only these three sections and three laps each, insufficient to validate driving-style groups. Arbitrary corner selection and cross-lap landmark search require a full local video."}</p>}
     </>}
     {step === 5 && <section className="space-y-5" data-testid="published-debrief">
@@ -94,7 +95,19 @@ export function PublishedGuidedContent({ data, initialStep = 0 }: { data: Publis
 
 function PublishedCoachExplorer({ section, data }: { section: PublishedCoachSection; data: PublishedCoachData }) {
   const { locale } = useI18n(), zh = locale === "zh";
-  const evidence = publishedCoachEvidence(section, zh), comparison = evidence.comparison!;
+  const evidence = useMemo(() => publishedCoachEvidence(section, zh), [section, zh]), comparison = evidence.comparison!;
+  const trajectory = useMemo(() => coachTrajectory(data.analysis, comparison, data.review.clips.filter(c => c.gps_warning)
+    .map(c => ({lap: c.lap, start: c.telemetry_start_s - .5, end: c.telemetry_start_s + c.duration_s + .5}))), [data, comparison]);
+  const sceneClips=useMemo(()=>{
+    if(comparison.status!=="available")return;
+    const clipFor=(row:typeof comparison.section)=>{
+      const clip=data.review.clips.find(c=>c.sector_id===section.id && c.lap===row.lap && !c.gps_warning);
+      if(!clip || row.start_session_s===undefined || row.end_session_s===undefined || row.start_session_s<clip.telemetry_start_s || row.end_session_s>clip.telemetry_start_s+clip.duration_s)return null;
+      return {url:clip.url,start:row.start_session_s-clip.telemetry_start_s};
+    };
+    const a=clipFor(comparison.section),b=clipFor(comparison.overall);
+    return a&&b ? [a,b] as const : undefined;
+  },[comparison,data.review.clips,section.id]);
   const laps = section.result.laps.filter(l => l.status === "candidate");
   const first = comparison.status !== "unavailable" ? comparison.section.lap : laps[0]?.lap;
   const [left, setLeft] = useState(first), [right, setRight] = useState(comparison.status === "available" ? comparison.overall.lap : laps.find(l => l.lap !== first)?.lap);
@@ -132,6 +145,6 @@ function PublishedCoachExplorer({ section, data }: { section: PublishedCoachSect
     </div></div>
     {error && <p role="alert" className="text-sm text-amber-200">{zh ? "播放失败，可使用原生播放器重试。" : "Playback failed; retry with native video controls."}</p>}
     <p className="text-xs text-slate-400">{zh ? "原短片各5秒；共同空间门位于片段内，实际对照时长按各圈过门时刻计算，不把5秒当作区段圈速。两侧不拉伸，速度/RPM跟随各自时间。" : "Original excerpts are 5s; shared gates lie inside them. Section time comes from each lap's gate crossings, not the fixed clip duration. Videos are not stretched; speed/RPM use each side's clock."}</p>
-    <CornerCoachComparison comparison={comparison} onReview={pair} playable={laps.length >= 2} />
+    <CornerCoachComparison comparison={comparison} trajectory={trajectory} clips={sceneClips} onReview={pair} playable={laps.length >= 2} />
   </section>;
 }

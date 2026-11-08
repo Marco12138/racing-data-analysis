@@ -248,33 +248,119 @@ test("narrow phone steps leave space for labels before switching to three column
   assert.match(html, /min-\[380px\]:grid-cols-3/);
   assert.match(html, /lg:grid-cols-6/);
 });
-const {publishedGhost,ghostFrame,PublishedGhostReview,I18nProvider}=await import(pathToFileURL(`${dir}/entry.mjs`).href);
-test("S2 replay uses only approved clips, independent clocks and shared spatial gates",()=>{
-  const before=JSON.stringify(data),result=publishedGhost(data);assert.ok(result.ok);
-  const m=result.model;
-  assert.deepEqual(m.runs.map(r=>r.clip.url),["/demo/video/sector-2-lap-4.mp4","/demo/video/sector-2-lap-5.mp4"]);
-  assert.equal(m.gates.length,16);assert.equal(m.gain.toFixed(3),"0.061");assert.equal(m.net.toFixed(3),"0.055");
-  assert.equal(m.exitAngle.toFixed(1),"2.2");assert.equal(m.course.flat().length,817);
-  assert.deepEqual(m.thirds.map(p=>[p.gate,p.gain.toFixed(3)]),[[5,"-0.002"],[10,"0.030"],[15,"0.033"]]);
-  for(const [i,g] of m.gates.entries()){
-    const {cars}=ghostFrame(m,"gate",i);
-    assert.ok(Math.abs(cars[1].time-cars[0].time-g.gain)<1e-8);
-    for(const [j,p] of cars.entries())assert.ok(p.clipTime===p.time+m.runs[j].videoOffset&&p.clipTime>=0&&p.clipTime<=5);
+const {coachTrajectory,driverTrajectory,trajectoryAt}=await import(pathToFileURL(`${dir}/entry.mjs`).href);
+const {replayFrame,sceneCandidate,samplePlan,readTrajectoryFrames,blendCamera,fitCamera,screenPoint}=await import(pathToFileURL(`${dir}/entry.mjs`).href);
+test("each real S2 kart has its own gate clock, channel readings and speed/RPM chart cursor",()=>{
+  const model=coachTrajectory(analysis,publishedCoachEvidence(evidence.sections[1]).comparison);
+  const end=replayFrame(model,"gate",15), timed=replayFrame(model,"time",4.43);
+  assert.equal(end.gap.toFixed(3),"0.061");assert.deepEqual(end.cars.map(c=>Math.round(c.rpm)),[9169,8871]);
+  assert.deepEqual(end.cars.map(c=>c.speed.toFixed(1)),["63.5","61.5"]);
+  assert.equal(end.cars[0].chartX,end.cars[1].chartX);assert.ok(end.cars.every(c=>Number.isFinite(c.heading)));
+  assert.ok(timed.cars[0].finished && !timed.cars[1].finished && timed.cars[0].chartX>timed.cars[1].chartX);
+  assert.equal(samplePlan(model).length,3);
+  const html=render(3);assert.equal((html.match(/data-testid="kart-glyph"/g)||[]).length,2);assert.match(html,/trajectory-readout/);
+  const d=structuredClone(model); for(const p of d.runs[0].points){p.local_x_m=0;p.local_y_m=0;p.rpm=null;}
+  const p=replayFrame(d,"time",.1).cars[0];assert.equal(p.heading,null);assert.equal(p.rpm,null);
+});
+test("the zoom preserves equal x/y scale at every intermediate camera position",()=>{
+  const a=fitCamera([{local_x_m:20,local_y_m:10},{local_x_m:30,local_y_m:45}]);
+  const b=fitCamera([{local_x_m:-50,local_y_m:60},{local_x_m:170,local_y_m:-35}]);
+  for(const u of [0,.1,.5,.9,1]){
+    const c=blendCamera(a,b,u), p=(x,y)=>screenPoint(c,{local_x_m:x,local_y_m:y});
+    assert.ok(Math.abs(p(1,0).x-p(0,0).x-(p(0,0).y-p(0,1).y))<1e-10);
   }
-  const {cars}=ghostFrame(m,"time",4.43);assert.ok(cars[0].finished&&!cars[1].finished);
-  assert.equal(JSON.stringify(data),before);
 });
-test("S2 fails closed on flagged laps, missing coverage, or non-approved media",()=>{
-  let d=structuredClone(data);d.evidence.sections[1].gps_flagged_laps=[4];assert.equal(publishedGhost(d).reason,"gps");
-  d=structuredClone(data);const clip=d.review.clips.find(c=>c.lap===4&&c.sector_id==="sector_2");clip.url="/elsewhere.mp4";assert.equal(publishedGhost(d).reason,"media");
-  d=structuredClone(data);d.analysis.top_laps_comparison.aligned=d.analysis.top_laps_comparison.aligned.filter(p=>p.lap_4_session_time_s<163||p.lap_4_session_time_s>164);assert.equal(publishedGhost(d).reason,"coverage");
-  d=structuredClone(data);d.review.clips.push({...clip,lap:5,gps_warning:true,telemetry_start_s:208});assert.equal(publishedGhost(d).model.net,null);
+test("visual sampling needs distinctive roadside patches at both sides and rejects arbitrary sources",async()=>{
+  const frame=(seed,time)=>{let n=seed;const rgba=new Uint8ClampedArray(96*64*4);
+    for(let i=0;i<rgba.length;i+=4){n=(Math.imul(1664525,n)+1013904223)>>>0;rgba[i]=rgba[i+1]=rgba[i+2]=n>>>24;rgba[i+3]=255;}
+    return {width:96,height:64,rgba,time};};
+  const frames=[frame(2,0),frame(3,2),frame(4,4)];
+  assert.equal(sceneCandidate(frames[1],frames,2),2);
+  assert.equal(sceneCandidate(frames[1],[frames[0],{...frames[1],time:2.5},frames[2]],2),2.5);
+  assert.equal(sceneCandidate(frames[1],[frames[0],{...frames[1],time:2.6},frames[2]],2),null);
+  assert.equal(sceneCandidate(frames[1],[frames[0],frames[1],{...frames[1],time:4}],2),null);
+  for(const url of ["https://other.invalid/a.mp4","/demo/video/unapproved.mp4","/demo/video/sector-2-lap-5.mp4?other=1"])
+    await assert.rejects(readTrajectoryFrames(url,[1],new AbortController().signal),/invalid_local_search/);
 });
-test("public map and S2 entry render without private diagnostics, projections or writes",()=>{
-  assert.match(render(3),/武汉全图 · S2 双圈叠影/);
-  assert.doesNotMatch(render(4),/武汉全图 · S2 双圈叠影/);
-  const html=renderToStaticMarkup(createElement(I18nProvider,{initialLocale:"zh"},createElement(PublishedGhostReview,{data})));
-  assert.match(html,/published-s2-ghost/);assert.match(html,/159\.55s ±0\.5s/);
-  assert.match(html,/sector-2-lap-4\.mp4/);assert.match(html,/sector-2-lap-5\.mp4/);
-  assert.doesNotMatch(html,/__local|projection|\/qa\/|\/experiments\/|GH010681|type="file"/i);
+test("all published recommendations use their own registered gates above speed, without selecting an excluded lap",()=>{
+  const html=render(3);
+  assert.ok(html.indexOf('data-testid="corner-trajectory"')>=0 && html.indexOf('data-testid="corner-trajectory"')<html.indexOf('data-testid="coach-overlay-speed"'));
+  for(const s of evidence.sections){
+    const pair=publishedCoachEvidence(s).comparison, model=coachTrajectory(analysis,pair);
+    assert.equal(model.ok,true,s.id);
+    assert.deepEqual(model.runs.map(r=>r.label),["L4","L5"]);
+    assert.equal(model.gates.length,pair.samples.length);
+    assert.equal(model.gates.at(-1).b-model.gates.at(-1).a,pair.gain_s);
+    assert.equal(model.runs[0].points[0].time,0);
+    assert.equal(trajectoryAt(model.runs[1].points,model.gates[5].b).time,model.gates[5].b);
+    assert.equal(trajectoryAt(model.runs[0].points,model.runs[0].duration+.1),null);
+    if(s.id==="sector_1")assert.ok(pair.excluded.includes(6));
+  }
+});
+test("recommended maps use the S2 schematic road, not a screen-width line or a synthetic closure",()=>{
+  const html=render(3), surface=html.match(/data-testid="gps-track-surface"[\s\S]*?(?=<polyline[^>]*stroke="#35d6d0")/)?.[0];
+  assert.ok(surface);assert.match(surface,/stroke-width="8"/);assert.match(surface,/stroke-width="8.4"/);
+  assert.doesNotMatch(surface,/non-scaling-stroke|<polygon|<path/);
+  assert.match(html,/L5 的 GPS 走线/);assert.match(html,/不是实测路缘/);
+  for(const s of evidence.sections){
+    const model=coachTrajectory(analysis,publishedCoachEvidence(s).comparison);
+    assert.equal(model.courseLabel,"L5");
+    const [dx,dy]=s.result.laps.find(r=>r.lap===5).registration.translation_m;
+    const reference=analysis.top_laps_comparison.aligned.filter(p=>Number.isFinite(p.lap_5_session_time_s)
+      && Number.isFinite(p.lap_5_local_x_m) && Number.isFinite(p.lap_5_local_y_m));
+    assert.deepEqual(model.course.flat().map(p=>[p.local_x_m,p.local_y_m]),
+      reference.map(p=>[p.lap_5_local_x_m+dx,p.lap_5_local_y_m+dy]));
+  }
+  const pair=publishedCoachEvidence(evidence.sections[1]).comparison, begin=pair.overall.start_session_s;
+  const partial=coachTrajectory(analysis,pair,[{lap:5,start:begin-3,end:begin-2}]);
+  assert.ok(partial.ok);assert.ok(partial.course.length>=2);
+  assert.ok(partial.course.every(seg=>seg.at(-1).time<begin-3 || seg[0].time>begin-2));
+});
+test("a metre of road scales like a metre of GPS across full-circuit rotation and zoom",()=>{
+  const pts=[{local_x_m:0,local_y_m:0},{local_x_m:20,local_y_m:90}];
+  const local=fitCamera(pts.slice(0,1)),full=fitCamera(pts,true);
+  assert.equal(full.angle,-90);assert.ok(local.scale>full.scale);
+  for(const u of [0,.25,.5,.75,1]){
+    const c=blendCamera(local,full,u),p=(x,y)=>screenPoint(c,{local_x_m:x,local_y_m:y});
+    const origin=p(0,0),east=p(8,0),north=p(0,8);
+    for(const edge of [east,north])assert.ok(Math.abs(Math.hypot(edge.x-origin.x,edge.y-origin.y)-8*c.scale)<1e-8);
+  }
+});
+test("current GPS flags, coordinate holes and rejected registration withhold the map, not the timing evidence",()=>{
+  const pair=publishedCoachEvidence(evidence.sections[1]).comparison, t=pair.section.start_session_s+2;
+  assert.equal(coachTrajectory(analysis,pair,[{lap:4,start:t,end:t+.01}]).reason,"gps");
+  const d=structuredClone(analysis), affected=d.top_laps_comparison.aligned.find(r=>r.lap_4_session_time_s>=t);
+  affected.lap_4_local_x_m=null;
+  assert.equal(coachTrajectory(d,pair).reason,"coverage");
+  pair.section={...pair.section,registration:{status:"rejected",translation_m:[0,0]}};
+  assert.equal(coachTrajectory(analysis,pair).reason,"registration");
+  assert.equal(coachTrajectory(analysis,{status:"same_lap"}).reason,"pair");
+});
+test("two drivers use A's coordinate frame and independent gate clocks, never B's untranslated origin",()=>{
+  const track=(offset,start)=>Array.from({length:31},(_,i)=>({session_time_s:start+i*.1,local_x_m:offset+i,local_y_m:2}));
+  const session=(offset,start)=>({selected_lap:7,channel_provenance:{speed:{source:"gps_receiver"}},track:track(offset,start)});
+  const corner={status:"candidate",a:{start_session_s:1,end_session_s:2},b:{start_session_s:11,end_session_s:12.2}};
+  const result={corners:[corner],sessions:{a:session(0,0),b:session(13,10)},registration:{status:"accepted",translation_m:[-13,0]}};
+  const model=driverTrajectory(result,corner,[[],[]]);
+  assert.ok(model.ok);assert.equal(model.gates.length,0);
+  assert.equal(model.runs[0].points[0].local_x_m,model.runs[1].points[0].local_x_m);
+  assert.ok(model.runs[0].duration<model.runs[1].duration);
+  assert.equal(driverTrajectory(result,corner,[[],[{lap:7,start:11.5,end:12}]]).reason,"gps");
+  const split=driverTrajectory(result,corner,[[{lap:7,start:.4,end:.5}],[]]);
+  assert.ok(split.ok);assert.equal(split.course.length,2);assert.equal(split.courseLabel,"A · L7");
+  assert.equal(driverTrajectory({...result,registration:null},corner,[[],[]]).reason,"registration");
+  assert.equal(driverTrajectory(result,{...corner},[[],[]]).reason,"pair");
+  result.sessions.b.track=result.sessions.b.track.filter(p=>p.session_time_s<11.4 || p.session_time_s>11.8);
+  assert.equal(driverTrajectory(result,corner,[[],[]]).reason,"coverage");
+});
+test("recommended review offers exactly the three sector excerpts, without a separate S2 showcase",()=>{
+  for(const locale of ["zh","en"]){
+    const html=render(3,locale), label=locale==="zh"?"公开区段":"Published section";
+    const group=html.split(`role="group" aria-label="${label}">`)[1]?.split("</div>")[0];
+    assert.ok(group);
+    assert.deepEqual([...group.matchAll(/<button\b[^>]*>(.*?)<\/button>/g)].map(m=>m[1]),
+      [1,2,3].map(n=>`Sector ${n} · ${locale==="zh"?"摘录":"excerpt"}`));
+    assert.doesNotMatch(html,/published-s2-ghost|武汉全图 · S2 双圈叠影|Wuhan circuit · S2 ghost replay/i);
+    assert.match(html,/data-testid="corner-trajectory"/);
+  }
 });

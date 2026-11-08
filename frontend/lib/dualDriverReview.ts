@@ -18,7 +18,7 @@ export type DriverCorner = { id: string; status: "candidate" | "unavailable"; re
   context?: { status: string; reason: string };
   a?: CornerObservation; b?: CornerObservation; difference_s?: number; differences?: Record<string, number | null> };
 export type DualDriverResult = { version: 1; sessions: { a: DriverSession; b: DriverSession };
-  corners: DriverCorner[]; warnings: string[]; limitations?: string[]; registration: null | { status: string };
+  corners: DriverCorner[]; warnings: string[]; limitations?: string[]; registration: null | { status: string; translation_m?: number[] };
   synthetic_curve_generated: false };
 export type DriverBinding = { version: 1; fileKey: string; inspectionId: string; lap: number;
   video_start_s: number; video_end_s: number; offset_s: number; uncertainty_s: .5; confirmed: true };
