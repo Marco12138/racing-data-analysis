@@ -10,5 +10,5 @@ export function GuideTest({ locale, analysis, view, coachEvidence, corner = null
 }
 
 export function ImportPanelsTest() {
-  return <I18nProvider initialLocale="en"><div hidden><NewSessionCard status="loaded" hasPendingVideo={false} onStart={() => {}} /></div><NewSessionCard guided status="loaded" hasPendingVideo={false} onStart={() => {}} /></I18nProvider>;
+  return <I18nProvider initialLocale="en"><div hidden><NewSessionCard importReadiness="ready" status="loaded" hasPendingVideo={false} onStart={() => {}} /></div><NewSessionCard importReadiness="ready" guided status="loaded" hasPendingVideo={false} onStart={() => {}} /></I18nProvider>;
 }

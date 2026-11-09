@@ -55,7 +55,10 @@ let apiConfigPromise: Promise<ResolvedApiConfig> | null = null;
 
 export function resolveApiConfig(): Promise<ResolvedApiConfig> {
   if (!apiConfigPromise) {
-    apiConfigPromise = resolveApiConfigUncached();
+    apiConfigPromise = resolveApiConfigUncached().catch(error => {
+      apiConfigPromise = null;
+      throw error;
+    });
   }
   return apiConfigPromise;
 }
@@ -160,15 +163,20 @@ function validateUploadUrl(rawUrl: string): string {
 }
 
 async function fetchRuntimeConfig(): Promise<RuntimeConfigResponse | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
   try {
     const response = await fetch("/api/runtime-config", {
       cache: "no-store",
       headers: { Accept: "application/json" },
+      signal: controller.signal,
     });
     if (!response.ok) return null;
     return (await response.json()) as RuntimeConfigResponse;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

@@ -83,8 +83,8 @@ export type DeploymentCapabilities = {
   };
 };
 
-export function getDeploymentCapabilities(): Promise<DeploymentCapabilities> {
-  return apiRequest<DeploymentCapabilities>("/capabilities");
+export function getDeploymentCapabilities(signal?: AbortSignal): Promise<DeploymentCapabilities> {
+  return apiRequest<DeploymentCapabilities>("/capabilities", { signal });
 }
 
 export async function getVideoLibrary(): Promise<VideoSource[]> {

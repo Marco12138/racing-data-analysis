@@ -139,6 +139,12 @@ export function RacingDashboard({ initialDemo = false, guidedReview = false }: {
     useState<DeploymentCapabilities | null>(null);
   const [capabilityError, setCapabilityError] = useState("");
   const [capabilityLoading, setCapabilityLoading] = useState(true);
+  const [capabilityCheck, setCapabilityCheck] = useState(0);
+  const importGate = {
+    importReadiness: capabilityLoading ? "checking" as const
+      : deploymentCapabilities?.xrk_server_import.available ? "ready" as const : "unavailable" as const,
+    onRecheck: () => { setCapabilityLoading(true); setCapabilityError(""); setCapabilityCheck(n => n + 1); },
+  };
   const [localXrkSources, setLocalXrkSources] = useState<LocalXrkSource[]>([]);
   const [aimImportStatus, setAimImportStatus] = useState<"idle" | "inspecting" | "inspected" | "analyzing" | "loaded">(
     "idle"
@@ -148,30 +154,38 @@ export function RacingDashboard({ initialDemo = false, guidedReview = false }: {
   useEffect(() => {
     let active = true;
     let attempt = 0;
+    let retryTimer: number | undefined;
+    let controller: AbortController;
     const maxAttempts = 3;
     async function loadCapabilities() {
+      controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 10000);
       try {
-        const capabilities = await getDeploymentCapabilities();
+        const capabilities = await getDeploymentCapabilities(controller.signal);
         if (!active) return;
         setDeploymentCapabilities(capabilities);
         setCapabilityError("");
+        setCapabilityLoading(false);
       } catch (error) {
         if (!active) return;
         attempt += 1;
         if (attempt < maxAttempts) {
-          window.setTimeout(loadCapabilities, attempt * 1500);
+          retryTimer = window.setTimeout(loadCapabilities, attempt * 1500);
           return;
         }
         setCapabilityError(formatXrkClientError(error as Error));
+        setCapabilityLoading(false);
       } finally {
-        if (active) setCapabilityLoading(false);
+        window.clearTimeout(timeout);
       }
     }
     void loadCapabilities();
     return () => {
       active = false;
+      window.clearTimeout(retryTimer);
+      controller?.abort();
     };
-  }, []);
+  }, [capabilityCheck]);
 
   useEffect(() => {
     if (deploymentCapabilities?.mode !== "local") return;
@@ -291,9 +305,8 @@ export function RacingDashboard({ initialDemo = false, guidedReview = false }: {
     const serverImport = deploymentCapabilities?.xrk_server_import;
     if (!serverImport?.available) {
       setDataError(
-        serverImport?.message ??
-          capabilityError ??
-          "XRK server import is not available in this deployment."
+        serverImport?.message || capabilityError ||
+          (locale === "zh" ? "XRK 解析服务暂不可用。" : "XRK import is unavailable.")
       );
       return null;
     }
@@ -635,6 +648,7 @@ export function RacingDashboard({ initialDemo = false, guidedReview = false }: {
             </div>
             <div className={guided ? "mx-auto grid w-full max-w-3xl min-w-0 grid-cols-1 gap-4" : "workspace-start__grid"}>
               <NewSessionCard
+                {...importGate}
                 guided={guided}
                 maxUploadBytes={deploymentCapabilities?.xrk_server_import.max_upload_bytes}
                 onCancel={() => xrkAbortRef.current?.abort()}
@@ -692,6 +706,7 @@ export function RacingDashboard({ initialDemo = false, guidedReview = false }: {
             <details className="workspace-disclosure">
               <summary>Import another session</summary>
               <NewSessionCard
+                {...importGate}
                 maxUploadBytes={deploymentCapabilities?.xrk_server_import.max_upload_bytes}
                 onCancel={() => xrkAbortRef.current?.abort()}
                 status={aimImportStatus}
@@ -770,7 +785,7 @@ export function RacingDashboard({ initialDemo = false, guidedReview = false }: {
                 guided={guided && !publishedDemo}
                 expiresAt={xrkInspection?.expires_at}
                 metadataPanel={<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><SessionInput label={locale === "zh" ? "车手" : "Driver"} value={driverName} onChange={value => editSessionLabel("Driver", value)} /><SessionInput label={locale === "zh" ? "车辆" : "Vehicle"} value={vehicleName} onChange={value => editSessionLabel("Vehicle", value)} /><SessionInput label={locale === "zh" ? "赛道" : "Track"} value={trackName} onChange={value => editSessionLabel("Venue", value)} /><SessionInput label={locale === "zh" ? "日期" : "Date"} value={sessionDate} onChange={value => editSessionLabel("Log Date", value)} /></div>}
-                importPanel={<div className="mx-auto w-full max-w-3xl space-y-4"><p className="text-sm text-slate-300">{locale === "zh" ? `${driverName} · ${vehicleName} · ${trackName} · ${sessionDate}` : `${driverName} · ${vehicleName} · ${trackName} · ${sessionDate}`}</p><p className="text-xs text-amber-200">{locale === "zh" ? "导入另一份遥测会开启新复盘；当前人工锚点仍保存在本机。视频与片段确认不会自动沿用。" : "Another telemetry file starts a new review. Local anchors are retained; video and clip decisions are not carried across sessions."}</p><NewSessionCard guided status={aimImportStatus} hasPendingVideo={!!pendingVideoFile} onStart={handleNewSession} onVideoSelect={setPendingVideoFile} maxUploadBytes={deploymentCapabilities?.xrk_server_import.max_upload_bytes} onCancel={() => xrkAbortRef.current?.abort()} /></div>}
+                importPanel={<div className="mx-auto w-full max-w-3xl space-y-4"><p className="text-sm text-slate-300">{locale === "zh" ? `${driverName} · ${vehicleName} · ${trackName} · ${sessionDate}` : `${driverName} · ${vehicleName} · ${trackName} · ${sessionDate}`}</p><p className="text-xs text-amber-200">{locale === "zh" ? "导入另一份遥测会开启新复盘；当前人工锚点仍保存在本机。视频与片段确认不会自动沿用。" : "Another telemetry file starts a new review. Local anchors are retained; video and clip decisions are not carried across sessions."}</p><NewSessionCard {...importGate} guided status={aimImportStatus} hasPendingVideo={!!pendingVideoFile} onStart={handleNewSession} onVideoSelect={setPendingVideoFile} maxUploadBytes={deploymentCapabilities?.xrk_server_import.max_upload_bytes} onCancel={() => xrkAbortRef.current?.abort()} /></div>}
                 analyzing={aimImportStatus === "analyzing"}
                 onAnalyze={runXrkAnalysis}
                 publishedDemo={Boolean(publishedDemo)}
