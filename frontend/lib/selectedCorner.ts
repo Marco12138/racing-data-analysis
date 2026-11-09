@@ -18,7 +18,7 @@ export type CornerLap = {
 export type CornerGroup = { id: number; laps: number[]; count: number; representative_lap: number; median_time_s: number; time_range_s: number[]; median_downstream_s: number | null; median_combined_s: number | null; metrics: CornerMetrics };
 export type SelectedCornerResult = {
   version: 1; source_lap: number; start_session_s: number; end_session_s: number;
-  context?: { status: string; reason: string } | null;
+  context?: { status: string; reason: string; seed_start_s?: number; seed_end_s?: number } | null;
   laps: CornerLap[]; synthetic_curve_generated: false;
   patterns: { status: "insufficient_confirmed_laps" | "no_clear_separation" | "exploratory_groups";
     groups: CornerGroup[]; confirmed_laps: number[]; most_common_group_ids: number[];

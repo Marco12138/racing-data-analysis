@@ -87,10 +87,18 @@ export function GuidedDebrief({ analysis, receipts, corner, coachEvidence = [], 
     : confirmedCoaches.length
     ? (zh ? "已核对的片段尚不足以形成完整训练对照。先补齐减速、出弯或下游证据；不据局部更快直接要求更晚刹车。" : "Checked clips do not yet support a complete training comparison. Resolve missing approach, exit or downstream evidence before changing driving actions.")
     : (zh ? "先核对教练对照的两圈首尾画面，再与教练选择要测试的动作。" : "Check both coach-comparison videos at their boundaries, then choose a test with your coach.");
-  const custom = !corner ? (zh ? "未完成自选弯道分组，或确认已变更。" : "Custom-corner grouping is incomplete or confirmations have changed.")
+  const lapStart = analysis.video_sync.lap_video_ranges.find(r => r.lap === corner?.source_lap)?.telemetry_start_s;
+  const seedStart = corner?.context?.seed_start_s, seedEnd = corner?.context?.seed_end_s;
+  const clock = lapStart != null && seedStart != null && seedEnd != null
+    ? `${(seedStart - lapStart).toFixed(2)}–${(seedEnd - lapStart).toFixed(2)} s` : null;
+  const laps = (items: number[]) => items.length ? items.map(n => `L${n}`).join(" / ") : (zh ? "无" : "none");
+  const chosen = corner ? (zh ? `自选 L${corner.source_lap}${clock ? ` · 圈内 ${clock}` : ""}。同区段候选：${laps(corner.laps.filter(r => r.status === "candidate").map(r => r.lap))}；本次纳入分组的确认圈：${laps(corner.patterns.confirmed_laps)}。`
+    : `Selected L${corner.source_lap}${clock ? ` · lap time ${clock}` : ""}. Same-section candidates: ${laps(corner.laps.filter(r => r.status === "candidate").map(r => r.lap))}; confirmed laps used for grouping: ${laps(corner.patterns.confirmed_laps)}.`) : "";
+  const classification = !corner ? (zh ? "本次没有自选弯道结果。" : "No driver-selected corner in this review.")
     : corner.patterns.status === "exploratory_groups" ? (zh ? `已确认 ${corner.patterns.confirmed_laps.length} 圈，观察到 ${corner.patterns.groups.length} 组开法；仅为本节描述性分组。` : `${corner.patterns.confirmed_laps.length} confirmed laps, ${corner.patterns.groups.length} exploratory groups; descriptive only.`)
     : corner.patterns.status === "no_clear_separation" ? (zh ? "已确认样本未发现清晰分开的开法，不强行分类。" : "Confirmed samples show no clear pattern separation.")
     : (zh ? "可用确认圈不足，暂不分类。" : "Too few confirmed laps to group.");
+  const custom = [chosen, classification, corner?.context?.status === "partial" ? (zh ? "此段未证实覆盖完整弯道。" : "Full corner coverage is unverified.") : ""].filter(Boolean).join(" ");
   const pending = zh ? `原目标圈对照：${result.pending.length} 个片段待确认；${result.rejected.length} 个已否定，不纳入建议。` : `Original target-lap comparisons: ${result.pending.length} pending; ${result.rejected.length} rejected and excluded from advice.`;
   const pendingNames = result.pending.map(r => `${name(r.name)} · L${r.referenceLap} / L${r.targetLap}`).join("; ");
   function download() {

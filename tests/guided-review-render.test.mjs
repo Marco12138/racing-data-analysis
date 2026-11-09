@@ -64,3 +64,15 @@ test("new coach evidence reaches bilingual debrief independently of legacy votes
     assert.ok(html.includes(locale === "zh" ? "不能称为完整弯道" : "not a complete corner"));
   }
 });
+test("the debrief carries the selected window without promoting candidates to confirmations", () => {
+  const lapStart = analysis.video_sync.lap_video_ranges.find(r => r.lap === 4).telemetry_start_s;
+  const corner = {source_lap: 4, context: {seed_start_s: lapStart+30, seed_end_s: lapStart+35, status: "partial"},
+    laps: [{lap: 4, status: "candidate"}, {lap: 5, status: "excluded"}],
+    patterns: {status: "insufficient_confirmed_laps", confirmed_laps: []}};
+  for (const locale of ["zh", "en"]) {
+    const html = renderToStaticMarkup(createElement(GuideTest, {locale, analysis, corner, view: "summary"}));
+    assert.match(html, /30\.00–35\.00 s/);
+    assert.match(html, /同区段候选：L4；本次纳入分组的确认圈：无|candidates: L4; confirmed laps used for grouping: none/);
+    assert.match(html, /未证实覆盖完整弯道|Full corner coverage is unverified/);
+  }
+});

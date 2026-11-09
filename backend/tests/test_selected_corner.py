@@ -71,6 +71,24 @@ def test_physical_gates_different_sample_rates_and_real_duration():
     pd.testing.assert_frame_equal(frame, original)
 
 
+@pytest.mark.parametrize("edge", ["entry", "exit"])
+def test_optional_context_at_lap_edge_keeps_the_same_selected_gates(monkeypatch, edge):
+    from backend.app.analysis import review_context as context_module
+    frame, manifest = corner_fixture()
+    def at_edge(source, start, end):
+        return {"start_session_s": float(source.session_time_s.iloc[0]) if edge == "entry" else start,
+                "end_session_s": float(source.session_time_s.iloc[-1]) if edge == "exit" else end,
+                "method": "test", "status": "partial"}
+    monkeypatch.setattr(context_module, "review_context", at_edge)
+    args = dict(source_lap=1, start_session_s=10., end_session_s=15., confirmed_laps=[])
+    seed = analyze_selected_corner(frame, manifest, **args)
+    response = analyze_selected_corner(frame, manifest, **args, include_context=True)
+    assert response["context"]["reason"] == "context_reaches_lap_boundary_using_seed"
+    assert response["context"]["status"] == "partial"
+    assert response["gates"] == seed["gates"]
+    assert response["laps"] == seed["laps"]
+
+
 def test_gaps_missing_rpm_invalid_quality_and_boundary_degrade():
     frame, manifest = corner_fixture()
     frame = frame.drop(columns="rpm")

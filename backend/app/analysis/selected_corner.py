@@ -214,6 +214,14 @@ def analyze_selected_corner(telemetry: pd.DataFrame, manifest: dict, *, source_l
     if include_context:
         from .review_context import review_context
         context = review_context(source, start_session_s, end_session_s)
+        # An optional extension must not move a gate onto the first/last GPS
+        # sample: there is no observation on the other side in this lap.
+        if ((context["start_session_s"] < start_session_s and context["start_session_s"] <= source.session_time_s.iloc[0])
+                or (context["end_session_s"] > end_session_s and context["end_session_s"] >= source.session_time_s.iloc[-1])):
+            context = {"seed_start_s": start_session_s, "seed_end_s": end_session_s,
+                       "start_session_s": start_session_s, "end_session_s": end_session_s,
+                       "method": context["method"], "status": "partial", "driver_input_confirmed": False,
+                       "reason": "context_reaches_lap_boundary_using_seed"}
         start_session_s, end_session_s = context["start_session_s"], context["end_session_s"]
     _section(source, start_session_s, end_session_s)
     entry, exit_gate = _gate(source, start_session_s), _gate(source, end_session_s)
