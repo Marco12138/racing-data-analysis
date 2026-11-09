@@ -1,7 +1,7 @@
 "use client";
 
-import { useId, useState } from "react";
-import { Clapperboard, Film, HardDrive, Play, Upload } from "lucide-react";
+import { useEffect, useId, useState } from "react";
+import { Clapperboard, Film, HardDrive, LoaderCircle, Play, Upload } from "lucide-react";
 
 import { useI18n } from "../lib/i18n";
 import { describeFileReadError, exceedsUploadLimit, materializeXrkFile } from "../lib/fileUpload";
@@ -24,6 +24,8 @@ export function NewSessionCard({
   onVideoSelect,
   maxUploadBytes,
   onCancel,
+  importReadiness,
+  onRecheck,
   guided = false,
 }: {
   status: "idle" | "inspecting" | "inspected" | "analyzing" | "loaded";
@@ -34,6 +36,8 @@ export function NewSessionCard({
   onVideoSelect?: (videoFile: File | null) => void;
   maxUploadBytes?: number;
   onCancel?: () => void;
+  importReadiness: "checking" | "ready" | "unavailable";
+  onRecheck?: () => void;
   guided?: boolean;
 }) {
   const { t, locale } = useI18n();
@@ -44,11 +48,24 @@ export function NewSessionCard({
   const [xrkReading, setXrkReading] = useState(false);
   const [lastStatus, setLastStatus] = useState(status);
   const [localSourceId, setLocalSourceId] = useState("");
+  const [waiting, setWaiting] = useState(false);
   const selection: SessionUploadSelection = { xrkFile, videoFile };
   const ready = canStartNewSession(selection);
   const localSource = resolveLocalXrkSource(localSources, localSourceId);
   const busy = status === "inspecting" || status === "analyzing";
-  const inputLocked = busy || xrkReading;
+  const inputLocked = busy || xrkReading || waiting;
+
+  useEffect(() => {
+    if (!waiting || importReadiness === "checking") return;
+    // Only replay an explicit click, and only while this card still owns it.
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setWaiting(false);
+      if (importReadiness === "ready" && xrkFile && !busy) onStart(xrkFile, videoFile);
+    });
+    return () => { active = false; };
+  }, [waiting, importReadiness, xrkFile, videoFile, busy, onStart]);
 
   if (status !== lastStatus) {
     setLastStatus(status);
@@ -128,7 +145,7 @@ export function NewSessionCard({
           <button
             type="button"
             className="new-session-card__local-start"
-            disabled={!localSource || busy}
+            disabled={!localSource || busy || waiting}
             onClick={() => {
               if (localSource && onStartLocal) {
                 onStartLocal(localSource.source_id, videoFile);
@@ -155,7 +172,7 @@ export function NewSessionCard({
           }}
         />
       </label>
-      {xrkFile && <p className="new-session-card__privacy">{(xrkFile.size / 1024 / 1024).toFixed(2)} MB · {locale === "zh" ? "已读取，可开始上传" : "Read locally, ready to upload"}</p>}
+      {xrkFile && <p className="new-session-card__privacy">{(xrkFile.size / 1024 / 1024).toFixed(2)} MB · {locale === "zh" ? "已在本机读取" : "Read locally"}</p>}
       {xrkError ? <p className="new-session-card__error">{xrkError}</p> : null}
 
       <label className="new-session-card__file">
@@ -179,14 +196,17 @@ export function NewSessionCard({
       <button
         type="button"
         className="new-session-card__start"
-        disabled={!ready || busy || xrkReading}
+        disabled={!ready || inputLocked || importReadiness === "unavailable"}
         onClick={() => {
-          if (xrkFile) onStart(xrkFile, videoFile);
+          if (importReadiness === "checking") setWaiting(true);
+          else if (importReadiness === "ready" && xrkFile) onStart(xrkFile, videoFile);
         }}
       >
-        <Play size={16} fill="currentColor" />
-        {busy ? t("sessionCard.running") : guided ? (locale === "zh" ? "读取素材，查看数据概览" : "Read files and view session") : t("sessionCard.start")}
+        {waiting ? <LoaderCircle size={16} className="animate-spin" /> : <Play size={16} fill="currentColor" />}
+        {waiting ? (locale === "zh" ? "等待解析服务" : "Waiting for the parser") : busy ? t("sessionCard.running") : guided ? (locale === "zh" ? "读取素材，查看数据概览" : "Read files and view session") : t("sessionCard.start")}
       </button>
+      {waiting && <><p role="status" className="new-session-card__privacy">{locale === "zh" ? "正在检查解析服务，就绪后将开始导入。" : "Checking the parser. Import will start when it is ready."}</p><button type="button" className="nav-command mt-2" onClick={() => setWaiting(false)}>{locale === "zh" ? "取消等待" : "Cancel waiting"}</button></>}
+      {xrkFile && importReadiness === "unavailable" && <><p role="alert" className="new-session-card__error">{locale === "zh" ? "XRK 解析服务暂不可用，所选文件已保留，尚未上传。" : "The XRK parser is unavailable. Your selection is kept and has not been uploaded."}</p>{onRecheck && <button type="button" className="nav-command mt-2" onClick={onRecheck}>{locale === "zh" ? "重新检查服务" : "Check service again"}</button>}</>}
       {busy && onCancel && <button type="button" className="nav-command mt-2" onClick={onCancel}>{locale === "zh" ? "取消导入" : "Cancel import"}</button>}
 
       {status !== "idle" ? (
