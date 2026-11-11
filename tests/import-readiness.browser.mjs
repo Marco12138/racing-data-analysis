@@ -9,14 +9,15 @@ let browser;
 before(async () => { browser = await chromium.launch({ channel: "chrome" }); });
 after(async () => { await browser?.close(); });
 
-async function fixture(t, { failures = 0, available = true, path = "/review" } = {}) {
+async function fixture(t, { failures = 0, available = true, path = "/review", early = false, xrk = sample } = {}) {
   const ctx = await browser.newContext({ locale: "zh-CN", serviceWorkers: "block" });
-  const page = await ctx.newPage(), gate = Promise.withResolvers();
+  const page = await ctx.newPage(), gate = Promise.withResolvers(), scripts = Promise.withResolvers();
   const state = { checks: 0, imports: 0, available };
-  t.after(async () => { gate.resolve(); await ctx.close(); });
+  t.after(async () => { gate.resolve(); scripts.resolve(); await ctx.close(); });
   await ctx.route("**/*", async route => {
     const url = new URL(route.request().url());
     if (url.origin !== origin) return route.abort();
+    if (early && route.request().resourceType() === "script") await scripts.promise;
     if (url.pathname === "/api/runtime-config") return route.fulfill({ json: {
       apiOrigin: origin, apiPrefix: "/api/v1", xrkUploadUrl: origin + "/api/v1/xrk/inspect", deploymentMode: "local",
     } });
@@ -34,12 +35,44 @@ async function fixture(t, { failures = 0, available = true, path = "/review" } =
     if (url.pathname.startsWith("/api/v1/") || route.request().method() !== "GET") return route.abort();
     return route.continue();
   });
-  await page.goto(origin + path, { waitUntil: "domcontentloaded" });
+  await page.goto(origin + path, { waitUntil: early ? "commit" : "domcontentloaded" });
   const card = page.locator(".new-session-card").filter({ visible: true }).first();
-  await card.locator('input[accept=".xrk,.xrz"]').setInputFiles(sample);
+  await card.locator('input[accept=".xrk,.xrz"]').setInputFiles(xrk);
+  if (early) {
+    await card.locator('input[accept="video/mp4,video/quicktime,.mp4,.mov"]').setInputFiles({
+      name: "test-only-video.mp4", mimeType: "video/mp4", buffer: Buffer.from("synthetic selection only"),
+    });
+  }
   const start = card.locator("button.new-session-card__start");
-  return { page, card, start, state, release: gate.resolve };
+  return { page, card, start, state, release: gate.resolve, hydrate: scripts.resolve };
 }
+
+for (const path of ["/review", "/workspace"]) {
+  test(path + ": selections made before hydration survive without uploading until clicked", async t => {
+    const { page, card, start, state, release, hydrate } = await fixture(t, { path, early: true });
+    assert.equal(await start.isDisabled(), true);
+    assert.equal(state.checks, 0);
+    hydrate();
+    await card.getByText(sample.name, { exact: true }).waitFor();
+    await card.getByText("test-only-video.mp4", { exact: true }).waitFor();
+    assert.equal(state.imports, 0);
+    await start.click();
+    await card.getByRole("button", { name: "取消等待" }).waitFor();
+    const inspect = page.waitForResponse(r => r.url().endsWith("/xrk/inspect"));
+    release(); await inspect;
+    await card.getByRole("status").waitFor({ state: "detached" });
+    assert.equal(state.imports, 1);
+    assert.equal(state.checks, 1);
+  });
+}
+
+test("an invalid early selection still uses normal file validation", async t => {
+  const { card, start, state, hydrate } = await fixture(t, { early: true, xrk: { ...sample, name: "invalid.txt" } });
+  hydrate();
+  await card.locator(".new-session-card__error").waitFor();
+  assert.equal(await start.isDisabled(), true);
+  assert.equal(state.imports, 0);
+});
 
 for (const path of ["/review", "/workspace"]) {
   test(path + ": first click survives a transient capability failure and starts once", async t => {
