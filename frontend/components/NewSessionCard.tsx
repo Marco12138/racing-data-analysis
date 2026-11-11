@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { Clapperboard, Film, HardDrive, LoaderCircle, Play, Upload } from "lucide-react";
 
 import { useI18n } from "../lib/i18n";
@@ -49,11 +49,26 @@ export function NewSessionCard({
   const [lastStatus, setLastStatus] = useState(status);
   const [localSourceId, setLocalSourceId] = useState("");
   const [waiting, setWaiting] = useState(false);
+  const xrkInput = useRef<HTMLInputElement>(null);
+  const videoInput = useRef<HTMLInputElement>(null);
+  const handledFiles = useRef<{ xrk: File | null; video: File | null }>({ xrk: null, video: null });
   const selection: SessionUploadSelection = { xrkFile, videoFile };
   const ready = canStartNewSession(selection);
   const localSource = resolveLocalXrkSource(localSources, localSourceId);
   const busy = status === "inspecting" || status === "analyzing";
   const inputLocked = busy || xrkReading || waiting;
+
+  const restoreEarlySelection = useEffectEvent(() => {
+    if (inputLocked) return;
+    if (xrkInput.current?.files?.length) readXrkInput(xrkInput.current);
+    if (videoInput.current?.files?.length) readVideoInput(videoInput.current);
+  });
+  useEffect(() => {
+    // Native file pickers can finish before React attaches change handlers.
+    let active = true;
+    queueMicrotask(() => { if (active) restoreEarlySelection(); });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (!waiting || importReadiness === "checking") return;
@@ -101,6 +116,23 @@ export function NewSessionCard({
     } finally {
       setXrkReading(false);
     }
+  }
+
+  function readXrkInput(input: HTMLInputElement) {
+    const file = input.files?.[0] ?? null;
+    if (file && handledFiles.current.xrk === file) return;
+    handledFiles.current.xrk = file;
+    void chooseXrk(file).finally(() => {
+      if (input.files?.[0] === file) input.value = "";
+    });
+  }
+
+  function readVideoInput(input: HTMLInputElement) {
+    const file = input.files?.[0] ?? null;
+    if (file && handledFiles.current.video === file) return;
+    handledFiles.current.video = file;
+    setVideoFile(file);
+    onVideoSelect?.(file);
   }
 
   const activeStep =
@@ -163,12 +195,12 @@ export function NewSessionCard({
         <Upload size={15} />
         <span>{xrkReading ? t("sessionCard.reading") : xrkFile ? xrkFile.name : t("sessionCard.xrkLabel")}</span>
         <input
+          ref={xrkInput}
           type="file"
           accept=".xrk,.xrz"
           disabled={inputLocked}
           onChange={(event) => {
-            const input = event.currentTarget;
-            if (!inputLocked) void chooseXrk(input.files?.[0] ?? null).finally(() => { input.value = ""; });
+            if (!inputLocked) readXrkInput(event.currentTarget);
           }}
         />
       </label>
@@ -179,15 +211,12 @@ export function NewSessionCard({
         <Film size={15} />
         <span>{videoFile ? videoFile.name : t("sessionCard.videoLabel")}</span>
         <input
+          ref={videoInput}
           type="file"
           accept="video/mp4,video/quicktime,.mp4,.mov"
           disabled={inputLocked}
           onChange={(event) => {
-            if (!inputLocked) {
-              const nextVideo = event.target.files?.[0] ?? null;
-              setVideoFile(nextVideo);
-              onVideoSelect?.(nextVideo);
-            }
+            if (!inputLocked) readVideoInput(event.currentTarget);
           }}
         />
       </label>
